@@ -12,7 +12,7 @@ fn compileAllShaders(b: *std.Build, exe: anytype) !void {
     while (walker.next() catch unreachable) |entry| {
         const out_file = std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path}) catch unreachable;
         defer b.allocator.free(out_file);
-        std.debug.print("compiling shader: {s} -> {s}.spv\n", .{ entry.path, out_file });
+        std.debug.print("compiling shader: {s} -> {s}\n", .{ entry.path, out_file });
         addShader(b, exe, entry.path, out_file) catch |e| {
             std.debug.print("Failed to compile vertex shader '{s}': {}\n", .{ entry.path, e });
         };
