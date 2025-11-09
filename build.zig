@@ -56,6 +56,10 @@ pub fn build(b: *std.Build) void {
     //exe.linkLibC();
     exe.linkSystemLibrary("glfw3");
 
+    if (target.result.os.tag == .linux) {
+        exe.linkSystemLibrary("gl");
+    }
+
     compileAllShaders(b, exe) catch |e| {
         std.debug.print("Failed to compile shaders: {}\n", .{e});
     };

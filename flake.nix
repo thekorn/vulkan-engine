@@ -19,16 +19,22 @@
       in
       {
         devShell = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            zig
-            zls
-            shaderc
-            pkg-config
-          ];
+          buildInputs =
+            with pkgs;
+            [
+              zig
+              zls
+              shaderc
+              pkg-config
+            ]
+            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL.dev ]);
 
-          nativeBuildInputs = with pkgs; [
-            glfw
-          ];
+          nativeBuildInputs =
+            with pkgs;
+            [
+              glfw
+            ]
+            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL ]);
 
           shellHook = ''
             # Issue: https://github.com/ziglang/zig/issues/18998
