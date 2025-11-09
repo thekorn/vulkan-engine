@@ -1,10 +1,11 @@
 const std = @import("std");
 
-fn addShader(b: *std.Build, exe: anytype, in_file: []const u8) !void {
+const shaders_dir = "./shaders";
+
+fn addShader(b: *std.Build, exe: anytype, in_file: []const u8, out_file: []const u8) !void {
     // example:
     // glslc -o shaders/vert.spv shaders/shader.vert
-    const full_in = try std.fs.path.join(b.allocator, &[_][]const u8{ "shaders", in_file });
-    const out_file = try std.fmt.allocPrint(b.allocator, "{s}.spv", .{in_file});
+    const full_in = try std.fs.path.join(b.allocator, &[_][]const u8{ shaders_dir, in_file });
 
     const run_cmd = b.addSystemCommand(&[_][]const u8{
         "glslc",
@@ -38,15 +39,17 @@ pub fn build(b: *std.Build) void {
     //exe.linkLibC();
     exe.linkSystemLibrary("glfw");
 
-    var dir = std.fs.cwd().openDir("./shaders", .{ .iterate = true }) catch unreachable;
+    var dir = std.fs.cwd().openDir(shaders_dir, .{ .iterate = true }) catch unreachable;
     defer dir.close();
 
     var walker = dir.walk(b.allocator) catch unreachable;
     defer walker.deinit();
 
     while (walker.next() catch unreachable) |entry| {
-        std.debug.print("compiling shader: {s} -> {s}.spv\n", .{ entry.path, entry.path });
-        addShader(b, exe, entry.path) catch |e| {
+        const out_file = std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path}) catch unreachable;
+        defer b.allocator.free(out_file);
+        std.debug.print("compiling shader: {s} -> {s}.spv\n", .{ entry.path, out_file });
+        addShader(b, exe, entry.path, out_file) catch |e| {
             std.debug.print("Failed to compile vertex shader '{s}': {}\n", .{ entry.path, e });
         };
     }
