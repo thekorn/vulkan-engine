@@ -2,6 +2,23 @@ const std = @import("std");
 
 const shaders_dir = "./shaders";
 
+fn compileAllShaders(b: *std.Build, exe: anytype) !void {
+    var dir = std.fs.cwd().openDir(shaders_dir, .{ .iterate = true }) catch unreachable;
+    defer dir.close();
+
+    var walker = dir.walk(b.allocator) catch unreachable;
+    defer walker.deinit();
+
+    while (walker.next() catch unreachable) |entry| {
+        const out_file = std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path}) catch unreachable;
+        defer b.allocator.free(out_file);
+        std.debug.print("compiling shader: {s} -> {s}.spv\n", .{ entry.path, out_file });
+        addShader(b, exe, entry.path, out_file) catch |e| {
+            std.debug.print("Failed to compile vertex shader '{s}': {}\n", .{ entry.path, e });
+        };
+    }
+}
+
 fn addShader(b: *std.Build, exe: anytype, in_file: []const u8, out_file: []const u8) !void {
     // example:
     // glslc -o shaders/vert.spv shaders/shader.vert
@@ -39,20 +56,9 @@ pub fn build(b: *std.Build) void {
     //exe.linkLibC();
     exe.linkSystemLibrary("glfw");
 
-    var dir = std.fs.cwd().openDir(shaders_dir, .{ .iterate = true }) catch unreachable;
-    defer dir.close();
-
-    var walker = dir.walk(b.allocator) catch unreachable;
-    defer walker.deinit();
-
-    while (walker.next() catch unreachable) |entry| {
-        const out_file = std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path}) catch unreachable;
-        defer b.allocator.free(out_file);
-        std.debug.print("compiling shader: {s} -> {s}.spv\n", .{ entry.path, out_file });
-        addShader(b, exe, entry.path, out_file) catch |e| {
-            std.debug.print("Failed to compile vertex shader '{s}': {}\n", .{ entry.path, e });
-        };
-    }
+    compileAllShaders(b, exe) catch |e| {
+        std.debug.print("Failed to compile shaders: {}\n", .{e});
+    };
 
     b.installArtifact(exe);
     const run_step = b.step("run", "Run the app");
