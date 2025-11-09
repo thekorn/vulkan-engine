@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
 
     //exe.linkLibC();
     exe.linkSystemLibrary("glfw3");
+    exe.linkSystemLibrary("vulkan");
 
     if (target.result.os.tag == .linux) {
         exe.linkSystemLibrary("gl");

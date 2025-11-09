@@ -13,3 +13,7 @@ Or even
 ```
 nix develop --command zig build run
 ```
+
+## ressources
+
+- [Vulkan Tutorial](https://vulkan-tutorial.com/)

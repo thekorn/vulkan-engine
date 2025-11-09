@@ -26,6 +26,8 @@
               zls
               shaderc
               pkg-config
+              vulkan-headers
+              vulkan-loader.dev
             ]
             ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL.dev ]);
 
