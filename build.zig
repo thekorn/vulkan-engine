@@ -3,14 +3,14 @@ const std = @import("std");
 const shaders_dir = "./shaders";
 
 fn compileAllShaders(b: *std.Build, exe: anytype) !void {
-    var dir = std.fs.cwd().openDir(shaders_dir, .{ .iterate = true }) catch unreachable;
+    var dir = try std.fs.cwd().openDir(shaders_dir, .{ .iterate = true });
     defer dir.close();
 
-    var walker = dir.walk(b.allocator) catch unreachable;
+    var walker = try dir.walk(b.allocator);
     defer walker.deinit();
 
-    while (walker.next() catch unreachable) |entry| {
-        const out_file = std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path}) catch unreachable;
+    while (try walker.next()) |entry| {
+        const out_file = try std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path});
         defer b.allocator.free(out_file);
         std.debug.print("compiling shader: {s} -> {s}\n", .{ entry.path, out_file });
         addShader(b, exe, entry.path, out_file) catch |e| {
