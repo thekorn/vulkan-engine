@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     });
 
     //exe.linkLibC();
-    exe.linkSystemLibrary("glfw");
+    exe.linkSystemLibrary("glfw3");
 
     compileAllShaders(b, exe) catch |e| {
         std.debug.print("Failed to compile shaders: {}\n", .{e});
