@@ -4,7 +4,7 @@ const c = @import("c.zig").c;
 const Loop = @import("Loop.zig");
 const Window = @import("Window.zig");
 const Pipeline = @import("Pipeline.zig");
-const Vulkan = @import("Vulkan.zig");
+const Device = @import("Device.zig");
 
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
@@ -12,8 +12,8 @@ pub fn main() !void {
     var window = try Window.init(800, 600);
     defer window.deinit();
 
-    var instance = try Vulkan.init(alloc);
-    defer instance.deinit();
+    var device = try Device.init(alloc, window);
+    defer device.deinit();
 
     var loop = try Loop.init(&window);
     defer loop.deinit();

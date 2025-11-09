@@ -28,6 +28,8 @@
               pkg-config
               vulkan-headers
               vulkan-loader.dev
+              vulkan-loader
+              vulkan-validation-layers
             ]
             ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL.dev ]);
 
@@ -44,6 +46,8 @@
             unset NIX_CFLAGS_COMPILE
             alias zed='zeditor'
           '';
+
+          VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
         };
       }
     );
