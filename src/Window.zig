@@ -1,4 +1,5 @@
 const c = @import("c.zig").c;
+
 const Self = @This();
 instance: *c.GLFWwindow,
 width: i32,

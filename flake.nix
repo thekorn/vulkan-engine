@@ -22,6 +22,7 @@
           buildInputs = with pkgs; [
             zig
             zls
+            shaderc
           ];
 
           nativeBuildInputs = with pkgs; [
