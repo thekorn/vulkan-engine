@@ -19,12 +19,18 @@
       in
       {
         devShell = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [
+          buildInputs = with pkgs; [
             zig
             zls
           ];
 
+          nativeBuildInputs = with pkgs; [
+            glfw
+          ];
+
           shellHook = ''
+            # Issue: https://github.com/ziglang/zig/issues/18998
+            unset NIX_CFLAGS_COMPILE
             alias zed='zeditor'
           '';
         };

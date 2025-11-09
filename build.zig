@@ -11,6 +11,10 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
+    //exe.linkLibC();
+    exe.linkSystemLibrary("glfw");
+
     b.installArtifact(exe);
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
