@@ -1,7 +1,12 @@
 words = [
     "deinit",
+    "eql",
     "glfw",
+    "glslc",
+    "infos",
+    "khr",
     "khronos",
     "shader",
+    "shaders",
     "spv",
 ]

@@ -277,7 +277,6 @@ const CStrContext = struct {
     const CSelf = @This();
     pub fn hash(self: CSelf, a: [*:0]const u8) u64 {
         _ = self;
-        // FNV 32-bit hash
         var h: u32 = 2166136261;
         var i: usize = 0;
         while (a[i] != 0) : (i += 1) {

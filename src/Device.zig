@@ -55,7 +55,7 @@ pub fn deinit(self: *Self) void {
     c.vkDestroyDevice(self.globalDevice, null);
 
     if (self.enable_validation_layers) {
-        //DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
+        //DestroyDebugUtilsMessengerEXT(instance, debugMessenger, null);
         //TODO: Implement validation layer deinit
     }
     c.vkDestroySurfaceKHR(self.instance.instance, self.surface, null);
