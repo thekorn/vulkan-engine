@@ -12,7 +12,7 @@ pub fn main() !void {
     var window = try Window.init(800, 600);
     defer window.deinit();
 
-    var device = try Device.init(alloc, window);
+    var device = try Device.init(alloc, &window);
     defer device.deinit();
 
     var loop = try Loop.init(&window);

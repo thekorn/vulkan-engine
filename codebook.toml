@@ -1,4 +1,5 @@
 words = [
+    "deinit",
     "glfw",
     "khronos",
     "shader",

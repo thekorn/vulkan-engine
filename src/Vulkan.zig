@@ -5,13 +5,6 @@ const c = @import("c.zig").c;
 const Self = @This();
 instance: c.VkInstance,
 
-fn checkSuccess(result: c.VkResult) !void {
-    switch (result) {
-        c.VK_SUCCESS => {},
-        else => return error.Unexpected,
-    }
-}
-
 fn getExtensionNames(
     alloc: std.mem.Allocator,
     enable_validation_layers: bool,
@@ -47,6 +40,7 @@ fn getExtensionNames(
     return extensions.toOwnedSlice(alloc);
 }
 
+//TODO: Implement this function
 fn checkValidationLayerSupport() bool {
     return true;
 }
