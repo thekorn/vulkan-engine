@@ -88,7 +88,7 @@ fn pickPhysicalDevice(alloc: std.mem.Allocator, vulkan: Vulkan, surface: c.VkSur
     var properties: c.VkPhysicalDeviceProperties = undefined;
 
     c.vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-    std.debug.print("physical device: {s}\n", .{properties.deviceName});
+    std.log.scoped(.device).debug("physical device: {s}", .{properties.deviceName});
 
     return physicalDevice;
 }

@@ -82,7 +82,7 @@ pub fn init(alloc: std.mem.Allocator, enable_validation_layers: bool) !Self {
 
     const extensions = try getExtensionNames(alloc, enable_validation_layers);
     for (extensions) |ext| {
-        std.debug.print("Extension: {s}\n", .{ext});
+        std.log.scoped(.extensions).debug("Extension: {s}", .{ext});
     }
     defer alloc.free(extensions);
 
