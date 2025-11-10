@@ -22,8 +22,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
       # Install Nix and use that to run our tests so our environment matches exactly.
       - uses: cachix/install-nix-action@v31
         with:
