@@ -16,6 +16,7 @@ physicalDevice: c.VkPhysicalDevice,
 globalDevice: c.VkDevice,
 graphicsQueue: c.VkQueue,
 presentQueue: c.VkQueue,
+commandPool: c.VkCommandPool,
 
 pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     const enable_validation_layers = builtin.mode == .Debug;
@@ -29,6 +30,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     var globalDevice: c.VkDevice = undefined;
 
     const physicalDevice = try pickPhysicalDevice(alloc, instance, surface);
+
     try Vulkan.createLogicalDevice(
         alloc,
         physicalDevice,
@@ -39,6 +41,9 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
         enable_validation_layers,
     );
 
+    var commandPool: c.VkCommandPool = undefined;
+    try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
+
     return .{
         .window = window,
         .surface = surface,
@@ -48,10 +53,12 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
         .globalDevice = globalDevice,
         .graphicsQueue = graphicsQueue,
         .presentQueue = presentQueue,
+        .commandPool = commandPool,
     };
 }
 
 pub fn deinit(self: *Self) void {
+    c.vkDestroyCommandPool(self.globalDevice, self.commandPool, null);
     c.vkDestroyDevice(self.globalDevice, null);
 
     if (self.enable_validation_layers) {
@@ -106,4 +113,24 @@ fn isDeviceSuitable(alloc: std.mem.Allocator, device: c.VkPhysicalDevice, surfac
     }
 
     return indices.isComplete() and extensionsSupported and swapChainAdequate;
+}
+
+fn createCommandPool(
+    alloc: std.mem.Allocator,
+    device: c.VkPhysicalDevice,
+    surface: c.VkSurfaceKHR,
+    globalDevice: c.VkDevice,
+    commandPool: *c.VkCommandPool,
+) !void {
+    const queueFamilyIndices = try Vulkan.findQueueFamilies(alloc, device, surface);
+
+    const poolInfo = c.VkCommandPoolCreateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = queueFamilyIndices.graphicsFamily.?,
+
+        .pNext = null,
+        .flags = 0,
+    };
+
+    try checkSuccess(c.vkCreateCommandPool(globalDevice, &poolInfo, null, commandPool));
 }
