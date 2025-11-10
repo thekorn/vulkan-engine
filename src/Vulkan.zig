@@ -8,7 +8,9 @@ const deviceExtensions = [_][*:0]const u8{
     c.VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     c.VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
 };
-const validationLayers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
+const validationLayers = [_][*:0]const u8{
+    "VK_LAYER_KHRONOS_validation",
+};
 
 const Self = @This();
 instance: c.VkInstance,
@@ -48,8 +50,34 @@ fn getExtensionNames(
     return extensions.toOwnedSlice(alloc);
 }
 
-//TODO: Implement this function
-fn checkValidationLayerSupport() bool {
+fn checkValidationLayerSupport(alloc: std.mem.Allocator) !bool {
+    var layer_count: u32 = 0;
+    _ = c.vkEnumerateInstanceLayerProperties(&layer_count, null);
+
+    const available_layers = try alloc.alloc(c.VkLayerProperties, layer_count);
+    defer alloc.free(available_layers);
+
+    _ = c.vkEnumerateInstanceLayerProperties(&layer_count, available_layers.ptr);
+
+    for (validationLayers) |layer_name| {
+        var layer_found = false;
+
+        for (available_layers) |layer_props| {
+            const available_name = std.mem.sliceTo(&layer_props.layerName, 0);
+            const requested_name = std.mem.span(layer_name);
+
+            if (std.mem.eql(u8, available_name, requested_name)) {
+                layer_found = true;
+                break;
+            }
+        }
+
+        if (!layer_found) {
+            std.log.scoped(.validation).warn("Validation layer not found: {s}", .{layer_name});
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -74,7 +102,7 @@ fn debugCallback(
 pub fn init(alloc: std.mem.Allocator, enable_validation_layers: bool) !Self {
     var instance: c.VkInstance = undefined;
 
-    if (enable_validation_layers and !checkValidationLayerSupport()) {
+    if (enable_validation_layers and !try checkValidationLayerSupport(alloc)) {
         return error.NoValidationLayerSupport;
     }
 
