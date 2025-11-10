@@ -14,6 +14,7 @@ Or even
 nix develop --command zig build run
 ```
 
-## ressources
+## resources
 
 - [Vulkan Tutorial](https://vulkan-tutorial.com/)
+- [vulkan game engine tutorials by Brendan Galea](https://www.youtube.com/playlist?list=PL8327DO66nu9qYVKLDmdLW_84-yE4auCR) with [source code](https://github.com/blurrypiano/littleVulkanEngine)
