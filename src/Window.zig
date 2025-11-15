@@ -1,4 +1,5 @@
 const c = @import("c.zig").c;
+const checkSuccess = @import("utils.zig").checkSuccess;
 
 const Self = @This();
 instance: *c.GLFWwindow,
@@ -26,4 +27,8 @@ pub fn deinit(self: *Self) void {
 
 pub fn should_close(self: *Self) bool {
     return c.glfwWindowShouldClose(self.instance) != 0;
+}
+
+pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurfaceKHR) !void {
+    try checkSuccess(c.glfwCreateWindowSurface(instance, self.instance, null, surface));
 }

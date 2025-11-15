@@ -11,7 +11,7 @@ const Self = @This();
 window: *Window,
 enable_validation_layers: bool,
 surface: c.VkSurfaceKHR,
-instance: Vulkan,
+vulkanInstance: Vulkan,
 physicalDevice: c.VkPhysicalDevice,
 globalDevice: c.VkDevice,
 graphicsQueue: c.VkQueue,
@@ -21,15 +21,15 @@ commandPool: c.VkCommandPool,
 pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     const enable_validation_layers = builtin.mode == .Debug;
 
-    const instance = try Vulkan.init(alloc, enable_validation_layers);
+    const vulkan = try Vulkan.init(alloc, enable_validation_layers);
     var surface: c.VkSurfaceKHR = undefined;
-    try createSurface(instance, window, &surface);
+    try window.create_surface(vulkan.instance, &surface);
 
     var graphicsQueue: c.VkQueue = undefined;
     var presentQueue: c.VkQueue = undefined;
     var globalDevice: c.VkDevice = undefined;
 
-    const physicalDevice = try pickPhysicalDevice(alloc, instance, surface);
+    const physicalDevice = try pickPhysicalDevice(alloc, vulkan, surface);
 
     try Vulkan.createLogicalDevice(
         alloc,
@@ -48,7 +48,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
         .window = window,
         .surface = surface,
         .enable_validation_layers = enable_validation_layers,
-        .instance = instance,
+        .vulkanInstance = vulkan,
         .physicalDevice = physicalDevice,
         .globalDevice = globalDevice,
         .graphicsQueue = graphicsQueue,
@@ -65,12 +65,8 @@ pub fn deinit(self: *Self) void {
         //DestroyDebugUtilsMessengerEXT(instance, debugMessenger, null);
         //TODO: Implement validation layer deinit
     }
-    c.vkDestroySurfaceKHR(self.instance.instance, self.surface, null);
-    self.instance.deinit();
-}
-
-fn createSurface(vulkan: Vulkan, window: *Window, surface: *c.VkSurfaceKHR) !void {
-    try checkSuccess(c.glfwCreateWindowSurface(vulkan.instance, window.instance, null, surface));
+    c.vkDestroySurfaceKHR(self.vulkanInstance.instance, self.surface, null);
+    self.vulkanInstance.deinit();
 }
 
 fn pickPhysicalDevice(alloc: std.mem.Allocator, vulkan: Vulkan, surface: c.VkSurfaceKHR) !c.VkPhysicalDevice {
