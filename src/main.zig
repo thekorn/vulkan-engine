@@ -21,12 +21,13 @@ pub fn main() !void {
     var loop = try Loop.init(&window);
     defer loop.deinit();
 
-    _ = try Pipeline.init(
+    var pipeline = try Pipeline.init(
         &device,
         @embedFile("shader.frag.spv"),
         @embedFile("shader.vert.spv"),
         Pipeline.defaultPipelineConfigInfo(width, height),
     );
+    defer pipeline.deinit();
 
     while (loop.is_running()) {
         c.glfwPollEvents();

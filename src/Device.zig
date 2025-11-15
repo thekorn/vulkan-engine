@@ -8,6 +8,7 @@ const Window = @import("Window.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
 const Self = @This();
+allocator: std.mem.Allocator,
 window: *Window,
 enable_validation_layers: bool,
 surface: c.VkSurfaceKHR,
@@ -45,6 +46,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
 
     return .{
+        .allocator = alloc,
         .window = window,
         .surface = surface,
         .enable_validation_layers = enable_validation_layers,
@@ -137,10 +139,16 @@ pub fn createShaderModule(
 ) !c.VkShaderModule {
     std.debug.assert(shaderCode.len % @sizeOf(u32) == 0);
 
+    // Allocate properly aligned memory for the shader code
+    // Vulkan requires pCode to be aligned to 4 bytes (u32 alignment)
+    const alignedCode = try self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(u32)), shaderCode.len);
+    defer self.allocator.free(alignedCode);
+    @memcpy(alignedCode, shaderCode);
+
     const createInfo = c.VkShaderModuleCreateInfo{
         .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = shaderCode.len,
-        .pCode = @ptrCast(@alignCast(shaderCode.ptr)),
+        .codeSize = alignedCode.len,
+        .pCode = @ptrCast(@alignCast(alignedCode.ptr)),
         .pNext = null,
         .flags = 0,
     };

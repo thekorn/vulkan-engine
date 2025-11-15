@@ -9,6 +9,8 @@ device: *Device,
 graphicsPipeline: ?c.VkPipeline,
 vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
+pipelineLayout: c.VkPipelineLayout,
+renderPass: c.VkRenderPass,
 
 const PipelineConfigInfo = struct {
     viewport: c.VkViewport,
@@ -28,6 +30,12 @@ const PipelineConfigInfo = struct {
 pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, configInfo: PipelineConfigInfo) !Self {
     std.log.scoped(.pipeline).info("frag shader len: {d}", .{fragShader.len});
     std.log.scoped(.pipeline).info("vert shader len: {d}", .{vertShader.len});
+
+    // Create pipeline layout
+    const pipelineLayout = try createPipelineLayout(device);
+
+    // Create render pass
+    const renderPass = try createRenderPass(device);
 
     const vertShaderModule = try createShaderModule(device, vertShader);
     const fragShaderModule = try createShaderModule(device, fragShader);
@@ -69,11 +77,12 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .pInputAssemblyState = &configInfo.inputAssemblyInfo,
         .pViewportState = &configInfo.viewportInfo,
         .pRasterizationState = &configInfo.rasterizationInfo,
+        .pMultisampleState = &configInfo.multisampleInfo,
         .pDepthStencilState = &configInfo.depthStencilInfo,
         .pColorBlendState = &configInfo.colorBlendInfo,
         .pDynamicState = null,
-        .layout = configInfo.pipelineLayout,
-        .renderPass = configInfo.renderPass,
+        .layout = pipelineLayout,
+        .renderPass = renderPass,
         .subpass = configInfo.subpass,
         .basePipelineHandle = null,
         .basePipelineIndex = -1,
@@ -88,11 +97,19 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .graphicsPipeline = graphicsPipeline,
         .vertShaderModule = vertShaderModule,
         .fragShaderModule = fragShaderModule,
+        .pipelineLayout = pipelineLayout,
+        .renderPass = renderPass,
     };
 }
 
 pub fn deinit(self: *Self) void {
-    _ = self;
+    c.vkDestroyShaderModule(self.device.globalDevice, self.vertShaderModule, null);
+    c.vkDestroyShaderModule(self.device.globalDevice, self.fragShaderModule, null);
+    if (self.graphicsPipeline) |pipeline| {
+        c.vkDestroyPipeline(self.device.globalDevice, pipeline, null);
+    }
+    c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
+    c.vkDestroyRenderPass(self.device.globalDevice, self.renderPass, null);
 }
 
 // see: https://pastebin.com/EmsJWHzb
@@ -185,4 +202,78 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
 
 fn createShaderModule(device: *Device, shaderCode: []const u8) !c.VkShaderModule {
     return device.createShaderModule(shaderCode);
+}
+
+fn createPipelineLayout(device: *Device) !c.VkPipelineLayout {
+    const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 0,
+        .pSetLayouts = null,
+        .pushConstantRangeCount = 0,
+        .pPushConstantRanges = null,
+        .pNext = null,
+        .flags = 0,
+    };
+
+    var pipelineLayout: c.VkPipelineLayout = undefined;
+    try checkSuccess(c.vkCreatePipelineLayout(device.globalDevice, &pipelineLayoutInfo, null, &pipelineLayout));
+    return pipelineLayout;
+}
+
+fn createRenderPass(device: *Device) !c.VkRenderPass {
+    // Color attachment
+    const colorAttachment: c.VkAttachmentDescription = .{
+        .format = c.VK_FORMAT_B8G8R8A8_UNORM, // Common format for macOS/MoltenVK
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .flags = 0,
+    };
+
+    const colorAttachmentRef: c.VkAttachmentReference = .{
+        .attachment = 0,
+        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    const subpass: c.VkSubpassDescription = .{
+        .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachmentRef,
+        .pInputAttachments = null,
+        .pResolveAttachments = null,
+        .pDepthStencilAttachment = null,
+        .preserveAttachmentCount = 0,
+        .pPreserveAttachments = null,
+        .flags = 0,
+    };
+
+    const dependency: c.VkSubpassDependency = .{
+        .srcSubpass = c.VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = 0,
+        .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dependencyFlags = 0,
+    };
+
+    const renderPassInfo: c.VkRenderPassCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &colorAttachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+        .pNext = null,
+        .flags = 0,
+    };
+
+    var renderPass: c.VkRenderPass = undefined;
+    try checkSuccess(c.vkCreateRenderPass(device.globalDevice, &renderPassInfo, null, &renderPass));
+    return renderPass;
 }
