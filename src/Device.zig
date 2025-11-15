@@ -130,3 +130,21 @@ fn createCommandPool(
 
     try checkSuccess(c.vkCreateCommandPool(globalDevice, &poolInfo, null, commandPool));
 }
+
+pub fn createShaderModule(
+    self: *Self,
+    shaderCode: []const u8,
+) !c.VkShaderModule {
+    std.debug.assert(shaderCode.len % @sizeOf(u32) == 0);
+
+    const createInfo = c.VkShaderModuleCreateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = shaderCode.len,
+        .pCode = @ptrCast(@alignCast(shaderCode.ptr)),
+        .pNext = null,
+        .flags = 0,
+    };
+    var shader_module: c.VkShaderModule = undefined;
+    try checkSuccess(c.vkCreateShaderModule(self.globalDevice, &createInfo, null, &shader_module));
+    return shader_module;
+}

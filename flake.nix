@@ -30,6 +30,11 @@
               vulkan-loader.dev
               vulkan-loader
               vulkan-validation-layers
+
+              # for [rift engine]
+              #glslang.bin
+              #freetype.out
+              #freetype.dev
             ]
             ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL.dev ]);
 
