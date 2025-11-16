@@ -358,7 +358,7 @@ pub fn querySwapChainSupport(
     return details;
 }
 
-const SwapChainSupportDetails = struct {
+pub const SwapChainSupportDetails = struct {
     capabilities: c.VkSurfaceCapabilitiesKHR,
     formats: std.ArrayList(c.VkSurfaceFormatKHR),
     presentModes: std.ArrayList(c.VkPresentModeKHR),

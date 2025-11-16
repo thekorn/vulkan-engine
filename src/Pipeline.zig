@@ -31,11 +31,15 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
     std.log.scoped(.pipeline).info("frag shader len: {d}", .{fragShader.len});
     std.log.scoped(.pipeline).info("vert shader len: {d}", .{vertShader.len});
 
+    // TODO: implement
     // Create pipeline layout
     const pipelineLayout = try createPipelineLayout(device);
+    std.debug.assert(pipelineLayout != null);
 
+    // TODO: implement
     // Create render pass
     const renderPass = try createRenderPass(device);
+    std.debug.assert(renderPass != null);
 
     const vertShaderModule = try createShaderModule(device, vertShader);
     const fragShaderModule = try createShaderModule(device, fragShader);

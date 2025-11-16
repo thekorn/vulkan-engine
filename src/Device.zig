@@ -156,3 +156,22 @@ pub fn createShaderModule(
     try checkSuccess(c.vkCreateShaderModule(self.globalDevice, &createInfo, null, &shader_module));
     return shader_module;
 }
+
+pub fn getSwapChainSupport(self: *Self) !Vulkan.SwapChainSupportDetails {
+    return try Vulkan.querySwapChainSupport(self.alloc, self.physicalDevice, self.surface);
+}
+
+pub fn findSupportedFormat(self: *Self, candidates: []const c.VkFormat, tiling: c.VkImageTiling, features: c.VkFormatFeatureFlags) !c.VkFormat {
+    for (candidates) |format| {
+        var props: VkFormatProperties = undefined;
+        c.vkGetPhysicalDeviceFormatProperties(self.physicalDevice, format, &props);
+
+        if (tiling == c.VK_IMAGE_TILING_LINEAR and (props.linearTilingFeatures & features) == features) {
+              return format;
+            } else if (tiling == c.VK_IMAGE_TILING_OPTIMAL and (props.optimalTilingFeatures & features) == features) {
+                return format;
+            }
+        }
+    }
+    return error.NoSupportedFormatFound;
+}
