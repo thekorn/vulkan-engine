@@ -8,7 +8,7 @@ const Window = @import("Window.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
 const Self = @This();
-allocator: std.mem.Allocator,
+alloc: std.mem.Allocator,
 window: *Window,
 enable_validation_layers: bool,
 surface: c.VkSurfaceKHR,
@@ -46,7 +46,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
 
     return .{
-        .allocator = alloc,
+        .alloc = alloc,
         .window = window,
         .surface = surface,
         .enable_validation_layers = enable_validation_layers,
@@ -107,7 +107,7 @@ fn isDeviceSuitable(alloc: std.mem.Allocator, device: c.VkPhysicalDevice, surfac
     if (extensionsSupported) {
         var swapChainSupport = try Vulkan.querySwapChainSupport(alloc, device, surface);
         defer swapChainSupport.deinit();
-        swapChainAdequate = swapChainSupport.formats.items.len != 0 and swapChainSupport.presentModes.items.len != 0;
+        swapChainAdequate = swapChainSupport.formats.len != 0 and swapChainSupport.presentModes.len != 0;
     }
 
     return indices.isComplete() and extensionsSupported and swapChainAdequate;
@@ -141,8 +141,8 @@ pub fn createShaderModule(
 
     // Allocate properly aligned memory for the shader code
     // Vulkan requires pCode to be aligned to 4 bytes (u32 alignment)
-    const alignedCode = try self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(u32)), shaderCode.len);
-    defer self.allocator.free(alignedCode);
+    const alignedCode = try self.alloc.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(u32)), shaderCode.len);
+    defer self.alloc.free(alignedCode);
     @memcpy(alignedCode, shaderCode);
 
     const createInfo = c.VkShaderModuleCreateInfo{
@@ -163,15 +163,43 @@ pub fn getSwapChainSupport(self: *Self) !Vulkan.SwapChainSupportDetails {
 
 pub fn findSupportedFormat(self: *Self, candidates: []const c.VkFormat, tiling: c.VkImageTiling, features: c.VkFormatFeatureFlags) !c.VkFormat {
     for (candidates) |format| {
-        var props: VkFormatProperties = undefined;
+        var props: c.VkFormatProperties = undefined;
         c.vkGetPhysicalDeviceFormatProperties(self.physicalDevice, format, &props);
 
         if (tiling == c.VK_IMAGE_TILING_LINEAR and (props.linearTilingFeatures & features) == features) {
-              return format;
-            } else if (tiling == c.VK_IMAGE_TILING_OPTIMAL and (props.optimalTilingFeatures & features) == features) {
-                return format;
-            }
+            return format;
+        } else if (tiling == c.VK_IMAGE_TILING_OPTIMAL and (props.optimalTilingFeatures & features) == features) {
+            return format;
         }
     }
     return error.NoSupportedFormatFound;
+}
+
+pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, properties: c.VkMemoryPropertyFlags, image: c.VkImage, imageMemory: *c.VkDeviceMemory) !void {
+    try checkSuccess(c.vkCreateImage(self.globalDevice, &imageInfo, null, &image));
+
+    var memRequirements: c.VkMemoryRequirements = undefined;
+    c.vkGetImageMemoryRequirements(self.globalDevice, image, &memRequirements);
+
+    const allocInfo = c.VkMemoryAllocateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = self.findMemoryType(memRequirements.memoryTypeBits, properties),
+    };
+
+    try checkSuccess(c.vkAllocateMemory(self.globalDevice, &allocInfo, null, &imageMemory));
+    try checkSuccess(c.vkBindImageMemory(self.globalDevice, image, imageMemory, 0));
+}
+
+pub fn findMemoryType(self: *Self, typeFilter: usize, properties: c.VkMemoryPropertyFlags) !void {
+    var memProperties: c.VkPhysicalDeviceMemoryProperties = undefined;
+    c.vkGetPhysicalDeviceMemoryProperties(self.physicalDevice, &memProperties);
+    for (0..memProperties.memoryTypeCount) |i| {
+        if ((typeFilter & (1 << i)) and
+            (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+        {
+            return i;
+        }
+    }
+    return error.NoSuitableMemoryTypeFound;
 }

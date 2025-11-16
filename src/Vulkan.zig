@@ -333,12 +333,12 @@ pub fn querySwapChainSupport(
     try checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, null));
 
     if (formatCount != 0) {
-        try details.formats.resize(alloc, formatCount);
+        details.formats = try alloc.alloc(c.VkSurfaceFormatKHR, formatCount);
         try checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(
             device,
             surface,
             &formatCount,
-            details.formats.items.ptr,
+            details.formats.ptr,
         ));
     }
 
@@ -346,12 +346,12 @@ pub fn querySwapChainSupport(
     try checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, null));
 
     if (presentModeCount != 0) {
-        try details.presentModes.resize(alloc, presentModeCount);
+        details.presentModes = try alloc.alloc(c.VkPresentModeKHR, presentModeCount);
         try checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(
             device,
             surface,
             &presentModeCount,
-            details.presentModes.items.ptr,
+            details.presentModes.ptr,
         ));
     }
 
@@ -360,13 +360,13 @@ pub fn querySwapChainSupport(
 
 pub const SwapChainSupportDetails = struct {
     capabilities: c.VkSurfaceCapabilitiesKHR,
-    formats: std.ArrayList(c.VkSurfaceFormatKHR),
-    presentModes: std.ArrayList(c.VkPresentModeKHR),
+    formats: []c.VkSurfaceFormatKHR,
+    presentModes: []c.VkPresentModeKHR,
     alloc: std.mem.Allocator,
 
     fn init(alloc: std.mem.Allocator) SwapChainSupportDetails {
-        const formats: std.ArrayList(c.VkSurfaceFormatKHR) = .empty;
-        const presentModes: std.ArrayList(c.VkPresentModeKHR) = .empty;
+        const formats: []c.VkSurfaceFormatKHR = undefined;
+        const presentModes: []c.VkPresentModeKHR = undefined;
 
         const result = SwapChainSupportDetails{
             .capabilities = undefined,
@@ -380,7 +380,8 @@ pub const SwapChainSupportDetails = struct {
     }
 
     pub fn deinit(self: *SwapChainSupportDetails) void {
-        self.formats.deinit(self.alloc);
-        self.presentModes.deinit(self.alloc);
+        _ = self;
+        //self.formats.deinit(self.alloc);
+        //self.presentModes.deinit(self.alloc);
     }
 };

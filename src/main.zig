@@ -5,6 +5,7 @@ const Loop = @import("Loop.zig");
 const Window = @import("Window.zig");
 const Pipeline = @import("Pipeline.zig");
 const Device = @import("Device.zig");
+const Swapchain = @import("Swapchain.zig");
 
 const width = 800;
 const height = 600;
@@ -28,6 +29,9 @@ pub fn main() !void {
         Pipeline.defaultPipelineConfigInfo(width, height),
     );
     defer pipeline.deinit();
+
+    var swapChain = try Swapchain.init(alloc, &device, &window);
+    defer swapChain.deinit();
 
     while (loop.is_running()) {
         c.glfwPollEvents();

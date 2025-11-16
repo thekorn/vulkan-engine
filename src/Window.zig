@@ -32,3 +32,10 @@ pub fn should_close(self: *Self) bool {
 pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurfaceKHR) !void {
     try checkSuccess(c.glfwCreateWindowSurface(instance, self.instance, null, surface));
 }
+
+pub fn getExtend(self: *Self) c.VkExtent2D {
+    return .{
+        .width = self.width,
+        .height = self.height,
+    };
+}
