@@ -15,9 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
-        #os: [macos-latest, ubuntu-latest]
-        #os: [ubuntu-latest]
+        os: [macos-latest, ubuntu-latest]
     runs-on: ${{matrix.os}}
     steps:
       - name: Checkout repository
@@ -33,5 +31,12 @@ jobs:
       - name: spellcheck
         run: nix develop -c codebook-lsp lint .
 
-      - name: build & test
+      - name: build & test (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CI: "true"
+        run: nix develop -c zig build test --summary all
+
+      - name: build & test (macos)
+        if: matrix.os == 'macos-latest'
         run: nix develop -c zig build test --summary all

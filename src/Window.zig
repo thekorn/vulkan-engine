@@ -37,6 +37,8 @@ pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurface
 // Helper for tests: try to bring up a Window, but skip the test when the
 // environment can't host one (e.g. headless CI without a display server).
 fn initOrSkip(width: i32, height: i32) !Self {
+    if (std.c.getenv("CI") != null) return error.SkipZigTest;
+
     return Self.init(width, height) catch |err| switch (err) {
         error.GlfwInitFailed, error.GlfwCreateWindowFailed => return error.SkipZigTest,
     };
