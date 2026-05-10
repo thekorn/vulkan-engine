@@ -3,13 +3,14 @@ const std = @import("std");
 const shaders_dir = "./shaders";
 
 fn compileAllShaders(b: *std.Build, exe: anytype) !void {
-    var dir = try std.fs.cwd().openDir(shaders_dir, .{ .iterate = true });
-    defer dir.close();
+    const io = b.graph.io;
+    var dir = try std.Io.Dir.openDir(std.Io.Dir.cwd(), io, shaders_dir, .{ .iterate = true });
+    defer dir.close(io);
 
     var walker = try dir.walk(b.allocator);
     defer walker.deinit();
 
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         const out_file = try std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path});
         defer b.allocator.free(out_file);
         std.debug.print("compiling shader: {s} -> {s}\n", .{ entry.path, out_file });
@@ -54,11 +55,11 @@ pub fn build(b: *std.Build) void {
     });
 
     //exe.linkLibC();
-    exe.linkSystemLibrary("glfw3");
-    exe.linkSystemLibrary("vulkan");
+    exe.root_module.linkSystemLibrary("glfw3", .{});
+    exe.root_module.linkSystemLibrary("vulkan", .{});
 
     if (target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("gl");
+        exe.root_module.linkSystemLibrary("gl", .{});
     }
 
     compileAllShaders(b, exe) catch |e| {

@@ -2,7 +2,7 @@
     .name = .vulkan_engine,
     .version = "0.0.0",
     .fingerprint = 0xd8cbed5931f8e0a3,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{
         "build.zig",
