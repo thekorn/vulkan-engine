@@ -22,8 +22,9 @@
           buildInputs =
             with pkgs;
             [
-              zig
-              zls
+              zig_0_16
+              zls_0_16
+              codebook
               shaderc
               pkg-config
               vulkan-headers

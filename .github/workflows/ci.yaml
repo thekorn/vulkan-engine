@@ -30,5 +30,8 @@ jobs:
       # Run our checks to catch quick issues
       - run: nix flake check
 
+      - name: spellcheck
+        run: nix develop -c codebook-lsp lint .
+
       - name: build & test
         run: nix develop -c zig build test --summary all
