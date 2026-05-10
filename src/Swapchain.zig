@@ -458,3 +458,228 @@ fn createFramebuffers(
     }
     return swapChainFramebuffers;
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "MAX_FRAMES_IN_FLIGHT is 2" {
+    try std.testing.expectEqual(@as(usize, 2), MAX_FRAMES_IN_FLIGHT);
+}
+
+test "Swapchain has expected fields and types" {
+    try std.testing.expectEqual([]c.VkFramebuffer, @FieldType(Self, "swapChainFramebuffers"));
+    try std.testing.expectEqual(c.VkRenderPass, @FieldType(Self, "renderPass"));
+    try std.testing.expectEqual([]c.VkImageView, @FieldType(Self, "swapChainImageViews"));
+    try std.testing.expectEqual([]c.VkImage, @FieldType(Self, "swapChainImages"));
+    try std.testing.expectEqual(c.VkFormat, @FieldType(Self, "swapChainImageFormat"));
+    try std.testing.expectEqual(c.VkExtent2D, @FieldType(Self, "swapChainExtent"));
+    try std.testing.expectEqual([]c.VkImage, @FieldType(Self, "depthImages"));
+    try std.testing.expectEqual([]c.VkDeviceMemory, @FieldType(Self, "depthImageMemories"));
+    try std.testing.expectEqual([]c.VkImageView, @FieldType(Self, "depthImageViews"));
+    try std.testing.expectEqual(*Device, @FieldType(Self, "device"));
+    try std.testing.expectEqual(c.VkExtent2D, @FieldType(Self, "windowExtent"));
+    try std.testing.expectEqual(c.VkSwapchainKHR, @FieldType(Self, "swapChain"));
+    try std.testing.expectEqual([]c.VkSemaphore, @FieldType(Self, "imageAvailableSemaphores"));
+    try std.testing.expectEqual([]c.VkSemaphore, @FieldType(Self, "renderFinishedSemaphores"));
+    try std.testing.expectEqual([]c.VkFence, @FieldType(Self, "inFlightFences"));
+    try std.testing.expectEqual([]c.VkFence, @FieldType(Self, "imagesInFlight"));
+    try std.testing.expectEqual(usize, @FieldType(Self, "currentFrame"));
+}
+
+// Build a minimal Self with only the swapChainExtent fields populated. All
+// other fields are left undefined / null because the helpers under test don't
+// touch them.
+fn makeSelfWithExtent(extent: c.VkExtent2D) Self {
+    return Self{
+        .swapChainFramebuffers = &.{},
+        .renderPass = null,
+        .swapChainImageViews = &.{},
+        .swapChainImages = &.{},
+        .swapChainImageFormat = 0,
+        .swapChainExtent = extent,
+        .depthImages = &.{},
+        .depthImageMemories = &.{},
+        .depthImageViews = &.{},
+        .device = undefined,
+        .windowExtent = .{ .width = 0, .height = 0 },
+        .swapChain = null,
+        .imageAvailableSemaphores = &.{},
+        .renderFinishedSemaphores = &.{},
+        .inFlightFences = &.{},
+        .imagesInFlight = &.{},
+    };
+}
+
+test "width/height return swapChainExtent dimensions" {
+    var self = makeSelfWithExtent(.{ .width = 1280, .height = 720 });
+    try std.testing.expectEqual(@as(usize, 1280), self.width());
+    try std.testing.expectEqual(@as(usize, 720), self.height());
+}
+
+test "extentAspectRatio computes width/height" {
+    var self = makeSelfWithExtent(.{ .width = 1600, .height = 800 });
+    try std.testing.expectEqual(@as(f32, 2.0), self.extentAspectRatio());
+}
+
+test "extentAspectRatio for square extent is 1.0" {
+    var self = makeSelfWithExtent(.{ .width = 512, .height = 512 });
+    try std.testing.expectEqual(@as(f32, 1.0), self.extentAspectRatio());
+}
+
+test "getFrameBuffer returns the framebuffer at the requested index" {
+    const fb0: c.VkFramebuffer = @ptrFromInt(0xdead_beef);
+    const fb1: c.VkFramebuffer = @ptrFromInt(0xfeed_face);
+    var framebuffers = [_]c.VkFramebuffer{ fb0, fb1 };
+    var self = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    self.swapChainFramebuffers = framebuffers[0..];
+
+    try std.testing.expectEqual(fb0, self.getFrameBuffer(0));
+    try std.testing.expectEqual(fb1, self.getFrameBuffer(1));
+}
+
+test "getImageView returns the image view at the requested index" {
+    const iv0: c.VkImageView = @ptrFromInt(0x1111);
+    const iv1: c.VkImageView = @ptrFromInt(0x2222);
+    const iv2: c.VkImageView = @ptrFromInt(0x3333);
+    var views = [_]c.VkImageView{ iv0, iv1, iv2 };
+    var self = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    self.swapChainImageViews = views[0..];
+
+    try std.testing.expectEqual(iv0, self.getImageView(0));
+    try std.testing.expectEqual(iv1, self.getImageView(1));
+    try std.testing.expectEqual(iv2, self.getImageView(2));
+}
+
+test "chooseSwapSurfaceFormat picks B8G8R8A8_SRGB / SRGB_NONLINEAR when available" {
+    var formats = [_]c.VkSurfaceFormatKHR{
+        .{ .format = c.VK_FORMAT_R8G8B8A8_UNORM, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        .{ .format = c.VK_FORMAT_B8G8R8A8_SRGB, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        .{ .format = c.VK_FORMAT_B8G8R8A8_UNORM, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+    };
+    var slice: []c.VkSurfaceFormatKHR = formats[0..];
+    const chosen = chooseSwapSurfaceFormat(&slice);
+    try std.testing.expectEqual(@as(c_uint, c.VK_FORMAT_B8G8R8A8_SRGB), chosen.format);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
+        chosen.colorSpace,
+    );
+}
+
+test "chooseSwapSurfaceFormat falls back to first when preferred not available" {
+    var formats = [_]c.VkSurfaceFormatKHR{
+        .{ .format = c.VK_FORMAT_R8G8B8A8_UNORM, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        .{ .format = c.VK_FORMAT_B8G8R8A8_UNORM, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+    };
+    var slice: []c.VkSurfaceFormatKHR = formats[0..];
+    const chosen = chooseSwapSurfaceFormat(&slice);
+    try std.testing.expectEqual(@as(c_uint, c.VK_FORMAT_R8G8B8A8_UNORM), chosen.format);
+}
+
+test "chooseSwapSurfaceFormat does not match SRGB format with wrong color space" {
+    var formats = [_]c.VkSurfaceFormatKHR{
+        .{ .format = c.VK_FORMAT_R8G8B8A8_UNORM, .colorSpace = c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        .{ .format = c.VK_FORMAT_B8G8R8A8_SRGB, .colorSpace = c.VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT },
+    };
+    var slice: []c.VkSurfaceFormatKHR = formats[0..];
+    const chosen = chooseSwapSurfaceFormat(&slice);
+    // No element matches both format AND color space, so we should get the
+    // first entry as fallback.
+    try std.testing.expectEqual(@as(c_uint, c.VK_FORMAT_R8G8B8A8_UNORM), chosen.format);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
+        chosen.colorSpace,
+    );
+}
+
+test "chooseSwapPresentMode prefers MAILBOX when available" {
+    var modes = [_]c.VkPresentModeKHR{
+        c.VK_PRESENT_MODE_IMMEDIATE_KHR,
+        c.VK_PRESENT_MODE_FIFO_KHR,
+        c.VK_PRESENT_MODE_MAILBOX_KHR,
+    };
+    var slice: []c.VkPresentModeKHR = modes[0..];
+    const chosen = chooseSwapPresentMode(&slice);
+    try std.testing.expectEqual(@as(c_uint, c.VK_PRESENT_MODE_MAILBOX_KHR), chosen);
+}
+
+test "chooseSwapPresentMode falls back to FIFO when MAILBOX is missing" {
+    var modes = [_]c.VkPresentModeKHR{
+        c.VK_PRESENT_MODE_IMMEDIATE_KHR,
+        c.VK_PRESENT_MODE_FIFO_KHR,
+    };
+    var slice: []c.VkPresentModeKHR = modes[0..];
+    const chosen = chooseSwapPresentMode(&slice);
+    try std.testing.expectEqual(@as(c_uint, c.VK_PRESENT_MODE_FIFO_KHR), chosen);
+}
+
+test "chooseSwapPresentMode falls back to FIFO for an empty list" {
+    var modes = [_]c.VkPresentModeKHR{};
+    var slice: []c.VkPresentModeKHR = modes[0..];
+    const chosen = chooseSwapPresentMode(&slice);
+    try std.testing.expectEqual(@as(c_uint, c.VK_PRESENT_MODE_FIFO_KHR), chosen);
+}
+
+test "chooseSwapExtent returns currentExtent when not maxInt" {
+    var caps = std.mem.zeroes(c.VkSurfaceCapabilitiesKHR);
+    caps.currentExtent = .{ .width = 1024, .height = 768 };
+    caps.minImageExtent = .{ .width = 1, .height = 1 };
+    caps.maxImageExtent = .{ .width = 4096, .height = 4096 };
+
+    const window = c.VkExtent2D{ .width = 800, .height = 600 };
+    const extent = chooseSwapExtent(&caps, window);
+    try std.testing.expectEqual(@as(u32, 1024), extent.width);
+    try std.testing.expectEqual(@as(u32, 768), extent.height);
+}
+
+test "chooseSwapExtent clamps windowExtent when currentExtent is maxInt" {
+    var caps = std.mem.zeroes(c.VkSurfaceCapabilitiesKHR);
+    caps.currentExtent = .{
+        .width = std.math.maxInt(u32),
+        .height = std.math.maxInt(u32),
+    };
+    caps.minImageExtent = .{ .width = 100, .height = 100 };
+    caps.maxImageExtent = .{ .width = 1920, .height = 1080 };
+
+    // Within range -> unchanged
+    {
+        const extent = chooseSwapExtent(&caps, .{ .width = 800, .height = 600 });
+        try std.testing.expectEqual(@as(u32, 800), extent.width);
+        try std.testing.expectEqual(@as(u32, 600), extent.height);
+    }
+
+    // Below min -> clamped up
+    {
+        const extent = chooseSwapExtent(&caps, .{ .width = 50, .height = 50 });
+        try std.testing.expectEqual(@as(u32, 100), extent.width);
+        try std.testing.expectEqual(@as(u32, 100), extent.height);
+    }
+
+    // Above max -> clamped down
+    {
+        const extent = chooseSwapExtent(&caps, .{ .width = 4000, .height = 4000 });
+        try std.testing.expectEqual(@as(u32, 1920), extent.width);
+        try std.testing.expectEqual(@as(u32, 1080), extent.height);
+    }
+}
+
+test "CreateSwapChainResult has the expected shape" {
+    try std.testing.expectEqual(c.VkFormat, @FieldType(CreateSwapChainResult, "format"));
+    try std.testing.expectEqual(c.VkExtent2D, @FieldType(CreateSwapChainResult, "extend"));
+    try std.testing.expectEqual([]c.VkImage, @FieldType(CreateSwapChainResult, "images"));
+    try std.testing.expectEqual(c.VkSwapchainKHR, @FieldType(CreateSwapChainResult, "swapChain"));
+}
+
+test "CreateDepthResourcesResult has the expected shape" {
+    try std.testing.expectEqual(c.VkFormat, @FieldType(CreateDepthResourcesResult, "swapChainDepthFormat"));
+    try std.testing.expectEqual([]c.VkImage, @FieldType(CreateDepthResourcesResult, "depthImages"));
+    try std.testing.expectEqual([]c.VkDeviceMemory, @FieldType(CreateDepthResourcesResult, "depthImageMemories"));
+    try std.testing.expectEqual([]c.VkImageView, @FieldType(CreateDepthResourcesResult, "depthImageViews"));
+}
+
+test "CreateSyncObjectsResult has the expected shape" {
+    try std.testing.expectEqual([]c.VkSemaphore, @FieldType(CreateSyncObjectsResult, "imageAvailableSemaphores"));
+    try std.testing.expectEqual([]c.VkSemaphore, @FieldType(CreateSyncObjectsResult, "renderFinishedSemaphores"));
+    try std.testing.expectEqual([]c.VkFence, @FieldType(CreateSyncObjectsResult, "inFlightFences"));
+    try std.testing.expectEqual([]c.VkFence, @FieldType(CreateSyncObjectsResult, "imagesInFlight"));
+}
