@@ -205,12 +205,25 @@ External Libraries (GLFW, Vulkan)
 - **Purpose:** Application event processing
 - **Type:** Struct with window reference
 - **Key Functions:**
-  - `init(window)` - Initialize event loop
+  - `init(window)` - Initialize event loop and install POSIX signal handlers
   - `deinit()` - Clean up
   - `is_running()` - Check if should continue
 - **Current Implementation:**
   - Delegates to window's `should_close()` check
   - Uses GLFW event polling in main loop
+  - **Graceful shutdown via signals:** `Loop.init` installs handlers for
+    `SIGINT`, `SIGTERM`, and `SIGHUP` (no-op on Windows). The handlers set
+    an atomic `shutdown_requested` flag that `is_running()` polls, so the
+    main loop exits cleanly and all `defer`/`deinit` paths run. To close
+    the app programmatically from another process, send any of these
+    signals, e.g.:
+    ```bash
+    kill -INT  <pid>   # same as Ctrl+C
+    kill -TERM <pid>
+    kill -HUP  <pid>
+    ```
+    `pkill vulkan_engine` works as well. Avoid `kill -9` / `SIGKILL`,
+    since it bypasses the handler and skips Vulkan/GLFW cleanup.
 
 #### **c.zig** - C FFI Layer
 - **Purpose:** C interoperability bindings

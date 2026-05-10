@@ -39,4 +39,5 @@ test {
     _ = @import("Vulkan.zig");
     _ = @import("Pipeline.zig");
     _ = @import("Window.zig");
+    _ = @import("Loop.zig");
 }
