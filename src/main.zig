@@ -44,4 +44,5 @@ test {
     _ = @import("Pipeline.zig");
     _ = @import("Window.zig");
     _ = @import("Swapchain.zig");
+    _ = @import("Loop.zig");
 }
