@@ -4,14 +4,15 @@
 
 **Build System:** Zig Build System
 - **Language:** Zig (systems programming language)
-- **Minimum Version:** 0.15.2
+- **Minimum Version:** 0.16.0
 - **Files:**
   - `build.zig` - Main build configuration
   - `build.zig.zon` - Zig dependency manifest (currently has no external dependencies)
 
 ### Build Features
 - **Shader Compilation:** Automatic GLSL to SPIR-V compilation using `glslc`
-  - Shaders are embedded as binary data into the executable
+  - Shaders are discovered by walking `shaders/` via `std.Io.Dir` (Zig 0.16 std.Io API)
+  - Compiled outputs are added as anonymous module imports and embedded via `@embedFile` in `main.zig`
   - Located in `compileAllShaders()` function
 - **System Library Linking:**
   - `glfw3` - Window and input management
@@ -51,8 +52,12 @@ vulkan-engine/
 ├── build.zig              # Build configuration (Zig build system)
 ├── build.zig.zon          # Zig manifest/dependencies
 ├── flake.nix              # Nix development environment
+├── flake.lock             # Pinned Nix inputs
 ├── README.md              # Basic project info
-├── CLAUDE.md              # This file
+├── AGENTS.md              # This file (project guidance for agents)
+├── codebook.toml          # Codebook configuration
+├── .agents/
+│   └── skills/            # Agent skills (e.g. zig 0.16 porting notes)
 ├── .github/
 │   └── workflows/
 │       └── ci.yaml        # GitHub Actions CI/CD
@@ -170,17 +175,21 @@ External Libraries (GLFW, Vulkan)
 
 #### **Pipeline.zig** - Graphics Pipeline Configuration
 - **Purpose:** Graphics pipeline creation and configuration
-- **Type:** Struct with pipeline handle and shader modules
+- **Type:** Struct with pipeline handle, shader modules, layout, and render pass
 - **Fields:**
   - `device` - Reference to device
-  - `graphicsPipeline` - VkPipeline handle
+  - `graphicsPipeline` - Optional `VkPipeline` handle
   - `vertShaderModule` - Vertex shader module
   - `fragShaderModule` - Fragment shader module
+  - `pipelineLayout` - `VkPipelineLayout` handle
+  - `renderPass` - `VkRenderPass` handle
 - **Key Structures:**
   - `PipelineConfigInfo` - Complete pipeline configuration state
 - **Key Functions:**
-  - `init()` - Create graphics pipeline
+  - `init(device, fragShader, vertShader, configInfo)` - Create pipeline layout, render pass, shader modules and graphics pipeline
   - `defaultPipelineConfigInfo(width, height)` - Generate default pipeline config
+  - `createPipelineLayout(device)` - Create empty pipeline layout (no descriptors / push constants)
+  - `createRenderPass(device)` - Create a single-subpass render pass with a `B8G8R8A8_UNORM` color attachment for swapchain presentation
 - **Pipeline Configuration (defaultPipelineConfigInfo):**
   - Viewport and scissor setup
   - Input assembly (triangle list topology)
@@ -362,7 +371,7 @@ void main() {
 - Package metadata
 - Project name: `vulkan_engine`
 - Version: 0.0.0
-- Minimum Zig version: 0.15.2
+- Minimum Zig version: 0.16.0
 - Dependencies: None (using system libraries)
 
 ### 5.2 Development Environment
@@ -510,11 +519,11 @@ defer extensions.deinit(alloc);
 
 ### 8.2 Known Limitations & TODOs
 
-- Swapchain not fully implemented
-- Render pass not created
-- Command buffer recording incomplete
-- No actual rendering to framebuffer
-- Validation layer cleanup incomplete (see Device.deinit)
+- Swapchain not fully implemented (capabilities queried only)
+- Render pass created, but not yet wired into a draw loop
+- Command buffer recording / submission incomplete
+- No framebuffer creation, no synchronization primitives
+- Validation layer cleanup incomplete — debug messenger destruction is TODO (see `Device.deinit`)
 - Single hardcoded triangle (no vertex buffer)
 - No transform matrices or camera
 

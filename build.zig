@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");

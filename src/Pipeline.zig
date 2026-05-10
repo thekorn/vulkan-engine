@@ -281,3 +281,138 @@ fn createRenderPass(device: *Device) !c.VkRenderPass {
     try checkSuccess(c.vkCreateRenderPass(device.globalDevice, &renderPassInfo, null, &renderPass));
     return renderPass;
 }
+
+test "defaultPipelineConfigInfo viewport matches given dimensions" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(@as(f32, 0), config.viewport.x);
+    try std.testing.expectEqual(@as(f32, 0), config.viewport.y);
+    try std.testing.expectEqual(@as(f32, 800), config.viewport.width);
+    try std.testing.expectEqual(@as(f32, 600), config.viewport.height);
+    try std.testing.expectEqual(@as(f32, 0.0), config.viewport.minDepth);
+    try std.testing.expectEqual(@as(f32, 1.0), config.viewport.maxDepth);
+}
+
+test "defaultPipelineConfigInfo scissor matches given dimensions" {
+    const config = defaultPipelineConfigInfo(1024, 768);
+
+    try std.testing.expectEqual(@as(i32, 0), config.scissor.offset.x);
+    try std.testing.expectEqual(@as(i32, 0), config.scissor.offset.y);
+    try std.testing.expectEqual(@as(u32, 1024), config.scissor.extent.width);
+    try std.testing.expectEqual(@as(u32, 768), config.scissor.extent.height);
+}
+
+test "defaultPipelineConfigInfo viewportInfo points at one viewport and scissor" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO),
+        config.viewportInfo.sType,
+    );
+    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.viewportCount);
+    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.scissorCount);
+}
+
+test "defaultPipelineConfigInfo input assembly uses triangle list without restart" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO),
+        config.inputAssemblyInfo.sType,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
+        config.inputAssemblyInfo.topology,
+    );
+    try std.testing.expectEqual(
+        @as(c.VkBool32, c.VK_FALSE),
+        config.inputAssemblyInfo.primitiveRestartEnable,
+    );
+}
+
+test "defaultPipelineConfigInfo rasterization uses fill, no culling, line width 1.0" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO),
+        config.rasterizationInfo.sType,
+    );
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.rasterizationInfo.depthClampEnable);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.rasterizationInfo.rasterizerDiscardEnable);
+    try std.testing.expectEqual(@as(c_uint, c.VK_POLYGON_MODE_FILL), config.rasterizationInfo.polygonMode);
+    try std.testing.expectEqual(@as(f32, 1.0), config.rasterizationInfo.lineWidth);
+    try std.testing.expectEqual(@as(c_uint, c.VK_CULL_MODE_NONE), config.rasterizationInfo.cullMode);
+    try std.testing.expectEqual(@as(c_uint, c.VK_FRONT_FACE_CLOCKWISE), config.rasterizationInfo.frontFace);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.rasterizationInfo.depthBiasEnable);
+}
+
+test "defaultPipelineConfigInfo multisample uses 1x sampling" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO),
+        config.multisampleInfo.sType,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_SAMPLE_COUNT_1_BIT),
+        config.multisampleInfo.rasterizationSamples,
+    );
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.multisampleInfo.sampleShadingEnable);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.multisampleInfo.alphaToCoverageEnable);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.multisampleInfo.alphaToOneEnable);
+}
+
+test "defaultPipelineConfigInfo color blending is disabled with all channels writable" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.colorBlendAttachment.blendEnable);
+    const expected_mask: c_uint = c.VK_COLOR_COMPONENT_R_BIT |
+        c.VK_COLOR_COMPONENT_G_BIT |
+        c.VK_COLOR_COMPONENT_B_BIT |
+        c.VK_COLOR_COMPONENT_A_BIT;
+    try std.testing.expectEqual(expected_mask, config.colorBlendAttachment.colorWriteMask);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO),
+        config.colorBlendInfo.sType,
+    );
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.colorBlendInfo.logicOpEnable);
+    try std.testing.expectEqual(@as(c_uint, c.VK_LOGIC_OP_COPY), config.colorBlendInfo.logicOp);
+    try std.testing.expectEqual(@as(u32, 1), config.colorBlendInfo.attachmentCount);
+    for (config.colorBlendInfo.blendConstants) |bc| {
+        try std.testing.expectEqual(@as(f32, 0.0), bc);
+    }
+}
+
+test "defaultPipelineConfigInfo depth/stencil enables depth test with LESS compare" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO),
+        config.depthStencilInfo.sType,
+    );
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_TRUE), config.depthStencilInfo.depthTestEnable);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_TRUE), config.depthStencilInfo.depthWriteEnable);
+    try std.testing.expectEqual(@as(c_uint, c.VK_COMPARE_OP_LESS), config.depthStencilInfo.depthCompareOp);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.depthStencilInfo.depthBoundsTestEnable);
+    try std.testing.expectEqual(@as(f32, 0.0), config.depthStencilInfo.minDepthBounds);
+    try std.testing.expectEqual(@as(f32, 1.0), config.depthStencilInfo.maxDepthBounds);
+    try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.depthStencilInfo.stencilTestEnable);
+}
+
+test "defaultPipelineConfigInfo defaults pipelineLayout, renderPass and subpass" {
+    const config = defaultPipelineConfigInfo(800, 600);
+
+    try std.testing.expect(config.pipelineLayout == null);
+    try std.testing.expect(config.renderPass == null);
+    try std.testing.expectEqual(@as(u32, 0), config.subpass);
+}
+
+test "defaultPipelineConfigInfo handles non-square dimensions" {
+    const config = defaultPipelineConfigInfo(1920, 1080);
+
+    try std.testing.expectEqual(@as(f32, 1920), config.viewport.width);
+    try std.testing.expectEqual(@as(f32, 1080), config.viewport.height);
+    try std.testing.expectEqual(@as(u32, 1920), config.scissor.extent.width);
+    try std.testing.expectEqual(@as(u32, 1080), config.scissor.extent.height);
+}

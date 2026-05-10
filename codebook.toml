@@ -35,6 +35,11 @@ words = [
   "zeditor",
   "multisample",
   "subpass",
+  "workson",
+  "fba",
+  "OOM",
+  "deflt",
+  "UNORM",
 ]
 
 ignore_paths = ["flake.lock"]

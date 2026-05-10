@@ -385,3 +385,123 @@ pub const SwapChainSupportDetails = struct {
         //self.presentModes.deinit(self.alloc);
     }
 };
+
+test "QueueFamilyIndices.init returns null fields" {
+    const indices = QueueFamilyIndices.init();
+    try std.testing.expect(indices.graphicsFamily == null);
+    try std.testing.expect(indices.presentFamily == null);
+}
+
+test "QueueFamilyIndices.isComplete is false when both fields are null" {
+    const indices = QueueFamilyIndices.init();
+    try std.testing.expect(!indices.isComplete());
+}
+
+test "QueueFamilyIndices.isComplete is false when only graphicsFamily is set" {
+    var indices = QueueFamilyIndices.init();
+    indices.graphicsFamily = 0;
+    try std.testing.expect(!indices.isComplete());
+}
+
+test "QueueFamilyIndices.isComplete is false when only presentFamily is set" {
+    var indices = QueueFamilyIndices.init();
+    indices.presentFamily = 1;
+    try std.testing.expect(!indices.isComplete());
+}
+
+test "QueueFamilyIndices.isComplete is true when both fields are set" {
+    var indices = QueueFamilyIndices.init();
+    indices.graphicsFamily = 0;
+    indices.presentFamily = 1;
+    try std.testing.expect(indices.isComplete());
+}
+
+test "QueueFamilyIndices.isComplete handles graphicsFamily == presentFamily" {
+    var indices = QueueFamilyIndices.init();
+    indices.graphicsFamily = 2;
+    indices.presentFamily = 2;
+    try std.testing.expect(indices.isComplete());
+}
+
+test "CStrContext.eql returns true for identical strings" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "VK_KHR_swapchain";
+    const b: [*:0]const u8 = "VK_KHR_swapchain";
+    try std.testing.expect(ctx.eql(a, b));
+}
+
+test "CStrContext.eql returns false for different strings" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "VK_KHR_swapchain";
+    const b: [*:0]const u8 = "VK_KHR_portability_subset";
+    try std.testing.expect(!ctx.eql(a, b));
+}
+
+test "CStrContext.eql returns false for strings with shared prefix" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "abc";
+    const b: [*:0]const u8 = "abcd";
+    try std.testing.expect(!ctx.eql(a, b));
+}
+
+test "CStrContext.eql returns true for empty strings" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "";
+    const b: [*:0]const u8 = "";
+    try std.testing.expect(ctx.eql(a, b));
+}
+
+test "CStrContext.hash produces identical hashes for identical strings" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "VK_KHR_swapchain";
+    const b: [*:0]const u8 = "VK_KHR_swapchain";
+    try std.testing.expectEqual(ctx.hash(a), ctx.hash(b));
+}
+
+test "CStrContext.hash produces different hashes for different strings" {
+    const ctx = CStrContext{};
+    const a: [*:0]const u8 = "VK_KHR_swapchain";
+    const b: [*:0]const u8 = "VK_KHR_portability_subset";
+    try std.testing.expect(ctx.hash(a) != ctx.hash(b));
+}
+
+test "CStrContext is usable as a HashMap context" {
+    const Map = std.hash_map.HashMap(
+        [*:0]const u8,
+        u32,
+        CStrContext,
+        std.hash_map.default_max_load_percentage,
+    );
+    var map = Map.init(std.testing.allocator);
+    defer map.deinit();
+
+    try map.put("alpha", 1);
+    try map.put("beta", 2);
+
+    try std.testing.expectEqual(@as(?u32, 1), map.get("alpha"));
+    try std.testing.expectEqual(@as(?u32, 2), map.get("beta"));
+    try std.testing.expectEqual(@as(?u32, null), map.get("gamma"));
+    try std.testing.expectEqual(@as(u32, 2), map.count());
+
+    try std.testing.expect(map.remove("alpha"));
+    try std.testing.expectEqual(@as(u32, 1), map.count());
+}
+
+test "SwapChainSupportDetails.init creates empty lists" {
+    var details = SwapChainSupportDetails.init(std.testing.allocator);
+    defer details.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), details.formats.items.len);
+    try std.testing.expectEqual(@as(usize, 0), details.presentModes.items.len);
+}
+
+test "SwapChainSupportDetails can grow and deinit cleanly" {
+    var details = SwapChainSupportDetails.init(std.testing.allocator);
+    defer details.deinit();
+
+    try details.formats.resize(std.testing.allocator, 3);
+    try details.presentModes.resize(std.testing.allocator, 2);
+
+    try std.testing.expectEqual(@as(usize, 3), details.formats.items.len);
+    try std.testing.expectEqual(@as(usize, 2), details.presentModes.items.len);
+}
