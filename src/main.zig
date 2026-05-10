@@ -33,3 +33,7 @@ pub fn main() !void {
         c.glfwPollEvents();
     }
 }
+
+test {
+    _ = @import("utils.zig");
+}
