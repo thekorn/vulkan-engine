@@ -110,6 +110,7 @@ pub fn deinit(self: *Self) void {
     }
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
     c.vkDestroyRenderPass(self.device.globalDevice, self.renderPass, null);
+    std.log.scoped(.pipeline).info("deinit done", .{});
 }
 
 // see: https://pastebin.com/EmsJWHzb
