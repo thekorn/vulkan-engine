@@ -36,4 +36,6 @@ pub fn main() !void {
 
 test {
     _ = @import("utils.zig");
+    _ = @import("Vulkan.zig");
+    _ = @import("Pipeline.zig");
 }
