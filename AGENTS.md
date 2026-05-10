@@ -3,6 +3,7 @@
 ## 1. Build System
 
 **Build System:** Zig Build System
+
 - **Language:** Zig (systems programming language)
 - **Minimum Version:** 0.16.0
 - **Files:**
@@ -10,6 +11,7 @@
   - `build.zig.zon` - Zig dependency manifest (currently has no external dependencies)
 
 ### Build Features
+
 - **Shader Compilation:** Automatic GLSL to SPIR-V compilation using `glslc`
   - Shaders are discovered by walking `shaders/` via `std.Io.Dir` (Zig 0.16 std.Io API)
   - Compiled outputs are added as anonymous module imports and embedded via `@embedFile` in `main.zig`
@@ -21,9 +23,11 @@
 - **Test Infrastructure:** Built-in test support via `zig build test`
 
 ### Development Setup
+
 Two options for local development:
 
 **Option 1 - Nix (Recommended):**
+
 ```bash
 nix develop
 nix develop --command zig build run
@@ -31,12 +35,14 @@ nix develop --command zig build run
 
 **Option 2 - Manual Setup:**
 Install required dependencies:
+
 - Zig 0.15.2+
 - GLFW3
 - Vulkan SDK
 - shaderc/glslc (for shader compilation)
 
 ### Build Commands
+
 ```bash
 zig build              # Build executable
 zig build run          # Build and run
@@ -103,6 +109,7 @@ External Libraries (GLFW, Vulkan)
 ### 3.2 Component Descriptions
 
 #### **main.zig** - Entry Point
+
 - **Purpose:** Application initialization and lifecycle management
 - **Window Size:** 800x600
 - **Key Functions:**
@@ -115,6 +122,7 @@ External Libraries (GLFW, Vulkan)
   5. Start event loop
 
 #### **Window.zig** - GLFW Window Management
+
 - **Purpose:** Handle window creation and surface management
 - **Type:** Struct with `instance`, `width`, `height` fields
 - **Key Functions:**
@@ -128,6 +136,7 @@ External Libraries (GLFW, Vulkan)
   - Uses GLFW C library bindings
 
 #### **Vulkan.zig** - Vulkan Instance & Core Setup
+
 - **Purpose:** Vulkan instance creation, validation layers, and device querying
 - **Type:** Struct with `instance` field
 - **Key Functions:**
@@ -149,6 +158,7 @@ External Libraries (GLFW, Vulkan)
   - Cross-platform extension handling (macOS-specific workarounds)
 
 #### **Device.zig** - Physical & Logical Device Management
+
 - **Purpose:** GPU selection and device creation
 - **Type:** Struct with device references, queues, and command pool
 - **Fields:**
@@ -174,6 +184,7 @@ External Libraries (GLFW, Vulkan)
   - Swapchain format availability
 
 #### **Pipeline.zig** - Graphics Pipeline Configuration
+
 - **Purpose:** Graphics pipeline creation and configuration
 - **Type:** Struct with pipeline handle, shader modules, layout, and render pass
 - **Fields:**
@@ -202,6 +213,7 @@ External Libraries (GLFW, Vulkan)
   - Fragment: Outputs red color
 
 #### **Loop.zig** - Main Event Loop
+
 - **Purpose:** Application event processing
 - **Type:** Struct with window reference
 - **Key Functions:**
@@ -226,6 +238,7 @@ External Libraries (GLFW, Vulkan)
     since it bypasses the handler and skips Vulkan/GLFW cleanup.
 
 #### **c.zig** - C FFI Layer
+
 - **Purpose:** C interoperability bindings
 - **Content:**
   - Defines `GLFW_INCLUDE_VULKAN` for GLFW/Vulkan integration
@@ -234,6 +247,7 @@ External Libraries (GLFW, Vulkan)
 - **Usage:** All C API calls go through `c.c` namespace
 
 #### **utils.zig** - Utility Functions
+
 - **Purpose:** Common utility functions
 - **Key Functions:**
   - `checkSuccess(result)` - Validate Vulkan result codes
@@ -242,6 +256,7 @@ External Libraries (GLFW, Vulkan)
 ### 3.3 Data Flow
 
 **Initialization Flow:**
+
 ```
 main.zig
   ├─→ Window.init()
@@ -268,6 +283,7 @@ main.zig
 ```
 
 **Runtime Flow:**
+
 ```
 while Loop.is_running():
   glfwPollEvents()  // Handle window events
@@ -283,17 +299,20 @@ while Loop.is_running():
 The rendering pipeline is structured in stages following the Vulkan graphics pipeline model:
 
 **1. Instance & Device Setup**
+
 - Location: `Vulkan.zig` + `Device.zig`
 - Creates Vulkan instance with platform-specific extensions
 - Selects suitable physical device
 - Creates logical device with graphics and presentation queues
 
 **2. Surface & Swapchain (Partial)**
+
 - Location: `Window.zig` + `Vulkan.zig`
 - Creates presentation surface via GLFW
 - Swapchain capabilities are queried but not fully implemented
 
 **3. Shader Compilation**
+
 - Location: `build.zig` + `shaders/`
 - Build-time: GLSL shaders compiled to SPIR-V
 - Runtime: Shader binaries embedded and loaded into modules
@@ -302,6 +321,7 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
   - `shader.frag` - Fragment shader
 
 **4. Graphics Pipeline**
+
 - Location: `Pipeline.zig`
 - Configures entire graphics pipeline state
 - Combines shader stages with rasterization configuration
@@ -312,6 +332,7 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
   - No color blending
 
 **5. Rendering (TODO)**
+
 - Command buffer recording
 - Render pass execution
 - Frame submission
@@ -319,6 +340,7 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 ### 4.2 Shader Details
 
 **Vertex Shader (`shader.vert`):**
+
 ```glsl
 #version 450
 // Hardcoded triangle in NDC space
@@ -334,6 +356,7 @@ void main() {
 ```
 
 **Fragment Shader (`shader.frag`):**
+
 ```glsl
 #version 450
 layout(location = 0) out vec4 outColor;
@@ -348,20 +371,24 @@ void main() {
 ### 4.3 Key Configuration Parameters
 
 **Viewport & Scissor:**
+
 - Viewport size: 800x600
 - Depth range: 0.0 to 1.0
 
 **Rasterization:**
+
 - Polygon mode: Fill
 - Cull mode: None
 - Front face: Clockwise
 - Line width: 1.0
 
 **Color Blending:**
+
 - Disabled (no blending operations)
 - RGBA write mask: All channels enabled
 
 **Depth Stencil:**
+
 - Depth test: Enabled
 - Depth write: Enabled
 - Depth compare op: Less
@@ -374,6 +401,7 @@ void main() {
 ### 5.1 Build Configuration
 
 **build.zig**
+
 - Zig build system configuration
 - Handles shader compilation
 - Links system libraries (GLFW, Vulkan)
@@ -381,6 +409,7 @@ void main() {
 - Target and optimization settings
 
 **build.zig.zon**
+
 - Package metadata
 - Project name: `vulkan_engine`
 - Version: 0.0.0
@@ -390,6 +419,7 @@ void main() {
 ### 5.2 Development Environment
 
 **flake.nix**
+
 - Nix package manager configuration
 - Provides reproducible development environment
 - Dependencies:
@@ -404,6 +434,7 @@ void main() {
 ### 5.3 CI/CD Configuration
 
 **.github/workflows/ci.yaml**
+
 - GitHub Actions workflow
 - Triggers on PR and push to main
 - Runs on Ubuntu Linux
@@ -417,6 +448,7 @@ void main() {
 ### 5.4 Git Configuration
 
 **.gitignore**
+
 - Ignores: `zig-out/`, `.zig-cache/`, `*.cpp`, `*.hpp`
 - Allows: source code, build files, configuration
 
@@ -427,16 +459,19 @@ void main() {
 ### 6.1 Test Infrastructure
 
 **Testing Framework:**
+
 - Built into Zig language
 - Uses `@import("builtin")` for compile-time checks
 - Test declarations with `test` keyword
 
 **Current Test Setup:**
+
 - Located in: Individual source files
 - Test execution: `zig build test`
 - CI integration: GitHub Actions runs tests on every PR/push
 
 **Running Tests:**
+
 ```bash
 zig build test                           # Local testing
 zig build test --summary all            # Detailed summary
@@ -463,26 +498,31 @@ nix develop -c zig build test           # In Nix environment
 ### 7.1 Design Patterns Used
 
 **1. Resource Acquisition Is Initialization (RAII)**
+
 - Each component has `init()` and `deinit()` functions
 - Deferred cleanup using `defer` keyword
 - Automatic resource management
 
 **2. Struct-Based Components**
+
 - Core components are Zig structs (implicit types via `@This()`)
 - Self-contained with encapsulated state
 - Methods return modified copies or mutate in-place
 
 **3. C Interoperability Layer**
+
 - Abstraction via `c.zig` module
 - Centralized C binding management
 - Error handling via `checkSuccess()` wrapper
 
 **4. Configuration Objects**
+
 - `PipelineConfigInfo` - Encapsulates pipeline state
 - Allows flexible configuration through builder pattern
 - `defaultPipelineConfigInfo()` provides sensible defaults
 
 **5. Allocator Pattern**
+
 - Explicit memory allocation via `std.mem.Allocator`
 - Page allocator used in main
 - Deferred cleanup for temporary allocations
@@ -490,12 +530,14 @@ nix develop -c zig build test           # In Nix environment
 ### 7.2 Error Handling
 
 **Error Management:**
+
 - Zig error union types (`!Type`)
 - Try operator (`try`) for error propagation
 - `checkSuccess()` converts Vulkan error codes to Zig errors
 - Validation layer support for runtime errors
 
 **Example Error Handling:**
+
 ```zig
 try checkSuccess(c.vkCreateDevice(...))  // Propagates errors
 _ = c.vkEnumeratePhysicalDevices(...)    // Ignores result
@@ -504,12 +546,14 @@ _ = c.vkEnumeratePhysicalDevices(...)    // Ignores result
 ### 7.3 Memory Management
 
 **Allocation Strategy:**
+
 - Page allocator for main application lifetime
 - ArrayList for dynamic collections
 - Explicit deallocation with `defer`
 - No garbage collection (manual management)
 
 **Example:**
+
 ```zig
 var extensions: std.ArrayList(...) = .empty;
 defer extensions.deinit(alloc);
@@ -522,11 +566,13 @@ defer extensions.deinit(alloc);
 ### 8.1 Platform-Specific Considerations
 
 **macOS Support:**
+
 - Handles VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
 - Requires VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 - Portability subset extension required
 
 **Linux Support:**
+
 - Includes GL library linking
 - Tested in CI pipeline
 
@@ -551,6 +597,7 @@ defer extensions.deinit(alloc);
 ## 9. Quick Start for Development
 
 ### Setup (with Nix)
+
 ```bash
 cd /Users/thekorn/devel/github.com/thekorn/vulkan-engine
 nix develop
@@ -558,6 +605,7 @@ zig build run
 ```
 
 ### Build Targets
+
 ```bash
 zig build              # Compile executable
 zig build run          # Compile and run
@@ -566,12 +614,14 @@ zig build --help       # Show all options
 ```
 
 ### Key File Locations
+
 - Entry point: `/src/main.zig`
 - Shader sources: `/shaders/`
 - Build config: `/build.zig`
 - Dev environment: `/flake.nix`
 
 ### IDE Support
+
 - ZLS (Zig Language Server) included in Nix env
 - Requires editor with LSP support
 
@@ -582,6 +632,7 @@ zig build --help       # Show all options
 **Architecture Type:** Layered, Component-Based
 
 **Tier Structure:**
+
 1. **Application Layer** (main.zig, Loop.zig)
 2. **High-Level Abstractions** (Window, Device, Pipeline)
 3. **Vulkan Core Layer** (Vulkan.zig)
@@ -589,6 +640,7 @@ zig build --help       # Show all options
 5. **Native Libraries** (GLFW, Vulkan SDK)
 
 **Key Strengths:**
+
 - Clear separation of concerns
 - Modular component design
 - Proper resource cleanup
@@ -596,4 +648,3 @@ zig build --help       # Show all options
 - Cross-platform support
 
 **Current Stage:** Foundation/Infrastructure complete, rendering pipeline work-in-progress
-

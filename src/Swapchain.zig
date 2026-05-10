@@ -70,62 +70,45 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, window: *Window) !Self {
 }
 
 pub fn deinit(self: *Self) void {
-    //  for (auto imageView : swapChainImageViews) {
-    //    vkDestroyImageView(device.device(), imageView, nullptr);
-    //  }
-    for (self.swapChainImages) |image| {
-        c.vkDestroyImage(self.device.globalDevice, image, null);
-    }
-    //  swapChainImageViews.clear();
-    self.swapChainImages = undefined;
-    //
-    //  if (swapChain != nullptr) {
-    //    vkDestroySwapchainKHR(device.device(), swapChain, nullptr);
-    //    swapChain = nullptr;
-    //  }
+    // Wait for the device to become idle so the GPU isn't using any of
+    // the resources we're about to tear down. Without this, the
+    // validation layers (rightfully) complain on shutdown.
+    _ = c.vkDeviceWaitIdle(self.device.globalDevice);
 
-    if (self.swapChain != null) {
-        c.vkDestroySwapchainKHR(self.device.globalDevice, self.swapChain, null);
-        self.swapChain = null;
+    // Framebuffers reference the image views, so destroy them first.
+    for (self.swapChainFramebuffers) |framebuffer| {
+        c.vkDestroyFramebuffer(self.device.globalDevice, framebuffer, null);
     }
 
-    //  for (int i = 0; i < depthImages.size(); i++) {
-    //    vkDestroyImageView(device.device(), depthImageViews[i], nullptr);
-    //    vkDestroyImage(device.device(), depthImages[i], nullptr);
-    //    vkFreeMemory(device.device(), depthImageMemorys[i], nullptr);
-    //  }
+    // Destroy the swapchain image views. The underlying VkImages are
+    // owned by the swapchain itself and MUST NOT be destroyed manually
+    // with vkDestroyImage — vkDestroySwapchainKHR takes care of them.
+    for (self.swapChainImageViews) |view| {
+        c.vkDestroyImageView(self.device.globalDevice, view, null);
+    }
 
+    // Depth resources are user-owned: destroy view, image, and free memory.
     for (self.depthImages, 0..) |image, i| {
         c.vkDestroyImageView(self.device.globalDevice, self.depthImageViews[i], null);
         c.vkDestroyImage(self.device.globalDevice, image, null);
         c.vkFreeMemory(self.device.globalDevice, self.depthImageMemories[i], null);
     }
-    //
-    //
-    //  for (auto framebuffer : swapChainFramebuffers) {
-    //    vkDestroyFramebuffer(device.device(), framebuffer, nullptr);
-    //  }
-    //
-    for (self.swapChainFramebuffers) |framebuffer| {
-        c.vkDestroyFramebuffer(self.device.globalDevice, framebuffer, null);
-    }
 
-    //
-    //  vkDestroyRenderPass(device.device(), renderPass, nullptr);
-    //
+    // Render pass can be destroyed once nothing references it.
     c.vkDestroyRenderPass(self.device.globalDevice, self.renderPass, null);
 
-    //
-    //  // cleanup synchronization objects
-    //  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    //    vkDestroySemaphore(device.device(), renderFinishedSemaphores[i], nullptr);
-    //    vkDestroySemaphore(device.device(), imageAvailableSemaphores[i], nullptr);
-    //    vkDestroyFence(device.device(), inFlightFences[i], nullptr);
-    //  }
+    // Sync primitives.
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         c.vkDestroySemaphore(self.device.globalDevice, self.renderFinishedSemaphores[i], null);
         c.vkDestroySemaphore(self.device.globalDevice, self.imageAvailableSemaphores[i], null);
         c.vkDestroyFence(self.device.globalDevice, self.inFlightFences[i], null);
+    }
+
+    // Finally, destroy the swapchain itself, which also destroys the
+    // VkImages it owns (i.e. self.swapChainImages).
+    if (self.swapChain != null) {
+        c.vkDestroySwapchainKHR(self.device.globalDevice, self.swapChain, null);
+        self.swapChain = null;
     }
 }
 

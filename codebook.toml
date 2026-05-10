@@ -26,6 +26,8 @@ words = [
     "oom",
     "optionals",
     "pkgs",
+    "pkill",
+    "programmatically",
     "raii",
     "shader",
     "shaderc",
@@ -41,6 +43,6 @@ words = [
     "workson",
     "zeditor",
     "zls",
-    "zon"
+    "zon",
 ]
 ignore_paths = ["flake.lock"]
