@@ -38,8 +38,8 @@ pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurface
 
 pub fn getExtend(self: *Self) c.VkExtent2D {
     return .{
-        .width = self.width,
-        .height = self.height,
+        .width = @intCast(self.width),
+        .height = @intCast(self.height),
     };
 }
 // Helper for tests: try to bring up a Window, but skip the test when the

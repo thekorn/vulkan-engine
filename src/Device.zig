@@ -175,30 +175,31 @@ pub fn findSupportedFormat(self: *Self, candidates: []const c.VkFormat, tiling: 
     return error.NoSupportedFormatFound;
 }
 
-pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, properties: c.VkMemoryPropertyFlags, image: c.VkImage, imageMemory: *c.VkDeviceMemory) !void {
-    try checkSuccess(c.vkCreateImage(self.globalDevice, &imageInfo, null, &image));
+pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, properties: c.VkMemoryPropertyFlags, image: *c.VkImage, imageMemory: *c.VkDeviceMemory) !void {
+    try checkSuccess(c.vkCreateImage(self.globalDevice, imageInfo, null, image));
 
     var memRequirements: c.VkMemoryRequirements = undefined;
-    c.vkGetImageMemoryRequirements(self.globalDevice, image, &memRequirements);
+    c.vkGetImageMemoryRequirements(self.globalDevice, image.*, &memRequirements);
 
     const allocInfo = c.VkMemoryAllocateInfo{
         .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memRequirements.size,
-        .memoryTypeIndex = self.findMemoryType(memRequirements.memoryTypeBits, properties),
+        .memoryTypeIndex = try self.findMemoryType(memRequirements.memoryTypeBits, properties),
     };
 
-    try checkSuccess(c.vkAllocateMemory(self.globalDevice, &allocInfo, null, &imageMemory));
-    try checkSuccess(c.vkBindImageMemory(self.globalDevice, image, imageMemory, 0));
+    try checkSuccess(c.vkAllocateMemory(self.globalDevice, &allocInfo, null, imageMemory));
+    try checkSuccess(c.vkBindImageMemory(self.globalDevice, image.*, imageMemory.*, 0));
 }
 
-pub fn findMemoryType(self: *Self, typeFilter: usize, properties: c.VkMemoryPropertyFlags) !void {
+pub fn findMemoryType(self: *Self, typeFilter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
     var memProperties: c.VkPhysicalDeviceMemoryProperties = undefined;
     c.vkGetPhysicalDeviceMemoryProperties(self.physicalDevice, &memProperties);
     for (0..memProperties.memoryTypeCount) |i| {
-        if ((typeFilter & (1 << i)) and
+        const bit: u32 = @as(u32, 1) << @intCast(i);
+        if ((typeFilter & bit) != 0 and
             (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
         {
-            return i;
+            return @intCast(i);
         }
     }
     return error.NoSuitableMemoryTypeFound;
