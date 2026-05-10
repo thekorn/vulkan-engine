@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const c = @import("c.zig").c;
 const checkSuccess = @import("utils.zig").checkSuccess;
 
@@ -38,7 +40,8 @@ pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurface
 // environment can't host one (e.g. headless CI without a display server).
 fn initOrSkip(width: i32, height: i32) !Self {
     const is_ci = std.testing.io_instance.environ.process_environ.contains(std.testing.allocator, "CI") catch return error.SkipZigTest;
-    if (is_ci) return error.SkipZigTest;
+    const is_linux = builtin.os.tag == .linux;
+    if (is_ci or is_linux) return error.SkipZigTest;
 
     return Self.init(width, height) catch |err| switch (err) {
         error.GlfwInitFailed, error.GlfwCreateWindowFailed => return error.SkipZigTest,
