@@ -33,6 +33,7 @@ words = [
     "spir",
     "spir-v",
     "spv",
+    "srgb",
     "stdenv",
     "subpass",
     "swapchain",
@@ -40,6 +41,6 @@ words = [
     "workson",
     "zeditor",
     "zls",
-    "zon",
+    "zon"
 ]
 ignore_paths = ["flake.lock"]
