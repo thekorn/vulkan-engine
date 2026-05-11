@@ -33,7 +33,9 @@ fn addShader(b: *std.Build, exe: anytype, in_file: []const u8, out_file: []const
 
     const output = run_cmd.addOutputFileArg(out_file);
 
-    run_cmd.addArg(full_in);
+    // Pass the input shader as a tracked file dependency so the build
+    // system re-runs glslc whenever the shader source changes.
+    run_cmd.addFileArg(b.path(full_in));
     exe.step.dependOn(&run_cmd.step);
 
     exe.root_module.addAnonymousImport(out_file, .{
