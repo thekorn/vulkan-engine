@@ -98,8 +98,13 @@ pub fn deinit(self: *Self) void {
     c.vkDestroyRenderPass(self.device.globalDevice, self.renderPass, null);
 
     // Sync primitives.
+    // renderFinishedSemaphores has one entry per swapchain image (see
+    // createSyncObjects), while imageAvailableSemaphores and inFlightFences
+    // are sized to MAX_FRAMES_IN_FLIGHT.
+    for (self.renderFinishedSemaphores) |sem| {
+        c.vkDestroySemaphore(self.device.globalDevice, sem, null);
+    }
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
-        c.vkDestroySemaphore(self.device.globalDevice, self.renderFinishedSemaphores[i], null);
         c.vkDestroySemaphore(self.device.globalDevice, self.imageAvailableSemaphores[i], null);
         c.vkDestroyFence(self.device.globalDevice, self.inFlightFences[i], null);
     }
@@ -146,17 +151,67 @@ pub fn findDepthFormat(device: *Device) !c.VkFormat {
     );
 }
 
-pub fn acquireNextImage(self: *Self, index: *usize) !c.VkResult {
-    _ = self;
-    _ = index;
-    return 0;
+pub fn acquireNextImage(self: *Self, imageIndex: *u32) !c.VkResult {
+    try checkSuccess(c.vkWaitForFences(
+        self.device.globalDevice,
+        1,
+        &self.inFlightFences[self.currentFrame],
+        c.VK_TRUE,
+        std.math.maxInt(u64),
+    ));
+
+    return c.vkAcquireNextImageKHR(
+        self.device.globalDevice,
+        self.swapChain,
+        std.math.maxInt(u64),
+        self.imageAvailableSemaphores[self.currentFrame], // must be a not signaled semaphore
+        null,
+        imageIndex,
+    );
 }
 
-pub fn submitCommandBuffers(self: *Self, buffers: *c.VkCommandBuffer, index: *usize) !c.VkResult {
-    _ = self;
-    _ = index;
-    _ = buffers;
-    return 0;
+pub fn submitCommandBuffers(self: *Self, buffers: *c.VkCommandBuffer, imageIndex: *u32) !c.VkResult {
+    if (self.imagesInFlight[imageIndex.*] != null) {
+        _ = c.vkWaitForFences(self.device.globalDevice, 1, &self.imagesInFlight[imageIndex.*], c.VK_TRUE, std.math.maxInt(u64));
+    }
+    self.imagesInFlight[imageIndex.*] = self.inFlightFences[self.currentFrame];
+
+    // The render-finished semaphore is keyed by the *image index*, not the
+    // frame index. vkQueuePresentKHR waits on this semaphore but does not
+    // un-signal it, so reusing one based on `currentFrame` (range
+    // MAX_FRAMES_IN_FLIGHT) breaks when the swapchain has more images than
+    // frames in flight (e.g. 3 images on MoltenVK). See
+    // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html
+    var signalSemaphores: [1]c.VkSemaphore = .{self.renderFinishedSemaphores[imageIndex.*]};
+    var waitSemaphores: [1]c.VkSemaphore = .{self.imageAvailableSemaphores[self.currentFrame]};
+    var waitDstStageMask: [1]c.VkPipelineStageFlags = .{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    const submitInfo: c.VkSubmitInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &waitSemaphores,
+        .pWaitDstStageMask = &waitDstStageMask,
+        .commandBufferCount = 1,
+        .pCommandBuffers = buffers,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &signalSemaphores,
+    };
+
+    _ = c.vkResetFences(self.device.globalDevice, 1, &self.inFlightFences[self.currentFrame]);
+    try checkSuccess(c.vkQueueSubmit(self.device.graphicsQueue, 1, &submitInfo, self.inFlightFences[self.currentFrame]));
+
+    var swapChains: [1]c.VkSwapchainKHR = .{self.swapChain};
+    const presentInfo: c.VkPresentInfoKHR = .{
+        .sType = c.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &signalSemaphores,
+        .swapchainCount = 1,
+        .pSwapchains = &swapChains,
+        .pImageIndices = imageIndex,
+    };
+    const result = c.vkQueuePresentKHR(self.device.presentQueue, &presentInfo);
+    self.currentFrame = (self.currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    return result;
 }
 
 const CreateSwapChainResult = struct {
@@ -395,9 +450,20 @@ fn createSyncObjects(
     createSwapChainResult: CreateSwapChainResult,
 ) !CreateSyncObjectsResult {
     var imageAvailableSemaphores = try alloc.alloc(c.VkSemaphore, MAX_FRAMES_IN_FLIGHT);
-    var renderFinishedSemaphores = try alloc.alloc(c.VkSemaphore, MAX_FRAMES_IN_FLIGHT);
+    // One render-finished semaphore per swapchain image (not per frame in
+    // flight). vkQueuePresentKHR waits on this semaphore but does not
+    // un-signal it, so it must be uniquely associated with the swapchain
+    // image whose presentation it gates. Indexing by `currentFrame` (range
+    // MAX_FRAMES_IN_FLIGHT) breaks when the swapchain has more images than
+    // frames in flight.
+    var renderFinishedSemaphores = try alloc.alloc(c.VkSemaphore, createSwapChainResult.images.len);
     var inFlightFences = try alloc.alloc(c.VkFence, MAX_FRAMES_IN_FLIGHT);
-    var imagesInFlight = try alloc.alloc(c.VkFence, createSwapChainResult.images.len);
+    const imagesInFlight = try alloc.alloc(c.VkFence, createSwapChainResult.images.len);
+    // The swapchain may contain more images than MAX_FRAMES_IN_FLIGHT (e.g. 3
+    // on MoltenVK). Every slot must start as VK_NULL_HANDLE, otherwise
+    // submitCommandBuffers will read uninitialized memory and pass a bogus
+    // fence handle to vkWaitForFences, which crashes the driver.
+    @memset(imagesInFlight, null);
 
     const semaphoreInfo = c.VkSemaphoreCreateInfo{
         .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -410,9 +476,10 @@ fn createSyncObjects(
 
     for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         try checkSuccess(c.vkCreateSemaphore(device.globalDevice, &semaphoreInfo, null, &imageAvailableSemaphores[i]));
-        try checkSuccess(c.vkCreateSemaphore(device.globalDevice, &semaphoreInfo, null, &renderFinishedSemaphores[i]));
         try checkSuccess(c.vkCreateFence(device.globalDevice, &fenceInfo, null, &inFlightFences[i]));
-        imagesInFlight[i] = null;
+    }
+    for (0..renderFinishedSemaphores.len) |i| {
+        try checkSuccess(c.vkCreateSemaphore(device.globalDevice, &semaphoreInfo, null, &renderFinishedSemaphores[i]));
     }
     return .{
         .imageAvailableSemaphores = imageAvailableSemaphores,
@@ -444,12 +511,13 @@ fn chooseSwapPresentMode(availablePresentModes: *[]c.VkPresentModeKHR) c.VkPrese
         }
     }
 
-    for (availablePresentModes.*) |availablePresentMode| {
-        if (availablePresentMode == c.VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            std.log.scoped(.swapchain).info("Present mode: Immediate", .{});
-            return availablePresentMode;
-        }
-    }
+    // see above, video describes why this should not be used
+    //    for (availablePresentModes.*) |availablePresentMode| {
+    //        if (availablePresentMode == c.VK_PRESENT_MODE_IMMEDIATE_KHR) {
+    //            std.log.scoped(.swapchain).info("Present mode: Immediate", .{});
+    //            return availablePresentMode;
+    //        }
+    //    }
 
     std.log.scoped(.swapchain).info("Present mode: V-Sync", .{});
     return c.VK_PRESENT_MODE_FIFO_KHR;
@@ -553,8 +621,8 @@ fn makeSelfWithExtent(extent: c.VkExtent2D) Self {
 
 test "width/height return swapChainExtent dimensions" {
     var self = makeSelfWithExtent(.{ .width = 1280, .height = 720 });
-    try std.testing.expectEqual(@as(usize, 1280), self.width());
-    try std.testing.expectEqual(@as(usize, 720), self.height());
+    try std.testing.expectEqual(@as(i32, 1280), self.width());
+    try std.testing.expectEqual(@as(i32, 720), self.height());
 }
 
 test "extentAspectRatio computes width/height" {

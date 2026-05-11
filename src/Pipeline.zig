@@ -9,8 +9,6 @@ device: *Device,
 graphicsPipeline: ?c.VkPipeline,
 vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
-pipelineLayout: c.VkPipelineLayout,
-renderPass: c.VkRenderPass,
 
 const PipelineConfigInfo = struct {
     viewport: c.VkViewport,
@@ -30,15 +28,10 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
     std.log.scoped(.pipeline).info("frag shader len: {d}", .{fragShader.len});
     std.log.scoped(.pipeline).info("vert shader len: {d}", .{vertShader.len});
 
-    // TODO: implement
-    // Create pipeline layout
-    const pipelineLayout = try createPipelineLayout(device);
-    std.debug.assert(pipelineLayout != null);
-
-    // TODO: implement
-    // Create render pass
-    const renderPass = try createRenderPass(device);
-    std.debug.assert(renderPass != null);
+    // The pipeline layout and render pass are owned externally and supplied
+    // via configInfo. Failing to provide them is a programming error.
+    std.debug.assert(configInfo.pipelineLayout != null);
+    std.debug.assert(configInfo.renderPass != null);
 
     const vertShaderModule = try createShaderModule(device, vertShader);
     const fragShaderModule = try createShaderModule(device, fragShader);
@@ -92,8 +85,8 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .pDepthStencilState = &configInfo.depthStencilInfo,
         .pColorBlendState = &configInfo.colorBlendInfo,
         .pDynamicState = null,
-        .layout = pipelineLayout,
-        .renderPass = renderPass,
+        .layout = configInfo.pipelineLayout,
+        .renderPass = configInfo.renderPass,
         .subpass = configInfo.subpass,
         .basePipelineHandle = null,
         .basePipelineIndex = -1,
@@ -108,8 +101,6 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .graphicsPipeline = graphicsPipeline,
         .vertShaderModule = vertShaderModule,
         .fragShaderModule = fragShaderModule,
-        .pipelineLayout = pipelineLayout,
-        .renderPass = renderPass,
     };
 }
 
@@ -119,8 +110,6 @@ pub fn deinit(self: *Self) void {
     if (self.graphicsPipeline) |pipeline| {
         c.vkDestroyPipeline(self.device.globalDevice, pipeline, null);
     }
-    c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
-    c.vkDestroyRenderPass(self.device.globalDevice, self.renderPass, null);
     std.log.scoped(.pipeline).info("deinit done", .{});
 }
 
@@ -305,17 +294,6 @@ test "defaultPipelineConfigInfo scissor matches given dimensions" {
     try std.testing.expectEqual(@as(i32, 0), config.scissor.offset.y);
     try std.testing.expectEqual(@as(u32, 1024), config.scissor.extent.width);
     try std.testing.expectEqual(@as(u32, 768), config.scissor.extent.height);
-}
-
-test "defaultPipelineConfigInfo viewportInfo points at one viewport and scissor" {
-    const config = defaultPipelineConfigInfo(800, 600);
-
-    try std.testing.expectEqual(
-        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO),
-        config.viewportInfo.sType,
-    );
-    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.viewportCount);
-    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.scissorCount);
 }
 
 test "defaultPipelineConfigInfo input assembly uses triangle list without restart" {

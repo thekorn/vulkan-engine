@@ -35,62 +35,16 @@ fn createPipeline(device: *Device, swapChain: *Swapchain, pipelineLayout: *c.VkP
     );
 }
 fn createCommandBuffers(alloc: std.mem.Allocator, commandBuffers: *ArrayList(c.VkCommandBuffer), swapChain: *Swapchain, device: *Device, pipeline: *Pipeline) !void {
-    //commandBuffers.resize(lveSwapChain.imageCount());
-
     try commandBuffers.resize(alloc, swapChain.getImageCount());
-    //
-    //VkCommandBufferAllocateInfo allocInfo{};
-    //allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    //allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    //allocInfo.commandPool = lveDevice.getCommandPool();
-    //allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
-    //
+
     const allocInfo: c.VkCommandBufferAllocateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandPool = device.commandPool,
         .commandBufferCount = @intCast(commandBuffers.items.len),
     };
-    //
-    //if (vkAllocateCommandBuffers(lveDevice.device(), &allocInfo, commandBuffers.data()) !=
-    //    VK_SUCCESS) {
-    //  throw std::runtime_error("failed to allocate command buffers!");
-    //}
-    //
     try checkSuccess(c.vkAllocateCommandBuffers(device.globalDevice, &allocInfo, commandBuffers.items.ptr));
-    //
-    //for (int i = 0; i < commandBuffers.size(); i++) {
-    //  VkCommandBufferBeginInfo beginInfo{};
-    //  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    //
-    //  if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) {
-    //    throw std::runtime_error("failed to begin recording command buffer!");
-    //  }
-    //
-    //  VkRenderPassBeginInfo renderPassInfo{};
-    //  renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    //  renderPassInfo.renderPass = lveSwapChain.getRenderPass();
-    //  renderPassInfo.framebuffer = lveSwapChain.getFrameBuffer(i);
-    //
-    //  renderPassInfo.renderArea.offset = {0, 0};
-    //  renderPassInfo.renderArea.extent = lveSwapChain.getSwapChainExtent();
-    //
-    //  std::array<VkClearValue, 2> clearValues{};
-    //  clearValues[0].color = {0.1f, 0.1f, 0.1f, 1.0f};
-    //  clearValues[1].depthStencil = {1.0f, 0};
-    //  renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    //  renderPassInfo.pClearValues = clearValues.data();
-    //
-    //  vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    //
-    //  lvePipeline->bind(commandBuffers[i]);
-    //  vkCmdDraw(commandBuffers[i], 3, 1, 0, 0);
-    //
-    //  vkCmdEndRenderPass(commandBuffers[i]);
-    //  if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) {
-    //    throw std::runtime_error("failed to record command buffer!");
-    //  }
-    //}
+
     for (commandBuffers.items, 0..) |cmdBuf, i| {
         const beginInfo: c.VkCommandBufferBeginInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -127,6 +81,16 @@ fn createCommandBuffers(alloc: std.mem.Allocator, commandBuffers: *ArrayList(c.V
     }
 }
 
+fn drawFrame(swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer)) !void {
+    var imageIndex: u32 = undefined;
+    const result = try swapChain.acquireNextImage(&imageIndex);
+    switch (result) {
+        c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
+        else => return error.Unexpected,
+    }
+    try checkSuccess(try swapChain.submitCommandBuffers(&commandBuffers.items[imageIndex], &imageIndex));
+}
+
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
@@ -150,12 +114,14 @@ pub fn main() !void {
 
     var pipelineLayout: c.VkPipelineLayout = undefined;
     try createPipelineLayout(&device, &pipelineLayout);
+    defer c.vkDestroyPipelineLayout(device.globalDevice, pipelineLayout, null);
 
     try createPipeline(&device, &swapChain, &pipelineLayout, pipeline);
     try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline);
 
     while (loop.is_running()) {
         c.glfwPollEvents();
+        try drawFrame(&swapChain, &commandBuffers);
     }
 
     // Wait for the device to become idle so the GPU isn't using any of
