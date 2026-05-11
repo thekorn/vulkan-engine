@@ -15,7 +15,6 @@ renderPass: c.VkRenderPass,
 const PipelineConfigInfo = struct {
     viewport: c.VkViewport,
     scissor: c.VkRect2D,
-    viewportInfo: c.VkPipelineViewportStateCreateInfo,
     inputAssemblyInfo: c.VkPipelineInputAssemblyStateCreateInfo,
     rasterizationInfo: c.VkPipelineRasterizationStateCreateInfo,
     multisampleInfo: c.VkPipelineMultisampleStateCreateInfo,
@@ -73,13 +72,21 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .pVertexAttributeDescriptions = null,
     };
 
+    const viewportInfo: c.VkPipelineViewportStateCreateInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &configInfo.viewport,
+        .scissorCount = 1,
+        .pScissors = &configInfo.scissor,
+    };
+
     const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 2,
         .pStages = &shaderStages,
         .pVertexInputState = &vertexInputInfo,
         .pInputAssemblyState = &configInfo.inputAssemblyInfo,
-        .pViewportState = &configInfo.viewportInfo,
+        .pViewportState = &viewportInfo,
         .pRasterizationState = &configInfo.rasterizationInfo,
         .pMultisampleState = &configInfo.multisampleInfo,
         .pDepthStencilState = &configInfo.depthStencilInfo,
@@ -117,6 +124,10 @@ pub fn deinit(self: *Self) void {
     std.log.scoped(.pipeline).info("deinit done", .{});
 }
 
+pub fn bind(self: *Self, commandBuffer: c.VkCommandBuffer) void {
+    c.vkCmdBindPipeline(commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipeline orelse unreachable);
+}
+
 // see: https://pastebin.com/EmsJWHzb
 pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
     const viewport: c.VkViewport = .{
@@ -146,13 +157,6 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
     return .{
         .viewport = viewport,
         .scissor = scissor,
-        .viewportInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            .viewportCount = 1,
-            .pViewports = &viewport,
-            .scissorCount = 1,
-            .pScissors = &scissor,
-        },
         .inputAssemblyInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,

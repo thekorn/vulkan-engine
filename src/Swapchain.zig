@@ -112,6 +112,10 @@ pub fn deinit(self: *Self) void {
     }
 }
 
+pub fn getImageCount(self: *Self) usize {
+    return self.swapChainImages.len;
+}
+
 pub fn getFrameBuffer(self: *Self, index: usize) c.VkFramebuffer {
     return self.swapChainFramebuffers[index];
 }
@@ -120,11 +124,11 @@ pub fn getImageView(self: *Self, index: usize) c.VkImageView {
     return self.swapChainImageViews[index];
 }
 
-pub fn width(self: *Self) usize {
-    return self.swapChainExtent.width;
+pub fn width(self: *Self) i32 {
+    return @intCast(self.swapChainExtent.width);
 }
-pub fn height(self: *Self) usize {
-    return self.swapChainExtent.height;
+pub fn height(self: *Self) i32 {
+    return @intCast(self.swapChainExtent.height);
 }
 
 pub fn extentAspectRatio(self: *Self) f32 {
@@ -432,7 +436,7 @@ fn chooseSwapSurfaceFormat(availableFormats: *[]c.VkSurfaceFormatKHR) c.VkSurfac
 }
 
 fn chooseSwapPresentMode(availablePresentModes: *[]c.VkPresentModeKHR) c.VkPresentModeKHR {
-    // TODO: switch
+    // see: https://youtu.be/IUYH74MqxOA?si=raiLb25OF3AeqPXC&t=518
     for (availablePresentModes.*) |availablePresentMode| {
         if (availablePresentMode == c.VK_PRESENT_MODE_MAILBOX_KHR) {
             std.log.scoped(.swapchain).info("Present mode: Mailbox", .{});
@@ -440,14 +444,12 @@ fn chooseSwapPresentMode(availablePresentModes: *[]c.VkPresentModeKHR) c.VkPrese
         }
     }
 
-    // also commented out upstream
-    // for (availablePresentModes) |availablePresentMode| {
-    //     if (availablePresentMode == c.VK_PRESENT_MODE_IMMEDIATE_KHR) {
-    //
-    //         std.log.scoped(.swapchain).info("Present mode: Immediate", .{});
-    //       return availablePresentMode;
-    //     }
-    //   }
+    for (availablePresentModes.*) |availablePresentMode| {
+        if (availablePresentMode == c.VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            std.log.scoped(.swapchain).info("Present mode: Immediate", .{});
+            return availablePresentMode;
+        }
+    }
 
     std.log.scoped(.swapchain).info("Present mode: V-Sync", .{});
     return c.VK_PRESENT_MODE_FIFO_KHR;

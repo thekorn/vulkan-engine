@@ -4,6 +4,6 @@
   },
   "format_on_save": "on",
   "languages": {},
-  "language_servers": ["zls", "codebook", "nixd"],
+  "language_servers": ["zls", "codebook", "nixd", "glsl"],
   "lsp": {},
 }

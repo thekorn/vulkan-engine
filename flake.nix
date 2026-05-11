@@ -47,9 +47,6 @@
             ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL ]);
 
           shellHook = ''
-            # Issue: https://github.com/ziglang/zig/issues/18998
-            # workaround warnings like `warning: Unrecognized C flag from NIX_CFLAGS_COMPILE: -fmacro-prefix-map=`
-            unset NIX_CFLAGS_COMPILE
             alias zed='zeditor'
           '';
 
