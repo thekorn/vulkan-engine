@@ -9,5 +9,18 @@ pub const c = @cImport({
 // the `__attribute` macro, which we don't want to leak into glfw/vulkan
 // headers.
 pub const cglm = @cImport({
-    @cInclude("cglm_wrapper.h");
+    @cDefine("__attribute(x)", "__attribute__(x)");
+    @cUndef("__ARM_NEON");
+
+    @cUndef("__ARM_NEON__");
+    @cUndef("__ARM_NEON_FP");
+    @cUndef("_M_ARM64");
+    @cUndef("_M_ARM64EC");
+    @cUndef("CGLM_NEON_FP");
+
+    @cUndef("__SSE__");
+    @cUndef("__SSE2__");
+    @cUndef("__AVX__");
+
+    @cInclude("cglm/cglm.h");
 });

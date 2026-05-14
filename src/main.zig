@@ -6,6 +6,7 @@ const Loop = @import("Loop.zig");
 const Pipeline = @import("Pipeline.zig");
 const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
+const Model = @import("Model.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
 
@@ -91,6 +92,13 @@ fn drawFrame(swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer
     try checkSuccess(try swapChain.submitCommandBuffers(&commandBuffers.items[imageIndex], &imageIndex));
 }
 
+fn loadModels(alloc: std.mem.Allocator, device: *Device) !Model {
+    var vertices: ArrayList(Model.Vertex) = .empty;
+    defer vertices.deinit(alloc);
+
+    return try Model.init(device, &vertices);
+}
+
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
@@ -111,6 +119,9 @@ pub fn main() !void {
 
     var swapChain = try Swapchain.init(alloc, &device, &window);
     defer swapChain.deinit();
+
+    var model = try loadModels(alloc, &device);
+    defer model.deinit();
 
     var pipelineLayout: c.VkPipelineLayout = undefined;
     try createPipelineLayout(&device, &pipelineLayout);
