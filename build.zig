@@ -59,6 +59,9 @@ pub fn build(b: *std.Build) void {
     //exe.linkLibC();
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
+    exe.root_module.linkSystemLibrary("cglm", .{});
+    // Allow `@cInclude("cglm_wrapper.h")` to resolve to src/cglm_wrapper.h.
+    exe.root_module.addIncludePath(b.path("src"));
 
     if (target.result.os.tag == .linux) {
         exe.root_module.linkSystemLibrary("gl", .{});
