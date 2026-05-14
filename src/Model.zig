@@ -14,6 +14,7 @@ vertexBufferMemory: c.VkDeviceMemory = undefined,
 
 pub const Vertex = struct {
     position: @Vector(2, f32),
+    color: @Vector(3, f32),
 
     pub fn getBindingDescriptions() [1]c.VkVertexInputBindingDescription {
         return [1]c.VkVertexInputBindingDescription{
@@ -25,13 +26,19 @@ pub const Vertex = struct {
         };
     }
 
-    pub fn getAttributeDescriptions() [1]c.VkVertexInputAttributeDescription {
-        return [1]c.VkVertexInputAttributeDescription{
+    pub fn getAttributeDescriptions() [2]c.VkVertexInputAttributeDescription {
+        return [2]c.VkVertexInputAttributeDescription{
             c.VkVertexInputAttributeDescription{
                 .location = 0,
                 .binding = 0,
                 .format = c.VK_FORMAT_R32G32_SFLOAT,
-                .offset = 0, //@offsetOf(Vertex, "position"),
+                .offset = @offsetOf(Vertex, "position"),
+            },
+            c.VkVertexInputAttributeDescription{
+                .location = 1,
+                .binding = 0,
+                .format = c.VK_FORMAT_R32G32B32_SFLOAT,
+                .offset = @offsetOf(Vertex, "color"),
             },
         };
     }
@@ -87,11 +94,17 @@ pub fn bind(self: Self, commandBuffer: c.VkCommandBuffer) void {
 }
 
 test "Vertex has expected size and position field" {
-    try std.testing.expectEqual(@as(usize, 2 * @sizeOf(f32)), @sizeOf(Vertex));
+    // Zig reorders struct fields by alignment (descending). `@Vector(3, f32)`
+    // has alignment 16, so `color` is placed first and `position` second,
+    // padded to a 16-byte alignment boundary. Hence sizeof = 32, not 20.
+    try std.testing.expectEqual(@as(usize, 32), @sizeOf(Vertex));
 
-    const v = Vertex{ .position = .{ 1.0, 2.0 } };
+    const v = Vertex{ .position = .{ 1.0, 2.0 }, .color = .{ 1.0, 0.0, 0.0 } };
     try std.testing.expectEqual(@as(f32, 1.0), v.position[0]);
     try std.testing.expectEqual(@as(f32, 2.0), v.position[1]);
+    try std.testing.expectEqual(@as(f32, 1.0), v.color[0]);
+    try std.testing.expectEqual(@as(f32, 0.0), v.color[1]);
+    try std.testing.expectEqual(@as(f32, 0.0), v.color[2]);
 }
 
 test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
@@ -109,14 +122,16 @@ test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
 test "Vertex.getAttributeDescriptions returns a single R32G32_SFLOAT position attribute" {
     const attrs = Vertex.getAttributeDescriptions();
 
-    try std.testing.expectEqual(@as(usize, 1), attrs.len);
+    try std.testing.expectEqual(@as(usize, 2), attrs.len);
     try std.testing.expectEqual(@as(u32, 0), attrs[0].location);
     try std.testing.expectEqual(@as(u32, 0), attrs[0].binding);
     try std.testing.expectEqual(
         @as(c_uint, c.VK_FORMAT_R32G32_SFLOAT),
         attrs[0].format,
     );
-    try std.testing.expectEqual(@as(u32, 0), attrs[0].offset);
+    // `position` is placed after `color` in memory due to alignment-based
+    // field reordering, so its offset is 16 (after the 16-byte color vector).
+    try std.testing.expectEqual(@as(u32, @offsetOf(Vertex, "position")), attrs[0].offset);
 }
 
 test "Model has expected fields and types" {
@@ -144,8 +159,8 @@ test "createVertexBuffers rejects fewer than 3 vertices" {
     try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, empty));
 
     const two = [_]Vertex{
-        .{ .position = .{ 0.0, 0.0 } },
-        .{ .position = .{ 1.0, 0.0 } },
+        .{ .position = .{ 0.0, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .position = .{ 1.0, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
     };
     try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, two[0..]));
 }

@@ -33,6 +33,7 @@ words = [
     "pkill",
     "programmatically",
     "raii",
+    "sfloat",
     "shader",
     "shaderc",
     "shaders",

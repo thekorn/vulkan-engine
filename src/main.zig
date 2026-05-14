@@ -102,9 +102,9 @@ fn drawFrame(swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer
 
 fn loadModels(device: *Device) !Model {
     const vertices = [_]Model.Vertex{
-        Model.Vertex{ .position = .{ 0.0, -0.5 } },
-        Model.Vertex{ .position = .{ 0.5, 0.5 } },
-        Model.Vertex{ .position = .{ -0.5, 0.5 } },
+        Model.Vertex{ .position = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
+        Model.Vertex{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
+        Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
     };
 
     return try Model.init(device, vertices[0..]);
