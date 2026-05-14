@@ -126,7 +126,7 @@ test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
     );
 }
 
-test "Vertex.getAttributeDescriptions returns a single R32G32_SFLOAT position attribute" {
+test "Vertex.getAttributeDescriptions returns a R32G32_SFLOAT position attribute and a R32G32B32_SFLOAT color attribute" {
     const attrs = Vertex.getAttributeDescriptions();
 
     try std.testing.expectEqual(@as(usize, 2), attrs.len);
