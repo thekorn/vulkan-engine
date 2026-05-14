@@ -160,4 +160,5 @@ test {
     _ = @import("Window.zig");
     _ = @import("Swapchain.zig");
     _ = @import("Loop.zig");
+    _ = @import("Model.zig");
 }

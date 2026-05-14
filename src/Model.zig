@@ -85,3 +85,67 @@ pub fn bind(self: Self, commandBuffer: c.VkCommandBuffer) void {
     var offsets: [1]u64 = [1]u64{0};
     c.vkCmdBindVertexBuffers(commandBuffer, 0, 1, &buffers, &offsets);
 }
+
+test "Vertex has expected size and position field" {
+    try std.testing.expectEqual(@as(usize, 2 * @sizeOf(f32)), @sizeOf(Vertex));
+
+    const v = Vertex{ .position = .{ 1.0, 2.0 } };
+    try std.testing.expectEqual(@as(f32, 1.0), v.position[0]);
+    try std.testing.expectEqual(@as(f32, 2.0), v.position[1]);
+}
+
+test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
+    const bindings = Vertex.getBindingDescriptions();
+
+    try std.testing.expectEqual(@as(usize, 1), bindings.len);
+    try std.testing.expectEqual(@as(u32, 0), bindings[0].binding);
+    try std.testing.expectEqual(@as(u32, @sizeOf(Vertex)), bindings[0].stride);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_VERTEX_INPUT_RATE_VERTEX),
+        bindings[0].inputRate,
+    );
+}
+
+test "Vertex.getAttributeDescriptions returns a single R32G32_SFLOAT position attribute" {
+    const attrs = Vertex.getAttributeDescriptions();
+
+    try std.testing.expectEqual(@as(usize, 1), attrs.len);
+    try std.testing.expectEqual(@as(u32, 0), attrs[0].location);
+    try std.testing.expectEqual(@as(u32, 0), attrs[0].binding);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_FORMAT_R32G32_SFLOAT),
+        attrs[0].format,
+    );
+    try std.testing.expectEqual(@as(u32, 0), attrs[0].offset);
+}
+
+test "Model has expected fields and types" {
+    const fields = @typeInfo(Self).@"struct".fields;
+
+    try std.testing.expectEqual(@as(usize, 4), fields.len);
+    try std.testing.expectEqualStrings("device", fields[0].name);
+    try std.testing.expectEqual(*Device, fields[0].type);
+    try std.testing.expectEqualStrings("vertexCount", fields[1].name);
+    try std.testing.expectEqual(u32, fields[1].type);
+    try std.testing.expectEqualStrings("vertexBuffer", fields[2].name);
+    try std.testing.expectEqual(c.VkBuffer, fields[2].type);
+    try std.testing.expectEqualStrings("vertexBufferMemory", fields[3].name);
+    try std.testing.expectEqual(c.VkDeviceMemory, fields[3].type);
+}
+
+test "createVertexBuffers rejects fewer than 3 vertices" {
+    var device: Device = undefined;
+    var model = Self{
+        .device = &device,
+        .vertexCount = 0,
+    };
+
+    const empty: []const Vertex = &.{};
+    try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, empty));
+
+    const two = [_]Vertex{
+        .{ .position = .{ 0.0, 0.0 } },
+        .{ .position = .{ 1.0, 0.0 } },
+    };
+    try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, two[0..]));
+}
