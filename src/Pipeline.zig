@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("c.zig").c;
 const Device = @import("Device.zig");
+const Model = @import("Model.zig");
 
 const checkSuccess = @import("utils.zig").checkSuccess;
 
@@ -57,12 +58,15 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         },
     };
 
+    const bindingDescriptions = Model.Vertex.getBindingDescriptions();
+    const attributeDescriptions = Model.Vertex.getAttributeDescriptions();
+
     const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 0,
-        .pVertexBindingDescriptions = null,
-        .vertexAttributeDescriptionCount = 0,
-        .pVertexAttributeDescriptions = null,
+        .vertexBindingDescriptionCount = bindingDescriptions.len,
+        .pVertexBindingDescriptions = &bindingDescriptions,
+        .vertexAttributeDescriptionCount = attributeDescriptions.len,
+        .pVertexAttributeDescriptions = &attributeDescriptions,
     };
 
     const viewportInfo: c.VkPipelineViewportStateCreateInfo = .{

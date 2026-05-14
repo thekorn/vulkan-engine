@@ -204,3 +204,33 @@ pub fn findMemoryType(self: *Self, typeFilter: u32, properties: c.VkMemoryProper
     }
     return error.NoSuitableMemoryTypeFound;
 }
+
+pub fn createBuffer(
+    self: *Self,
+    size: u64,
+    usage: c.VkBufferUsageFlags,
+    properties: c.VkMemoryPropertyFlags,
+    buffer: *c.VkBuffer,
+    bufferMemory: *c.VkDeviceMemory,
+) !void {
+    const bufferInfo = c.VkBufferCreateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    try checkSuccess(c.vkCreateBuffer(self.globalDevice, &bufferInfo, null, buffer));
+
+    var memRequirements: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(self.globalDevice, buffer.*, &memRequirements);
+
+    const allocInfo = c.VkMemoryAllocateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = try self.findMemoryType(memRequirements.memoryTypeBits, properties),
+    };
+
+    try checkSuccess(c.vkAllocateMemory(self.globalDevice, &allocInfo, null, bufferMemory));
+    try checkSuccess(c.vkBindBufferMemory(self.globalDevice, buffer.*, bufferMemory.*, 0));
+}

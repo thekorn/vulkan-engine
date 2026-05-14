@@ -43,6 +43,7 @@
             with pkgs;
             [
               glfw
+              cglm
             ]
             ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL ]);
 
