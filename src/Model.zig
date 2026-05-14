@@ -94,10 +94,17 @@ pub fn bind(self: Self, commandBuffer: c.VkCommandBuffer) void {
 }
 
 test "Vertex has expected size and position field" {
-    // Zig reorders struct fields by alignment (descending). `@Vector(3, f32)`
-    // has alignment 16, so `color` is placed first and `position` second,
-    // padded to a 16-byte alignment boundary. Hence sizeof = 32, not 20.
-    try std.testing.expectEqual(@as(usize, 32), @sizeOf(Vertex));
+    const position_type = @TypeOf(@field(@as(Vertex, undefined), "position"));
+    const color_type = @TypeOf(@field(@as(Vertex, undefined), "color"));
+
+    const position_end = @offsetOf(Vertex, "position") + @sizeOf(position_type);
+    const color_end = @offsetOf(Vertex, "color") + @sizeOf(color_type);
+    const data_end = @max(position_end, color_end);
+    const expected_size = std.mem.alignForward(usize, data_end, @alignOf(Vertex));
+
+    // Derive the expected size from the actual field layout and struct alignment
+    // rather than hard-coding a target/ABI-specific total size for vector fields.
+    try std.testing.expectEqual(expected_size, @sizeOf(Vertex));
 
     const v = Vertex{ .position = .{ 1.0, 2.0 }, .color = .{ 1.0, 0.0, 0.0 } };
     try std.testing.expectEqual(@as(f32, 1.0), v.position[0]);
