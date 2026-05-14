@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
+const cglm = @import("c.zig").cglm;
 const Device = @import("Device.zig");
 const Loop = @import("Loop.zig");
 const Pipeline = @import("Pipeline.zig");
@@ -35,7 +36,14 @@ fn createPipeline(device: *Device, swapChain: *Swapchain, pipelineLayout: *c.VkP
         pipelineConfig,
     );
 }
-fn createCommandBuffers(alloc: std.mem.Allocator, commandBuffers: *ArrayList(c.VkCommandBuffer), swapChain: *Swapchain, device: *Device, pipeline: *Pipeline) !void {
+fn createCommandBuffers(
+    alloc: std.mem.Allocator,
+    commandBuffers: *ArrayList(c.VkCommandBuffer),
+    swapChain: *Swapchain,
+    device: *Device,
+    pipeline: *Pipeline,
+    model: *Model,
+) !void {
     try commandBuffers.resize(alloc, swapChain.getImageCount());
 
     const allocInfo: c.VkCommandBufferAllocateInfo = .{
@@ -75,7 +83,8 @@ fn createCommandBuffers(alloc: std.mem.Allocator, commandBuffers: *ArrayList(c.V
         };
         c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
         pipeline.bind(cmdBuf);
-        c.vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+        model.bind(cmdBuf);
+        model.draw(cmdBuf);
         c.vkCmdEndRenderPass(cmdBuf);
 
         try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
@@ -92,11 +101,14 @@ fn drawFrame(swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer
     try checkSuccess(try swapChain.submitCommandBuffers(&commandBuffers.items[imageIndex], &imageIndex));
 }
 
-fn loadModels(alloc: std.mem.Allocator, device: *Device) !Model {
-    var vertices: ArrayList(Model.Vertex) = .empty;
-    defer vertices.deinit(alloc);
+fn loadModels(device: *Device) !Model {
+    const vertices = [_]Model.Vertex{
+        Model.Vertex{ .position = .{ 0.0, -0.5 } },
+        Model.Vertex{ .position = .{ 0.5, 0.5 } },
+        Model.Vertex{ .position = .{ -0.5, 0.5 } },
+    };
 
-    return try Model.init(device, &vertices);
+    return try Model.init(device, vertices[0..]);
 }
 
 pub fn main() !void {
@@ -120,7 +132,7 @@ pub fn main() !void {
     var swapChain = try Swapchain.init(alloc, &device, &window);
     defer swapChain.deinit();
 
-    var model = try loadModels(alloc, &device);
+    var model = try loadModels(&device);
     defer model.deinit();
 
     var pipelineLayout: c.VkPipelineLayout = undefined;
@@ -128,7 +140,7 @@ pub fn main() !void {
     defer c.vkDestroyPipelineLayout(device.globalDevice, pipelineLayout, null);
 
     try createPipeline(&device, &swapChain, &pipelineLayout, pipeline);
-    try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline);
+    try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline, &model);
 
     while (loop.is_running()) {
         c.glfwPollEvents();
