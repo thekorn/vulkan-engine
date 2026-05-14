@@ -110,6 +110,43 @@ fn loadModels(device: *Device) !Model {
     return try Model.init(device, vertices[0..]);
 }
 
+fn freeCommandBuffers(
+    alloc: std.mem.Allocator,
+    device: *Device,
+    commandBuffers: *ArrayList(c.VkCommandBuffer),
+) !void {
+    c.vkFreeCommandBuffers(device.globalDevice, device.commandPool, commandBuffers.items.len, commandBuffers.items);
+    commandBuffers.shrinkAndFree(alloc, 0);
+}
+
+fn recreateSwapChain(
+    alloc: std.mem.Allocator,
+    window: *Window,
+    device: *Device,
+    swapChain: ?*Swapchain,
+    commandBuffers: *ArrayList(c.VkCommandBuffer),
+    pipelineLayout: c.VkPipelineLayout,
+    pipeline: *Pipeline,
+) !void {
+    var extend = window.getExtend();
+    while (extend.width == 0 or extend.height == 0) {
+        extend = window.getExtend();
+        c.glfwWaitEvents();
+    }
+    c.vkDeviceWaitIdle(device.globalDevice);
+
+    if (swapChain) |sc| {
+        swapChain = try Swapchain.init(alloc, device, extend, &sc);
+        if (swapChain.imageCount() != commandBuffers.size()) {
+            freeCommandBuffers();
+            createCommandBuffers(alloc, commandBuffers, swapChain, device, pipeline, model);
+        }
+    } else {
+        swapChain = try Swapchain.init(alloc, device, extend, null);
+    }
+    try createPipeline(device, swapChain, pipelineLayout, pipeline);
+}
+
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
@@ -138,7 +175,7 @@ pub fn main() !void {
     try createPipelineLayout(&device, &pipelineLayout);
     defer c.vkDestroyPipelineLayout(device.globalDevice, pipelineLayout, null);
 
-    try createPipeline(&device, &swapChain, &pipelineLayout, pipeline);
+    try recreateSwapChain(&device, &swapChain, &pipelineLayout, pipeline);
     try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline, &model);
 
     while (loop.is_running()) {

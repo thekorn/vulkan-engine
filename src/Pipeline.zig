@@ -12,14 +12,14 @@ vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
 
 const PipelineConfigInfo = struct {
-    viewport: c.VkViewport,
-    scissor: c.VkRect2D,
     inputAssemblyInfo: c.VkPipelineInputAssemblyStateCreateInfo,
     rasterizationInfo: c.VkPipelineRasterizationStateCreateInfo,
     multisampleInfo: c.VkPipelineMultisampleStateCreateInfo,
     colorBlendAttachment: c.VkPipelineColorBlendAttachmentState,
     colorBlendInfo: c.VkPipelineColorBlendStateCreateInfo,
     depthStencilInfo: c.VkPipelineDepthStencilStateCreateInfo,
+    dynamicStateEnables: []c.VkDynamicState,
+    dynamicStateInfo: c.VkPipelineDynamicStateCreateInfo,
     pipelineLayout: c.VkPipelineLayout = null,
     renderPass: c.VkRenderPass = null,
     subpass: u32 = 0,
@@ -88,7 +88,7 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .pMultisampleState = &configInfo.multisampleInfo,
         .pDepthStencilState = &configInfo.depthStencilInfo,
         .pColorBlendState = &configInfo.colorBlendInfo,
-        .pDynamicState = null,
+        .pDynamicState = &configInfo.dynamicStateInfo,
         .layout = configInfo.pipelineLayout,
         .renderPass = configInfo.renderPass,
         .subpass = configInfo.subpass,
@@ -122,20 +122,7 @@ pub fn bind(self: *Self, commandBuffer: c.VkCommandBuffer) void {
 }
 
 // see: https://pastebin.com/EmsJWHzb
-pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
-    const viewport: c.VkViewport = .{
-        .x = 0,
-        .y = 0,
-        .width = @floatFromInt(width),
-        .height = @floatFromInt(height),
-        .minDepth = 0.0,
-        .maxDepth = 1.0,
-    };
-    const scissor: c.VkRect2D = .{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = .{ .width = @intCast(width), .height = @intCast(height) },
-    };
-
+pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
     const colorBlendAttachment: c.VkPipelineColorBlendAttachmentState = .{
         .blendEnable = c.VK_FALSE,
         .srcColorBlendFactor = c.VK_BLEND_FACTOR_ONE, // Optional
@@ -147,9 +134,11 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
         .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
     };
 
+    const dynamicStateEnables: []c.VkDynamicState = .{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
+
     return .{
-        .viewport = viewport,
-        .scissor = scissor,
+        .viewport = null,
+        .scissor = null,
         .inputAssemblyInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -198,6 +187,14 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
             .stencilTestEnable = c.VK_FALSE,
             .front = .{}, //Optional
             .back = .{}, //Optional
+        },
+
+        .dynamicStateEnables = dynamicStateEnables,
+        .dynamicStateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = dynamicStateEnables.len,
+            .pDynamicStates = &dynamicStateEnables,
+            .flag = 0,
         },
     };
 }
