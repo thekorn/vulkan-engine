@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const cglm = @import("c.zig").cglm;
 const Device = @import("Device.zig");
 const Loop = @import("Loop.zig");
 const Pipeline = @import("Pipeline.zig");
