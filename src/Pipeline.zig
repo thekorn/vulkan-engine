@@ -19,7 +19,7 @@ const PipelineConfigInfo = struct {
     colorBlendAttachment: c.VkPipelineColorBlendAttachmentState,
     colorBlendInfo: c.VkPipelineColorBlendStateCreateInfo,
     depthStencilInfo: c.VkPipelineDepthStencilStateCreateInfo,
-    dynamicStateEnables: []c.VkDynamicState,
+    dynamicStateEnables: []const c.VkDynamicState,
     dynamicStateInfo: c.VkPipelineDynamicStateCreateInfo,
     pipelineLayout: c.VkPipelineLayout = null,
     renderPass: c.VkRenderPass = null,
@@ -127,9 +127,16 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
         .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
     };
 
-    const dynamicStateEnables = [_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
+    const dynamicStateEnables: []const c.VkDynamicState = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
 
     return .{
+        .viewportInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .pViewports = null,
+            .scissorCount = 1,
+            .pScissors = null,
+        },
         .inputAssemblyInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -180,12 +187,12 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
             .back = .{}, //Optional
         },
 
-        .dynamicStateEnables = dynamicStateEnables[0..],
+        .dynamicStateEnables = dynamicStateEnables,
         .dynamicStateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            .dynamicStateCount = dynamicStateEnables.len,
-            .pDynamicStates = &dynamicStateEnables,
-            .flag = 0,
+            .dynamicStateCount = @intCast(dynamicStateEnables.len),
+            .pDynamicStates = dynamicStateEnables.ptr,
+            .flags = 0,
         },
     };
 }
