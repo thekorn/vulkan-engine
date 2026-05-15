@@ -23,7 +23,10 @@ fn createPipelineLayout(device: *Device, pipelineLayout: *c.VkPipelineLayout) !v
     };
     try checkSuccess(c.vkCreatePipelineLayout(device.globalDevice, &pipelineLayoutInfo, null, pipelineLayout));
 }
-fn createPipeline(device: *Device, swapChain: *Swapchain, pipelineLayout: *c.VkPipelineLayout, pipeline: *Pipeline) !void {
+fn createPipeline(device: *Device, swapChain: ?*Swapchain, pipelineLayout: ?*c.VkPipelineLayout, pipeline: *Pipeline) !void {
+    if (swapChain != null) return error.SwapchainAlreadyInitialized;
+    if (pipelineLayout != null) return error.PipelineLayoutAlreadyInitialized;
+
     var pipelineConfig = Pipeline.defaultPipelineConfigInfo(swapChain.width(), swapChain.height());
     pipelineConfig.renderPass = swapChain.renderPass;
     pipelineConfig.pipelineLayout = pipelineLayout.*;
@@ -123,9 +126,10 @@ fn recreateSwapChain(
     alloc: std.mem.Allocator,
     window: *Window,
     device: *Device,
+    model: *Model,
     swapChain: ?*Swapchain,
     commandBuffers: *ArrayList(c.VkCommandBuffer),
-    pipelineLayout: c.VkPipelineLayout,
+    pipelineLayout: ?*c.VkPipelineLayout,
     pipeline: *Pipeline,
 ) !void {
     var extend = window.getExtend();
@@ -133,11 +137,11 @@ fn recreateSwapChain(
         extend = window.getExtend();
         c.glfwWaitEvents();
     }
-    c.vkDeviceWaitIdle(device.globalDevice);
+    _ = c.vkDeviceWaitIdle(device.globalDevice);
 
     if (swapChain) |sc| {
-        swapChain = try Swapchain.init(alloc, device, extend, &sc);
-        if (swapChain.imageCount() != commandBuffers.size()) {
+        swapChain.* = try Swapchain.init(alloc, device, extend, sc);
+        if (swapChain.*.imageCount() != commandBuffers.size()) {
             freeCommandBuffers();
             createCommandBuffers(alloc, commandBuffers, swapChain, device, pipeline, model);
         }
@@ -165,7 +169,7 @@ pub fn main() !void {
     var pipeline = try alloc.create(Pipeline);
     defer pipeline.deinit();
 
-    var swapChain = try Swapchain.init(alloc, &device, &window);
+    var swapChain = try Swapchain.init(alloc, &device, window.getExtend(), null);
     defer swapChain.deinit();
 
     var model = try loadModels(&device);
@@ -175,7 +179,7 @@ pub fn main() !void {
     try createPipelineLayout(&device, &pipelineLayout);
     defer c.vkDestroyPipelineLayout(device.globalDevice, pipelineLayout, null);
 
-    try recreateSwapChain(&device, &swapChain, &pipelineLayout, pipeline);
+    try recreateSwapChain(alloc, &window, &device, &model, &swapChain, &commandBuffers, &pipelineLayout, pipeline);
     try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline, &model);
 
     while (loop.is_running()) {

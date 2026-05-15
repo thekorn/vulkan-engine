@@ -12,6 +12,7 @@ vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
 
 const PipelineConfigInfo = struct {
+    viewportInfo: c.VkPipelineViewportStateCreateInfo,
     inputAssemblyInfo: c.VkPipelineInputAssemblyStateCreateInfo,
     rasterizationInfo: c.VkPipelineRasterizationStateCreateInfo,
     multisampleInfo: c.VkPipelineMultisampleStateCreateInfo,
@@ -69,21 +70,13 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
         .pVertexAttributeDescriptions = &attributeDescriptions,
     };
 
-    const viewportInfo: c.VkPipelineViewportStateCreateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &configInfo.viewport,
-        .scissorCount = 1,
-        .pScissors = &configInfo.scissor,
-    };
-
     const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 2,
         .pStages = &shaderStages,
         .pVertexInputState = &vertexInputInfo,
         .pInputAssemblyState = &configInfo.inputAssemblyInfo,
-        .pViewportState = &viewportInfo,
+        .pViewportState = &configInfo.viewportInfo,
         .pRasterizationState = &configInfo.rasterizationInfo,
         .pMultisampleState = &configInfo.multisampleInfo,
         .pDepthStencilState = &configInfo.depthStencilInfo,
@@ -134,11 +127,9 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
         .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
     };
 
-    const dynamicStateEnables: []c.VkDynamicState = .{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
+    const dynamicStateEnables = [_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
 
     return .{
-        .viewport = null,
-        .scissor = null,
         .inputAssemblyInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -189,7 +180,7 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
             .back = .{}, //Optional
         },
 
-        .dynamicStateEnables = dynamicStateEnables,
+        .dynamicStateEnables = dynamicStateEnables[0..],
         .dynamicStateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
             .dynamicStateCount = dynamicStateEnables.len,

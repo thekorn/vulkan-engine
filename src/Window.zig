@@ -18,14 +18,14 @@ pub fn init(width: i32, height: i32) !Self {
 
     const window = c.glfwCreateWindow(width, height, "Vulkan", null, null) orelse return error.GlfwCreateWindowFailed;
 
-    const w = .{
+    var w: Self = .{
         .instance = window,
         .width = width,
         .height = height,
     };
 
-    c.glfwSetWindowUserPointer(window, w);
-    c.glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    c.glfwSetWindowUserPointer(window, @ptrCast(&w));
+    _ = c.glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 
     return w;
 }
@@ -58,10 +58,16 @@ pub fn resetWindowResized(self: *Self) void {
     self.framebufferResized = false;
 }
 
-fn framebufferResizeCallback(self: *Self, width: i32, height: i32) void {
-    self.framebufferResized = true;
-    self.width = width;
-    self.height = height;
+fn framebufferResizeCallback(
+    window: ?*c.GLFWwindow,
+    width: c_int,
+    height: c_int,
+) callconv(.c) void {
+    const ptr = c.glfwGetWindowUserPointer(window);
+    const w: *Self = @ptrCast(@alignCast(ptr));
+    w.framebufferResized = true;
+    w.width = width;
+    w.height = height;
 }
 
 // Helper for tests: try to bring up a Window, but skip the test when the
