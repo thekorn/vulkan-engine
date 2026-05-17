@@ -9,13 +9,14 @@ alloc: std.mem.Allocator,
 instance: *c.GLFWwindow,
 width: i32,
 height: i32,
+framebufferResized: bool = false,
 
 pub fn init(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     errdefer c.glfwTerminate();
 
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
-    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
+    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_TRUE);
 
     const window = c.glfwCreateWindow(width, height, "Vulkan", null, null) orelse return error.GlfwCreateWindowFailed;
     errdefer c.glfwDestroyWindow(window);
@@ -27,6 +28,10 @@ pub fn init(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
         .width = width,
         .height = height,
     };
+
+    c.glfwSetWindowUserPointer(window, @ptrCast(self));
+    _ = c.glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+
     return self;
 }
 
@@ -50,6 +55,28 @@ pub fn getExtend(self: *Self) c.VkExtent2D {
         .height = @intCast(self.height),
     };
 }
+
+pub fn wasWindowResized(self: *Self) bool {
+    return self.framebufferResized;
+}
+
+pub fn resetWindowResized(self: *Self) void {
+    self.framebufferResized = false;
+}
+
+fn framebufferResizeCallback(
+    window: ?*c.GLFWwindow,
+    width: c_int,
+    height: c_int,
+) callconv(.c) void {
+    std.log.scoped(.window).info("calling window resize callback", .{});
+    const ptr = c.glfwGetWindowUserPointer(window);
+    const w: *Self = @ptrCast(@alignCast(ptr));
+    w.framebufferResized = true;
+    w.width = width;
+    w.height = height;
+}
+
 // Helper for tests: try to bring up a Window, but skip the test when the
 // skipping as it's currently broken on (headless) Linux
 fn initOrSkip(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
@@ -63,12 +90,13 @@ fn initOrSkip(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
 
 test "Window has expected fields and types" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 4), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 5), info.fields.len);
 
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*c.GLFWwindow, @FieldType(Self, "instance"));
     try std.testing.expectEqual(i32, @FieldType(Self, "width"));
     try std.testing.expectEqual(i32, @FieldType(Self, "height"));
+    try std.testing.expectEqual(bool, @FieldType(Self, "framebufferResized"));
 }
 
 test "Window.init stores the requested dimensions" {
