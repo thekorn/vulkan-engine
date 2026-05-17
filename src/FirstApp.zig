@@ -197,6 +197,7 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
     try checkSuccess(c.vkBeginCommandBuffer(cmdBuf, &beginInfo));
 
     var clearValues: ArrayList(c.VkClearValue) = .empty;
+    defer clearValues.deinit(self.alloc);
     try clearValues.append(self.alloc, .{
         .color = .{
             .float32 = .{ 0.1, 0.1, 0.1, 1.0 },
