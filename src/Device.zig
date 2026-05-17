@@ -19,7 +19,7 @@ graphicsQueue: c.VkQueue,
 presentQueue: c.VkQueue,
 commandPool: c.VkCommandPool,
 
-pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
+pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
     const enable_validation_layers = builtin.mode == .Debug;
 
     const vulkan = try Vulkan.init(alloc, enable_validation_layers);
@@ -45,7 +45,8 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
     var commandPool: c.VkCommandPool = undefined;
     try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
 
-    return .{
+    const self = try alloc.create(Self);
+    self.* = .{
         .alloc = alloc,
         .window = window,
         .surface = surface,
@@ -57,6 +58,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !Self {
         .presentQueue = presentQueue,
         .commandPool = commandPool,
     };
+    return self;
 }
 
 pub fn deinit(self: *Self) void {
@@ -69,6 +71,7 @@ pub fn deinit(self: *Self) void {
     }
     c.vkDestroySurfaceKHR(self.vulkanInstance.instance, self.surface, null);
     self.vulkanInstance.deinit();
+    self.alloc.destroy(self);
 }
 
 fn pickPhysicalDevice(alloc: std.mem.Allocator, vulkan: Vulkan, surface: c.VkSurfaceKHR) !c.VkPhysicalDevice {

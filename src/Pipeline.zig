@@ -6,6 +6,7 @@ const Model = @import("Model.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
 const Self = @This();
+alloc: std.mem.Allocator,
 device: *Device,
 graphicsPipeline: ?c.VkPipeline,
 vertShaderModule: c.VkShaderModule,
@@ -25,7 +26,7 @@ const PipelineConfigInfo = struct {
     subpass: u32 = 0,
 };
 
-pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, configInfo: PipelineConfigInfo) !Self {
+pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, vertShader: []const u8, configInfo: PipelineConfigInfo) !*Self {
     std.log.scoped(.pipeline).info("frag shader len: {d}", .{fragShader.len});
     std.log.scoped(.pipeline).info("vert shader len: {d}", .{vertShader.len});
 
@@ -100,12 +101,15 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
 
     try checkSuccess(c.vkCreateGraphicsPipelines(device.globalDevice, null, 1, &pipelineInfo, null, &graphicsPipeline));
 
-    return .{
+    const self = try alloc.create(Self);
+    self.* = .{
+        .alloc = alloc,
         .device = device,
         .graphicsPipeline = graphicsPipeline,
         .vertShaderModule = vertShaderModule,
         .fragShaderModule = fragShaderModule,
     };
+    return self;
 }
 
 pub fn deinit(self: *Self) void {
@@ -115,6 +119,7 @@ pub fn deinit(self: *Self) void {
         c.vkDestroyPipeline(self.device.globalDevice, pipeline, null);
     }
     std.log.scoped(.pipeline).info("deinit done", .{});
+    self.alloc.destroy(self);
 }
 
 pub fn bind(self: *Self, commandBuffer: c.VkCommandBuffer) void {
