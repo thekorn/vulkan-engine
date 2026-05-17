@@ -25,7 +25,7 @@ alloc: std.mem.Allocator,
 window: *Window,
 device: *Device,
 loop: Loop,
-pipeline: *Pipeline,
+pipeline: ?*Pipeline,
 swapChain: Swapchain,
 model: Model,
 pipelineLayout: c.VkPipelineLayout,
@@ -49,7 +49,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .window = window,
         .device = device,
         .loop = loop,
-        .pipeline = undefined,
+        .pipeline = null,
         .swapChain = swapChain,
         .model = undefined,
         .pipelineLayout = undefined,
@@ -58,18 +58,19 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     try self.loadModels();
     try self.createPipelineLayout();
-    try self.createPipeline();
+    try self.recreateSwapChain();
     try self.createCommandBuffers();
 
     return self;
 }
 
 pub fn deinit(self: *Self) void {
+    std.log.scoped(.firstApp).info("deinit first app", .{});
     self.commandBuffers.deinit(self.alloc);
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
     self.model.deinit();
     self.swapChain.deinit();
-    self.pipeline.deinit();
+    if (self.pipeline) |p| p.deinit();
     self.loop.deinit();
     self.device.deinit();
     self.window.deinit();
@@ -102,6 +103,13 @@ fn createPipeline(self: *Self) !void {
     pipelineConfig.renderPass = self.swapChain.renderPass;
     pipelineConfig.pipelineLayout = self.pipelineLayout;
 
+    // Destroy any previously created pipeline (e.g. from a prior
+    // swapchain recreation) so its shader modules and VkPipeline are
+    // released; otherwise they leak until vkDestroyDevice and trigger
+    // VUID-vkDestroyDevice-device-05137 validation errors.
+    if (self.pipeline) |old| old.deinit();
+    self.pipeline = null;
+
     self.pipeline = try Pipeline.init(
         self.alloc,
         self.device,
@@ -121,52 +129,33 @@ fn createCommandBuffers(self: *Self) !void {
         .commandBufferCount = @intCast(self.commandBuffers.items.len),
     };
     try checkSuccess(c.vkAllocateCommandBuffers(self.device.globalDevice, &allocInfo, self.commandBuffers.items.ptr));
-
-    for (self.commandBuffers.items, 0..) |cmdBuf, i| {
-        const beginInfo: c.VkCommandBufferBeginInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        };
-        try checkSuccess(c.vkBeginCommandBuffer(cmdBuf, &beginInfo));
-
-        var clearValues: ArrayList(c.VkClearValue) = .empty;
-        try clearValues.append(self.alloc, .{
-            .color = .{
-                .float32 = .{ 0.1, 0.1, 0.1, 1.0 },
-            },
-        });
-        try clearValues.append(self.alloc, .{
-            .depthStencil = .{ .depth = 1.0, .stencil = 0 },
-        });
-
-        const renderPassInfo: c.VkRenderPassBeginInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = self.swapChain.renderPass,
-            .framebuffer = self.swapChain.getFrameBuffer(i),
-            .renderArea = .{
-                .offset = .{ .x = 0, .y = 0 },
-                .extent = self.swapChain.swapChainExtent,
-            },
-            .clearValueCount = @intCast(clearValues.items.len),
-            .pClearValues = clearValues.items.ptr,
-        };
-        c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
-        self.pipeline.bind(cmdBuf);
-        self.model.bind(cmdBuf);
-        self.model.draw(cmdBuf);
-        c.vkCmdEndRenderPass(cmdBuf);
-
-        try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
-    }
 }
 
 fn drawFrame(self: *Self) !void {
     var imageIndex: u32 = undefined;
     const result = try self.swapChain.acquireNextImage(&imageIndex);
     switch (result) {
+        c.VK_ERROR_OUT_OF_DATE_KHR => {
+            try self.recreateSwapChain();
+        },
         c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
         else => return error.Unexpected,
     }
-    try checkSuccess(try self.swapChain.submitCommandBuffers(&self.commandBuffers.items[imageIndex], &imageIndex));
+    try self.recordCommandBuffer(imageIndex);
+    const submitResult = try self.swapChain.submitCommandBuffers(&self.commandBuffers.items[imageIndex], &imageIndex);
+    if (self.window.wasWindowResized()) {
+        self.window.resetWindowResized();
+        try self.recreateSwapChain();
+        return;
+    }
+    switch (submitResult) {
+        c.VK_ERROR_OUT_OF_DATE_KHR, c.VK_SUBOPTIMAL_KHR => {
+            try self.recreateSwapChain();
+            return;
+        },
+        c.VK_SUCCESS => {},
+        else => return error.Unexpected,
+    }
 }
 
 fn loadModels(self: *Self) !void {
@@ -177,4 +166,61 @@ fn loadModels(self: *Self) !void {
     };
 
     self.model = try Model.init(self.device, vertices[0..]);
+}
+
+fn recreateSwapChain(self: *Self) !void {
+    var extend = self.window.getExtend();
+
+    while (extend.width == 0 or extend.height == 0) {
+        extend = self.window.getExtend();
+        c.glfwWaitEvents();
+    }
+
+    try checkSuccess(c.vkDeviceWaitIdle(self.device.globalDevice));
+
+    // The previous swapchain still owns the surface; destroy it before
+    // creating the new one. On MoltenVK, attempting to create a second
+    // swapchain for the same surface while the old one is alive fails
+    // with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR (surfaced here as
+    // error.Unexpected from vkCreateSwapchainKHR).
+    self.swapChain.deinit();
+    self.swapChain = try Swapchain.init(self.alloc, self.device, extend);
+    try self.createPipeline();
+}
+
+fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
+    const cmdBuf = self.commandBuffers.items[imageIndex];
+    const beginInfo: c.VkCommandBufferBeginInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
+    try checkSuccess(c.vkBeginCommandBuffer(cmdBuf, &beginInfo));
+
+    var clearValues: ArrayList(c.VkClearValue) = .empty;
+    try clearValues.append(self.alloc, .{
+        .color = .{
+            .float32 = .{ 0.1, 0.1, 0.1, 1.0 },
+        },
+    });
+    try clearValues.append(self.alloc, .{
+        .depthStencil = .{ .depth = 1.0, .stencil = 0 },
+    });
+
+    const renderPassInfo: c.VkRenderPassBeginInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = self.swapChain.renderPass,
+        .framebuffer = self.swapChain.getFrameBuffer(imageIndex),
+        .renderArea = .{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapChain.swapChainExtent,
+        },
+        .clearValueCount = @intCast(clearValues.items.len),
+        .pClearValues = clearValues.items.ptr,
+    };
+    c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
+    self.pipeline.?.bind(cmdBuf);
+    self.model.bind(cmdBuf);
+    self.model.draw(cmdBuf);
+    c.vkCmdEndRenderPass(cmdBuf);
+
+    try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
 }

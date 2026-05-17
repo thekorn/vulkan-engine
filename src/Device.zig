@@ -128,9 +128,8 @@ fn createCommandPool(
     const poolInfo = c.VkCommandPoolCreateInfo{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .queueFamilyIndex = queueFamilyIndices.graphicsFamily.?,
-
         .pNext = null,
-        .flags = 0,
+        .flags = c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     };
 
     try checkSuccess(c.vkCreateCommandPool(globalDevice, &poolInfo, null, commandPool));
