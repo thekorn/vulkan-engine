@@ -137,6 +137,7 @@ fn drawFrame(self: *Self) !void {
     switch (result) {
         c.VK_ERROR_OUT_OF_DATE_KHR => {
             try self.recreateSwapChain();
+            return;
         },
         c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
         else => return error.Unexpected,
