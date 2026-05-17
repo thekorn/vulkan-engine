@@ -26,7 +26,7 @@ window: *Window,
 device: *Device,
 loop: Loop,
 pipeline: ?*Pipeline,
-swapChain: Swapchain,
+swapChain: ?Swapchain,
 model: Model,
 pipelineLayout: c.VkPipelineLayout,
 commandBuffers: ArrayList(c.VkCommandBuffer),
@@ -41,16 +41,13 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var loop = try Loop.init(window);
     errdefer loop.deinit();
 
-    var swapChain = try Swapchain.init(alloc, device, window.getExtent());
-    errdefer swapChain.deinit();
-
     var self: Self = .{
         .alloc = alloc,
         .window = window,
         .device = device,
         .loop = loop,
         .pipeline = null,
-        .swapChain = swapChain,
+        .swapChain = null,
         .model = undefined,
         .pipelineLayout = undefined,
         .commandBuffers = .empty,
@@ -69,7 +66,7 @@ pub fn deinit(self: *Self) void {
     self.commandBuffers.deinit(self.alloc);
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
     self.model.deinit();
-    self.swapChain.deinit();
+    if (self.swapChain) |*s| s.deinit();
     if (self.pipeline) |p| p.deinit();
     self.loop.deinit();
     self.device.deinit();
@@ -99,8 +96,11 @@ fn createPipelineLayout(self: *Self) !void {
 }
 
 fn createPipeline(self: *Self) !void {
+    std.debug.assert(self.swapChain != null);
+    std.debug.assert(self.pipelineLayout != null);
+
     var pipelineConfig = Pipeline.defaultPipelineConfigInfo();
-    pipelineConfig.renderPass = self.swapChain.renderPass;
+    pipelineConfig.renderPass = self.swapChain.?.renderPass;
     pipelineConfig.pipelineLayout = self.pipelineLayout;
 
     // Destroy any previously created pipeline (e.g. from a prior
@@ -120,7 +120,7 @@ fn createPipeline(self: *Self) !void {
 }
 
 fn createCommandBuffers(self: *Self) !void {
-    try self.commandBuffers.resize(self.alloc, self.swapChain.getImageCount());
+    try self.commandBuffers.resize(self.alloc, self.swapChain.?.getImageCount());
 
     const allocInfo: c.VkCommandBufferAllocateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -131,9 +131,14 @@ fn createCommandBuffers(self: *Self) !void {
     try checkSuccess(c.vkAllocateCommandBuffers(self.device.globalDevice, &allocInfo, self.commandBuffers.items.ptr));
 }
 
+fn freeCommandBuffers(self: *Self) void {
+    c.vkFreeCommandBuffers(self.device.globalDevice, self.device.commandPool, @intCast(self.commandBuffers.items.len), self.commandBuffers.items.ptr);
+    self.commandBuffers.clearAndFree(self.alloc);
+}
+
 fn drawFrame(self: *Self) !void {
     var imageIndex: u32 = undefined;
-    const result = try self.swapChain.acquireNextImage(&imageIndex);
+    const result = try self.swapChain.?.acquireNextImage(&imageIndex);
     switch (result) {
         c.VK_ERROR_OUT_OF_DATE_KHR => {
             try self.recreateSwapChain();
@@ -143,7 +148,7 @@ fn drawFrame(self: *Self) !void {
         else => return error.Unexpected,
     }
     try self.recordCommandBuffer(imageIndex);
-    const submitResult = try self.swapChain.submitCommandBuffers(&self.commandBuffers.items[imageIndex], &imageIndex);
+    const submitResult = try self.swapChain.?.submitCommandBuffers(&self.commandBuffers.items[imageIndex], &imageIndex);
     if (self.window.wasWindowResized()) {
         self.window.resetWindowResized();
         try self.recreateSwapChain();
@@ -177,8 +182,6 @@ fn recreateSwapChain(self: *Self) !void {
         extent = self.window.getExtent();
     }
 
-    const oldImageCount = self.swapChain.getImageCount();
-
     try checkSuccess(c.vkDeviceWaitIdle(self.device.globalDevice));
 
     // The previous swapchain still owns the surface; destroy it before
@@ -186,13 +189,23 @@ fn recreateSwapChain(self: *Self) !void {
     // swapchain for the same surface while the old one is alive fails
     // with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR (surfaced here as
     // error.Unexpected from vkCreateSwapchainKHR).
-    self.swapChain.deinit();
-    self.swapChain = try Swapchain.init(self.alloc, self.device, extent);
-    try self.createPipeline();
+    //
+    if (self.swapChain) |*sc| {
+        sc.deinit();
+        self.swapChain = try Swapchain.init(self.alloc, self.device, extent, sc);
+        // we need to make sure that both are the same, otherwise the swapchain
+        // images are not properly synchronized with the command buffers
+        var swapchain = self.swapChain orelse unreachable;
+        if (swapchain.getImageCount() != self.commandBuffers.items.len) {
+            self.freeCommandBuffers();
+            try self.createCommandBuffers();
+        }
+    } else {
+        self.swapChain = try Swapchain.init(self.alloc, self.device, extent, null);
+    }
 
-    // we need to make sure that both are the same, otherwise the swapchain
-    // images are not properly synchronized with the command buffers
-    std.debug.assert(oldImageCount == self.swapChain.getImageCount());
+    // TODO: if render pass are compatible, reuse the existing pipeline - do nothing
+    try self.createPipeline();
 }
 
 fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
@@ -213,13 +226,15 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
         .depthStencil = .{ .depth = 1.0, .stencil = 0 },
     });
 
+    var swapchain = self.swapChain orelse unreachable;
+
     const renderPassInfo: c.VkRenderPassBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass = self.swapChain.renderPass,
-        .framebuffer = self.swapChain.getFrameBuffer(imageIndex),
+        .renderPass = swapchain.renderPass,
+        .framebuffer = swapchain.getFrameBuffer(imageIndex),
         .renderArea = .{
             .offset = .{ .x = 0, .y = 0 },
-            .extent = self.swapChain.swapChainExtent,
+            .extent = swapchain.swapChainExtent,
         },
         .clearValueCount = @intCast(clearValues.items.len),
         .pClearValues = clearValues.items.ptr,
@@ -229,14 +244,14 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
     const viewport = c.VkViewport{
         .x = 0.0,
         .y = 0.0,
-        .width = @floatFromInt(self.swapChain.width()),
-        .height = @floatFromInt(self.swapChain.height()),
+        .width = @floatFromInt(swapchain.width()),
+        .height = @floatFromInt(swapchain.height()),
         .minDepth = 0.0,
         .maxDepth = 1.0,
     };
     const scissor = c.VkRect2D{
         .offset = .{ .x = 0, .y = 0 },
-        .extent = self.swapChain.swapChainExtent,
+        .extent = swapchain.swapChainExtent,
     };
     c.vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
     c.vkCmdSetScissor(cmdBuf, 0, 1, &scissor);

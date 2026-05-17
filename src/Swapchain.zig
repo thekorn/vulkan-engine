@@ -30,8 +30,8 @@ inFlightFences: []c.VkFence,
 imagesInFlight: []c.VkFence,
 currentFrame: usize = 0,
 
-pub fn init(alloc: std.mem.Allocator, device: *Device, extent: c.VkExtent2D) !Self {
-    const createSwapChainResult = try createSwapChain(alloc, device, extent);
+pub fn init(alloc: std.mem.Allocator, device: *Device, extent: c.VkExtent2D, prevSwapChain: ?*Self) !Self {
+    const createSwapChainResult = try createSwapChain(alloc, device, extent, prevSwapChain);
     const swapChainImageViews = try createImageViews(alloc, device, createSwapChainResult.images, createSwapChainResult.format);
     const renderPass = try createRenderPass(device, createSwapChainResult.format);
     const depthResourcesResult = try createDepthResources(alloc, device, createSwapChainResult);
@@ -221,7 +221,7 @@ const CreateSwapChainResult = struct {
     swapChain: c.VkSwapchainKHR,
 };
 
-fn createSwapChain(alloc: std.mem.Allocator, device: *Device, windowExtent: c.VkExtent2D) !CreateSwapChainResult {
+fn createSwapChain(alloc: std.mem.Allocator, device: *Device, windowExtent: c.VkExtent2D, prevSwapChain: ?*Self) !CreateSwapChainResult {
     var swapChain: c.VkSwapchainKHR = undefined;
     var swapChainSupport = try device.getSwapChainSupport();
 
@@ -249,7 +249,7 @@ fn createSwapChain(alloc: std.mem.Allocator, device: *Device, windowExtent: c.Vk
         .compositeAlpha = c.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = presentMode,
         .clipped = c.VK_TRUE,
-        .oldSwapchain = null,
+        .oldSwapchain = if (prevSwapChain) |sc| sc.swapChain else null,
     };
 
     const indices = try Vulkan.findQueueFamilies(alloc, device.physicalDevice, device.surface);
