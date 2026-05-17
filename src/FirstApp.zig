@@ -41,7 +41,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var loop = try Loop.init(window);
     errdefer loop.deinit();
 
-    var swapChain = try Swapchain.init(alloc, device, window);
+    var swapChain = try Swapchain.init(alloc, device, window.getExtend());
     errdefer swapChain.deinit();
 
     var self: Self = .{
