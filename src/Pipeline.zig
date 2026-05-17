@@ -2,8 +2,18 @@ const std = @import("std");
 const c = @import("c.zig").c;
 const Device = @import("Device.zig");
 const Model = @import("Model.zig");
+const ArrayList = std.ArrayList;
 
 const checkSuccess = @import("utils.zig").checkSuccess;
+
+// Module-level storage so PipelineConfigInfo can safely hold pointers into it
+// after defaultPipelineConfigInfo() returns. Putting these on the function's
+// stack made `pDynamicStates` dangle, which manifested as Vulkan seeing
+// VK_DYNAMIC_STATE_VIEWPORT (value 0) in both slots.
+const default_dynamic_state_enables = [_]c.VkDynamicState{
+    c.VK_DYNAMIC_STATE_VIEWPORT,
+    c.VK_DYNAMIC_STATE_SCISSOR,
+};
 
 const Self = @This();
 alloc: std.mem.Allocator,
@@ -13,14 +23,15 @@ vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
 
 const PipelineConfigInfo = struct {
-    viewport: c.VkViewport,
-    scissor: c.VkRect2D,
+    viewportInfo: c.VkPipelineViewportStateCreateInfo,
     inputAssemblyInfo: c.VkPipelineInputAssemblyStateCreateInfo,
     rasterizationInfo: c.VkPipelineRasterizationStateCreateInfo,
     multisampleInfo: c.VkPipelineMultisampleStateCreateInfo,
     colorBlendAttachment: c.VkPipelineColorBlendAttachmentState,
     colorBlendInfo: c.VkPipelineColorBlendStateCreateInfo,
     depthStencilInfo: c.VkPipelineDepthStencilStateCreateInfo,
+    dynamicStateEnables: []const c.VkDynamicState,
+    dynamicStateInfo: c.VkPipelineDynamicStateCreateInfo,
     pipelineLayout: c.VkPipelineLayout = null,
     renderPass: c.VkRenderPass = null,
     subpass: u32 = 0,
@@ -70,26 +81,18 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
         .pVertexAttributeDescriptions = &attributeDescriptions,
     };
 
-    const viewportInfo: c.VkPipelineViewportStateCreateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &configInfo.viewport,
-        .scissorCount = 1,
-        .pScissors = &configInfo.scissor,
-    };
-
     const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 2,
         .pStages = &shaderStages,
         .pVertexInputState = &vertexInputInfo,
         .pInputAssemblyState = &configInfo.inputAssemblyInfo,
-        .pViewportState = &viewportInfo,
+        .pViewportState = &configInfo.viewportInfo,
         .pRasterizationState = &configInfo.rasterizationInfo,
         .pMultisampleState = &configInfo.multisampleInfo,
         .pDepthStencilState = &configInfo.depthStencilInfo,
         .pColorBlendState = &configInfo.colorBlendInfo,
-        .pDynamicState = null,
+        .pDynamicState = &configInfo.dynamicStateInfo,
         .layout = configInfo.pipelineLayout,
         .renderPass = configInfo.renderPass,
         .subpass = configInfo.subpass,
@@ -126,21 +129,7 @@ pub fn bind(self: *Self, commandBuffer: c.VkCommandBuffer) void {
     c.vkCmdBindPipeline(commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipeline orelse unreachable);
 }
 
-// see: https://pastebin.com/EmsJWHzb
-pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
-    const viewport: c.VkViewport = .{
-        .x = 0,
-        .y = 0,
-        .width = @floatFromInt(width),
-        .height = @floatFromInt(height),
-        .minDepth = 0.0,
-        .maxDepth = 1.0,
-    };
-    const scissor: c.VkRect2D = .{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = .{ .width = @intCast(width), .height = @intCast(height) },
-    };
-
+pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
     const colorBlendAttachment: c.VkPipelineColorBlendAttachmentState = .{
         .blendEnable = c.VK_FALSE,
         .srcColorBlendFactor = c.VK_BLEND_FACTOR_ONE, // Optional
@@ -153,8 +142,13 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
     };
 
     return .{
-        .viewport = viewport,
-        .scissor = scissor,
+        .viewportInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .pViewports = null,
+            .scissorCount = 1,
+            .pScissors = null,
+        },
         .inputAssemblyInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -203,6 +197,14 @@ pub fn defaultPipelineConfigInfo(width: i32, height: i32) PipelineConfigInfo {
             .stencilTestEnable = c.VK_FALSE,
             .front = .{}, //Optional
             .back = .{}, //Optional
+        },
+
+        .dynamicStateEnables = &default_dynamic_state_enables,
+        .dynamicStateInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = default_dynamic_state_enables.len,
+            .pDynamicStates = &default_dynamic_state_enables,
+            .flags = 0,
         },
     };
 }
@@ -285,28 +287,8 @@ fn createRenderPass(device: *Device) !c.VkRenderPass {
     return renderPass;
 }
 
-test "defaultPipelineConfigInfo viewport matches given dimensions" {
-    const config = defaultPipelineConfigInfo(800, 600);
-
-    try std.testing.expectEqual(@as(f32, 0), config.viewport.x);
-    try std.testing.expectEqual(@as(f32, 0), config.viewport.y);
-    try std.testing.expectEqual(@as(f32, 800), config.viewport.width);
-    try std.testing.expectEqual(@as(f32, 600), config.viewport.height);
-    try std.testing.expectEqual(@as(f32, 0.0), config.viewport.minDepth);
-    try std.testing.expectEqual(@as(f32, 1.0), config.viewport.maxDepth);
-}
-
-test "defaultPipelineConfigInfo scissor matches given dimensions" {
-    const config = defaultPipelineConfigInfo(1024, 768);
-
-    try std.testing.expectEqual(@as(i32, 0), config.scissor.offset.x);
-    try std.testing.expectEqual(@as(i32, 0), config.scissor.offset.y);
-    try std.testing.expectEqual(@as(u32, 1024), config.scissor.extent.width);
-    try std.testing.expectEqual(@as(u32, 768), config.scissor.extent.height);
-}
-
 test "defaultPipelineConfigInfo input assembly uses triangle list without restart" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expectEqual(
         @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO),
@@ -323,7 +305,7 @@ test "defaultPipelineConfigInfo input assembly uses triangle list without restar
 }
 
 test "defaultPipelineConfigInfo rasterization uses fill, no culling, line width 1.0" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expectEqual(
         @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO),
@@ -339,7 +321,7 @@ test "defaultPipelineConfigInfo rasterization uses fill, no culling, line width 
 }
 
 test "defaultPipelineConfigInfo multisample uses 1x sampling" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expectEqual(
         @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO),
@@ -355,7 +337,7 @@ test "defaultPipelineConfigInfo multisample uses 1x sampling" {
 }
 
 test "defaultPipelineConfigInfo color blending is disabled with all channels writable" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expectEqual(@as(c.VkBool32, c.VK_FALSE), config.colorBlendAttachment.blendEnable);
     const expected_mask: c_uint = c.VK_COLOR_COMPONENT_R_BIT |
@@ -377,7 +359,7 @@ test "defaultPipelineConfigInfo color blending is disabled with all channels wri
 }
 
 test "defaultPipelineConfigInfo depth/stencil enables depth test with LESS compare" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expectEqual(
         @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO),
@@ -393,18 +375,118 @@ test "defaultPipelineConfigInfo depth/stencil enables depth test with LESS compa
 }
 
 test "defaultPipelineConfigInfo defaults pipelineLayout, renderPass and subpass" {
-    const config = defaultPipelineConfigInfo(800, 600);
+    const config = defaultPipelineConfigInfo();
 
     try std.testing.expect(config.pipelineLayout == null);
     try std.testing.expect(config.renderPass == null);
     try std.testing.expectEqual(@as(u32, 0), config.subpass);
 }
 
-test "defaultPipelineConfigInfo handles non-square dimensions" {
-    const config = defaultPipelineConfigInfo(1920, 1080);
+test "defaultPipelineConfigInfo viewport state has 1 viewport/scissor with null pointers (dynamic)" {
+    const config = defaultPipelineConfigInfo();
 
-    try std.testing.expectEqual(@as(f32, 1920), config.viewport.width);
-    try std.testing.expectEqual(@as(f32, 1080), config.viewport.height);
-    try std.testing.expectEqual(@as(u32, 1920), config.scissor.extent.width);
-    try std.testing.expectEqual(@as(u32, 1080), config.scissor.extent.height);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO),
+        config.viewportInfo.sType,
+    );
+    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.viewportCount);
+    try std.testing.expectEqual(@as(u32, 1), config.viewportInfo.scissorCount);
+    // Viewport and scissor are supplied via dynamic state, so the static
+    // pointers must remain null.
+    try std.testing.expect(config.viewportInfo.pViewports == null);
+    try std.testing.expect(config.viewportInfo.pScissors == null);
+}
+
+test "defaultPipelineConfigInfo dynamic state enables viewport and scissor" {
+    const config = defaultPipelineConfigInfo();
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO),
+        config.dynamicStateInfo.sType,
+    );
+    try std.testing.expectEqual(@as(u32, 2), config.dynamicStateInfo.dynamicStateCount);
+    try std.testing.expectEqual(@as(usize, 2), config.dynamicStateEnables.len);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_DYNAMIC_STATE_VIEWPORT),
+        config.dynamicStateEnables[0],
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_DYNAMIC_STATE_SCISSOR),
+        config.dynamicStateEnables[1],
+    );
+    try std.testing.expectEqual(@as(u32, 0), config.dynamicStateInfo.flags);
+
+    // pDynamicStates must point at the module-level array (not a stale stack
+    // slot) and the first entry must be VK_DYNAMIC_STATE_VIEWPORT.
+    try std.testing.expect(config.dynamicStateInfo.pDynamicStates != null);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_DYNAMIC_STATE_VIEWPORT),
+        config.dynamicStateInfo.pDynamicStates[0],
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_DYNAMIC_STATE_SCISSOR),
+        config.dynamicStateInfo.pDynamicStates[1],
+    );
+}
+
+test "defaultPipelineConfigInfo color blend attachment factors and ops match defaults" {
+    const config = defaultPipelineConfigInfo();
+
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_FACTOR_ONE),
+        config.colorBlendAttachment.srcColorBlendFactor,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_FACTOR_ZERO),
+        config.colorBlendAttachment.dstColorBlendFactor,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_OP_ADD),
+        config.colorBlendAttachment.colorBlendOp,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_FACTOR_ONE),
+        config.colorBlendAttachment.srcAlphaBlendFactor,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_FACTOR_ZERO),
+        config.colorBlendAttachment.dstAlphaBlendFactor,
+    );
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_BLEND_OP_ADD),
+        config.colorBlendAttachment.alphaBlendOp,
+    );
+}
+
+test "Pipeline struct has expected fields and types" {
+    const fields = @typeInfo(Self).@"struct".fields;
+
+    try std.testing.expectEqual(@as(usize, 5), fields.len);
+    try std.testing.expectEqualStrings("alloc", fields[0].name);
+    try std.testing.expectEqual(std.mem.Allocator, fields[0].type);
+    try std.testing.expectEqualStrings("device", fields[1].name);
+    try std.testing.expectEqual(*Device, fields[1].type);
+    try std.testing.expectEqualStrings("graphicsPipeline", fields[2].name);
+    try std.testing.expectEqual(?c.VkPipeline, fields[2].type);
+    try std.testing.expectEqualStrings("vertShaderModule", fields[3].name);
+    try std.testing.expectEqual(c.VkShaderModule, fields[3].type);
+    try std.testing.expectEqualStrings("fragShaderModule", fields[4].name);
+    try std.testing.expectEqual(c.VkShaderModule, fields[4].type);
+}
+
+test "default_dynamic_state_enables is stable across calls (no dangling pointer)" {
+    const a = defaultPipelineConfigInfo();
+    const b = defaultPipelineConfigInfo();
+
+    // Both configurations must point at the same module-level storage so the
+    // pointer captured in dynamicStateInfo.pDynamicStates stays valid after
+    // the helper returns.
+    try std.testing.expectEqual(
+        @intFromPtr(a.dynamicStateInfo.pDynamicStates),
+        @intFromPtr(b.dynamicStateInfo.pDynamicStates),
+    );
+    try std.testing.expectEqual(
+        @intFromPtr(&default_dynamic_state_enables),
+        @intFromPtr(a.dynamicStateInfo.pDynamicStates),
+    );
 }

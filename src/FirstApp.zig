@@ -99,7 +99,7 @@ fn createPipelineLayout(self: *Self) !void {
 }
 
 fn createPipeline(self: *Self) !void {
-    var pipelineConfig = Pipeline.defaultPipelineConfigInfo(self.swapChain.width(), self.swapChain.height());
+    var pipelineConfig = Pipeline.defaultPipelineConfigInfo();
     pipelineConfig.renderPass = self.swapChain.renderPass;
     pipelineConfig.pipelineLayout = self.pipelineLayout;
 
@@ -225,6 +225,22 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
         .pClearValues = clearValues.items.ptr,
     };
     c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
+
+    const viewport = c.VkViewport{
+        .x = 0.0,
+        .y = 0.0,
+        .width = @floatFromInt(self.swapChain.width()),
+        .height = @floatFromInt(self.swapChain.height()),
+        .minDepth = 0.0,
+        .maxDepth = 1.0,
+    };
+    const scissor = c.VkRect2D{
+        .offset = .{ .x = 0, .y = 0 },
+        .extent = self.swapChain.swapChainExtent,
+    };
+    c.vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+    c.vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
+
     self.pipeline.?.bind(cmdBuf);
     self.model.bind(cmdBuf);
     self.model.draw(cmdBuf);
