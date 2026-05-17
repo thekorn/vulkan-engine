@@ -177,6 +177,8 @@ fn recreateSwapChain(self: *Self) !void {
         extent = self.window.getExtent();
     }
 
+    const oldImageCount = self.swapChain.getImageCount();
+
     try checkSuccess(c.vkDeviceWaitIdle(self.device.globalDevice));
 
     // The previous swapchain still owns the surface; destroy it before
@@ -187,6 +189,10 @@ fn recreateSwapChain(self: *Self) !void {
     self.swapChain.deinit();
     self.swapChain = try Swapchain.init(self.alloc, self.device, extent);
     try self.createPipeline();
+
+    // we need to make sure that both are the same, otherwise the swapchain
+    // images are not properly synchronized with the command buffers
+    std.debug.assert(oldImageCount == self.swapChain.getImageCount());
 }
 
 fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {

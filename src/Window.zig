@@ -70,11 +70,12 @@ fn framebufferResizeCallback(
     height: c_int,
 ) callconv(.c) void {
     std.log.scoped(.window).info("calling window resize callback", .{});
-    const ptr = c.glfwGetWindowUserPointer(window);
-    const w: *Self = @ptrCast(@alignCast(ptr));
-    w.framebufferResized = true;
-    w.width = width;
-    w.height = height;
+    if (c.glfwGetWindowUserPointer(window)) |ptr| {
+        const w: *Self = @ptrCast(@alignCast(ptr));
+        w.framebufferResized = true;
+        w.width = width;
+        w.height = height;
+    }
 }
 
 // Helper for tests: try to bring up a Window, but skip the test when the
