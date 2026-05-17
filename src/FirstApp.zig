@@ -30,6 +30,12 @@ swapChain: ?Swapchain,
 model: Model,
 pipelineLayout: c.VkPipelineLayout,
 commandBuffers: ArrayList(c.VkCommandBuffer),
+frame: usize = 30,
+
+const SimplePushConstantData = extern struct {
+    offset: @Vector(2, f32),
+    color: @Vector(3, f32) align(16),
+};
 
 pub fn init(alloc: std.mem.Allocator) !Self {
     const window = try Window.init(alloc, width, height);
@@ -85,12 +91,18 @@ pub fn run(self: *Self) !void {
 }
 
 fn createPipelineLayout(self: *Self) !void {
+    const pushConstantRange: c.VkPushConstantRange = .{
+        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = @sizeOf(SimplePushConstantData),
+    };
+
     const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 0,
         .pSetLayouts = null,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = null,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange,
     };
     try checkSuccess(c.vkCreatePipelineLayout(self.device.globalDevice, &pipelineLayoutInfo, null, &self.pipelineLayout));
 }
@@ -209,6 +221,7 @@ fn recreateSwapChain(self: *Self) !void {
 }
 
 fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
+    self.frame = (self.frame + 1) % 100;
     const cmdBuf = self.commandBuffers.items[imageIndex];
     const beginInfo: c.VkCommandBufferBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -258,7 +271,24 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
 
     self.pipeline.?.bind(cmdBuf);
     self.model.bind(cmdBuf);
-    self.model.draw(cmdBuf);
+
+    for (0..4) |i| {
+        const push: SimplePushConstantData = .{
+            .offset = .{ -0.5 + @as(f32, @floatFromInt(self.frame)) * 0.02, -0.4 + @as(f32, @floatFromInt(i)) * 0.2 },
+            .color = .{ 0.0, 0.0, 0.2 + 0.2 * @as(f32, @floatFromInt(i)) },
+        };
+
+        c.vkCmdPushConstants(
+            cmdBuf,
+            self.pipelineLayout,
+            c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            @sizeOf(SimplePushConstantData),
+            &push,
+        );
+        self.model.draw(cmdBuf);
+    }
+
     c.vkCmdEndRenderPass(cmdBuf);
 
     try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
