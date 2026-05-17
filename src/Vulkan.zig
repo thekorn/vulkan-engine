@@ -87,15 +87,23 @@ fn debugCallback(
     p_callback_data: ?*const c.VkDebugUtilsMessengerCallbackDataEXT,
     p_user_data: ?*anyopaque,
 ) callconv(.c) c_uint {
-    _ = message_severity;
     _ = message_types;
     _ = p_user_data;
+    const log = std.log.scoped(.validation);
     b: {
         const msg = (p_callback_data orelse break :b).pMessage orelse break :b;
-        std.log.scoped(.validation).warn("{s}", .{msg});
+        if (message_severity & c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT != 0) {
+            log.err("{s}", .{msg});
+        } else if (message_severity & c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT != 0) {
+            log.warn("{s}", .{msg});
+        } else if (message_severity & c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT != 0) {
+            log.info("{s}", .{msg});
+        } else {
+            log.debug("{s}", .{msg});
+        }
         return c.VK_FALSE;
     }
-    std.log.scoped(.validation).warn("unrecognized validation layer debug message", .{});
+    log.warn("unrecognized validation layer debug message", .{});
     return c.VK_FALSE;
 }
 
