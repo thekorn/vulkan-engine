@@ -10,7 +10,11 @@ width: i32,
 height: i32,
 framebufferResized: bool = false,
 
-pub fn init(width: i32, height: i32) !Self {
+/// Initializes the `Window` in-place at the caller-provided address. The
+/// caller must ensure `self` stays at a stable location for the lifetime
+/// of the window, because GLFW retains it as the user pointer used by the
+/// framebuffer-resize callback.
+pub fn init(self: *Self, width: i32, height: i32) !void {
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
 
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
@@ -18,16 +22,14 @@ pub fn init(width: i32, height: i32) !Self {
 
     const window = c.glfwCreateWindow(width, height, "Vulkan", null, null) orelse return error.GlfwCreateWindowFailed;
 
-    var w: Self = .{
+    self.* = .{
         .instance = window,
         .width = width,
         .height = height,
     };
 
-    c.glfwSetWindowUserPointer(window, @ptrCast(&w));
+    c.glfwSetWindowUserPointer(window, @ptrCast(self));
     _ = c.glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
-
-    return w;
 }
 
 pub fn deinit(self: *Self) void {
@@ -63,6 +65,7 @@ fn framebufferResizeCallback(
     width: c_int,
     height: c_int,
 ) callconv(.c) void {
+    std.log.scoped(.window).info("calling window resize callback", .{});
     const ptr = c.glfwGetWindowUserPointer(window);
     const w: *Self = @ptrCast(@alignCast(ptr));
     w.framebufferResized = true;
@@ -72,10 +75,10 @@ fn framebufferResizeCallback(
 
 // Helper for tests: try to bring up a Window, but skip the test when the
 // skipping as it's currently broken on (headless) Linux
-fn initOrSkip(width: i32, height: i32) !Self {
+fn initOrSkip(self: *Self, width: i32, height: i32) !void {
     if (builtin.os.tag == .linux) return error.SkipZigTest;
 
-    return Self.init(width, height) catch |err| switch (err) {
+    Self.init(self, width, height) catch |err| switch (err) {
         error.GlfwInitFailed, error.GlfwCreateWindowFailed => return error.SkipZigTest,
     };
 }
@@ -91,7 +94,8 @@ test "Window has expected fields and types" {
 }
 
 test "Window.init stores the requested dimensions" {
-    var window = try initOrSkip(800, 600);
+    var window: Self = undefined;
+    try initOrSkip(&window, 800, 600);
     defer window.deinit();
 
     try std.testing.expectEqual(@as(i32, 800), window.width);
@@ -99,7 +103,8 @@ test "Window.init stores the requested dimensions" {
 }
 
 test "Window.init stores non-square dimensions" {
-    var window = try initOrSkip(1280, 720);
+    var window: Self = undefined;
+    try initOrSkip(&window, 1280, 720);
     defer window.deinit();
 
     try std.testing.expectEqual(@as(i32, 1280), window.width);
@@ -107,7 +112,8 @@ test "Window.init stores non-square dimensions" {
 }
 
 test "Window.init returns a non-null window handle" {
-    var window = try initOrSkip(640, 480);
+    var window: Self = undefined;
+    try initOrSkip(&window, 640, 480);
     defer window.deinit();
 
     // `instance` is a non-optional pointer; this just ensures the value is
@@ -116,14 +122,16 @@ test "Window.init returns a non-null window handle" {
 }
 
 test "Window.should_close is false for a freshly created window" {
-    var window = try initOrSkip(320, 240);
+    var window: Self = undefined;
+    try initOrSkip(&window, 320, 240);
     defer window.deinit();
 
     try std.testing.expect(!window.should_close());
 }
 
 test "Window.should_close becomes true after glfwSetWindowShouldClose" {
-    var window = try initOrSkip(320, 240);
+    var window: Self = undefined;
+    try initOrSkip(&window, 320, 240);
     defer window.deinit();
 
     c.glfwSetWindowShouldClose(window.instance, c.GLFW_TRUE);

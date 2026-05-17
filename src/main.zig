@@ -116,7 +116,8 @@ pub fn main() !void {
     var commandBuffers: ArrayList(c.VkCommandBuffer) = .empty;
     defer commandBuffers.deinit(alloc);
 
-    var window = try Window.init(width, height);
+    var window: Window = undefined;
+    try window.init(width, height);
     defer window.deinit();
 
     var device = try Device.init(alloc, &window);
