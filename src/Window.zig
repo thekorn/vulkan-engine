@@ -82,11 +82,12 @@ fn initOrSkip(width: i32, height: i32) !Self {
 
 test "Window has expected fields and types" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 3), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 4), info.fields.len);
 
     try std.testing.expectEqual(*c.GLFWwindow, @FieldType(Self, "instance"));
     try std.testing.expectEqual(i32, @FieldType(Self, "width"));
     try std.testing.expectEqual(i32, @FieldType(Self, "height"));
+    try std.testing.expectEqual(bool, @FieldType(Self, "framebufferResized"));
 }
 
 test "Window.init stores the requested dimensions" {
