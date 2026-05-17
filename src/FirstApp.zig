@@ -173,8 +173,8 @@ fn recreateSwapChain(self: *Self) !void {
     var extend = self.window.getExtend();
 
     while (extend.width == 0 or extend.height == 0) {
-        extend = self.window.getExtend();
         c.glfwWaitEvents();
+        extend = self.window.getExtend();
     }
 
     try checkSuccess(c.vkDeviceWaitIdle(self.device.globalDevice));
