@@ -30,8 +30,8 @@ inFlightFences: []c.VkFence,
 imagesInFlight: []c.VkFence,
 currentFrame: usize = 0,
 
-pub fn init(alloc: std.mem.Allocator, device: *Device, window: *Window) !Self {
-    const createSwapChainResult = try createSwapChain(alloc, device, window);
+pub fn init(alloc: std.mem.Allocator, device: *Device, extend: c.VkExtent2D) !Self {
+    const createSwapChainResult = try createSwapChain(alloc, device, extend);
     const swapChainImageViews = try createImageViews(alloc, device, createSwapChainResult.images, createSwapChainResult.format);
     const renderPass = try createRenderPass(device, createSwapChainResult.format);
     const depthResourcesResult = try createDepthResources(alloc, device, createSwapChainResult);
@@ -58,7 +58,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, window: *Window) !Self {
         .depthImageViews = depthResourcesResult.depthImageViews,
 
         .device = device,
-        .windowExtent = window.getExtend(),
+        .windowExtent = extend,
 
         .swapChain = createSwapChainResult.swapChain,
 
@@ -221,13 +221,13 @@ const CreateSwapChainResult = struct {
     swapChain: c.VkSwapchainKHR,
 };
 
-fn createSwapChain(alloc: std.mem.Allocator, device: *Device, window: *Window) !CreateSwapChainResult {
+fn createSwapChain(alloc: std.mem.Allocator, device: *Device, extend: c.VkExtent2D) !CreateSwapChainResult {
     var swapChain: c.VkSwapchainKHR = undefined;
     var swapChainSupport = try device.getSwapChainSupport();
 
     const surfaceFormat = chooseSwapSurfaceFormat(&swapChainSupport.formats);
     const presentMode = chooseSwapPresentMode(&swapChainSupport.presentModes);
-    const extent = chooseSwapExtent(&swapChainSupport.capabilities, window.getExtend());
+    const extent = chooseSwapExtent(&swapChainSupport.capabilities, extend);
 
     var imageCount = swapChainSupport.capabilities.minImageCount + 1;
     if (swapChainSupport.capabilities.maxImageCount > 0 and

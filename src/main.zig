@@ -40,8 +40,6 @@ fn createCommandBuffers(
     commandBuffers: *ArrayList(c.VkCommandBuffer),
     swapChain: *Swapchain,
     device: *Device,
-    pipeline: *Pipeline,
-    model: *Model,
 ) !void {
     try commandBuffers.resize(alloc, swapChain.getImageCount());
 
@@ -52,52 +50,32 @@ fn createCommandBuffers(
         .commandBufferCount = @intCast(commandBuffers.items.len),
     };
     try checkSuccess(c.vkAllocateCommandBuffers(device.globalDevice, &allocInfo, commandBuffers.items.ptr));
-
-    for (commandBuffers.items, 0..) |cmdBuf, i| {
-        const beginInfo: c.VkCommandBufferBeginInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        };
-        try checkSuccess(c.vkBeginCommandBuffer(cmdBuf, &beginInfo));
-
-        var clearValues: ArrayList(c.VkClearValue) = .empty;
-        try clearValues.append(alloc, .{
-            .color = .{
-                .float32 = .{ 0.1, 0.1, 0.1, 1.0 },
-            },
-        });
-        try clearValues.append(alloc, .{
-            .depthStencil = .{ .depth = 1.0, .stencil = 0 },
-        });
-
-        const renderPassInfo: c.VkRenderPassBeginInfo = .{
-            .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = swapChain.renderPass,
-            .framebuffer = swapChain.getFrameBuffer(i),
-            .renderArea = .{
-                .offset = .{ .x = 0, .y = 0 },
-                .extent = swapChain.swapChainExtent,
-            },
-            .clearValueCount = @intCast(clearValues.items.len),
-            .pClearValues = clearValues.items.ptr,
-        };
-        c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
-        pipeline.bind(cmdBuf);
-        model.bind(cmdBuf);
-        model.draw(cmdBuf);
-        c.vkCmdEndRenderPass(cmdBuf);
-
-        try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
-    }
 }
 
-fn drawFrame(swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer)) !void {
+fn drawFrame(alloc: std.mem.Allocator, swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer), pipeline: *Pipeline, window: *Window, device: *Device, pipelineLayout: *c.VkPipelineLayout, model: *Model) !void {
     var imageIndex: u32 = undefined;
     const result = try swapChain.acquireNextImage(&imageIndex);
     switch (result) {
+        c.VK_ERROR_OUT_OF_DATE_KHR => {
+            try recreateSwapChain(alloc, swapChain, window, device, pipeline, pipelineLayout);
+        },
         c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
         else => return error.Unexpected,
     }
-    try checkSuccess(try swapChain.submitCommandBuffers(&commandBuffers.items[imageIndex], &imageIndex));
+    try recordCommandBuffer(alloc, imageIndex, swapChain, commandBuffers, pipeline, model);
+    const submitResult = try swapChain.submitCommandBuffers(&commandBuffers.items[imageIndex], &imageIndex);
+    if (window.wasWindowResized()) {
+        try recreateSwapChain(alloc, swapChain, window, device, pipeline, pipelineLayout);
+        return;
+    }
+    switch (submitResult) {
+        c.VK_ERROR_OUT_OF_DATE_KHR, c.VK_SUBOPTIMAL_KHR => {
+            try recreateSwapChain(alloc, swapChain, window, device, pipeline, pipelineLayout);
+            return;
+        },
+        c.VK_SUCCESS => {},
+        else => return error.Unexpected,
+    }
 }
 
 fn loadModels(device: *Device) !Model {
@@ -108,6 +86,57 @@ fn loadModels(device: *Device) !Model {
     };
 
     return try Model.init(device, vertices[0..]);
+}
+
+fn recreateSwapChain(alloc: std.mem.Allocator, swapChain: *Swapchain, window: *Window, device: *Device, pipeline: *Pipeline, pipelineLayout: *c.VkPipelineLayout) !void {
+    var extend = window.getExtend();
+
+    while (extend.width == 0 or extend.height == 0) {
+        extend = window.getExtend();
+        c.glfwWaitEvents();
+    }
+
+    try checkSuccess(c.vkDeviceWaitIdle(device.globalDevice));
+
+    swapChain.* = try Swapchain.init(alloc, device, extend);
+    try createPipeline(device, swapChain, pipelineLayout, pipeline);
+}
+
+fn recordCommandBuffer(alloc: std.mem.Allocator, imageIndex: usize, swapChain: *Swapchain, commandBuffers: *ArrayList(c.VkCommandBuffer), pipeline: *Pipeline, model: *Model) !void {
+    const cmdBuf = commandBuffers.items[imageIndex];
+    const beginInfo: c.VkCommandBufferBeginInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
+    try checkSuccess(c.vkBeginCommandBuffer(cmdBuf, &beginInfo));
+
+    var clearValues: ArrayList(c.VkClearValue) = .empty;
+    try clearValues.append(alloc, .{
+        .color = .{
+            .float32 = .{ 0.1, 0.1, 0.1, 1.0 },
+        },
+    });
+    try clearValues.append(alloc, .{
+        .depthStencil = .{ .depth = 1.0, .stencil = 0 },
+    });
+
+    const renderPassInfo: c.VkRenderPassBeginInfo = .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = swapChain.renderPass,
+        .framebuffer = swapChain.getFrameBuffer(imageIndex),
+        .renderArea = .{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = swapChain.swapChainExtent,
+        },
+        .clearValueCount = @intCast(clearValues.items.len),
+        .pClearValues = clearValues.items.ptr,
+    };
+    c.vkCmdBeginRenderPass(cmdBuf, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
+    pipeline.bind(cmdBuf);
+    model.bind(cmdBuf);
+    model.draw(cmdBuf);
+    c.vkCmdEndRenderPass(cmdBuf);
+
+    try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
 }
 
 pub fn main() !void {
@@ -129,7 +158,7 @@ pub fn main() !void {
     var pipeline = try alloc.create(Pipeline);
     defer pipeline.deinit();
 
-    var swapChain = try Swapchain.init(alloc, &device, &window);
+    var swapChain = try Swapchain.init(alloc, &device, window.getExtend());
     defer swapChain.deinit();
 
     var model = try loadModels(&device);
@@ -139,12 +168,12 @@ pub fn main() !void {
     try createPipelineLayout(&device, &pipelineLayout);
     defer c.vkDestroyPipelineLayout(device.globalDevice, pipelineLayout, null);
 
-    try createPipeline(&device, &swapChain, &pipelineLayout, pipeline);
-    try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device, pipeline, &model);
+    try recreateSwapChain(alloc, &swapChain, &window, &device, pipeline, &pipelineLayout);
+    try createCommandBuffers(alloc, &commandBuffers, &swapChain, &device);
 
     while (loop.is_running()) {
         c.glfwPollEvents();
-        try drawFrame(&swapChain, &commandBuffers);
+        try drawFrame(alloc, &swapChain, &commandBuffers, pipeline, &window, &device, &pipelineLayout, &model);
     }
 
     // Wait for the device to become idle so the GPU isn't using any of

@@ -109,11 +109,13 @@ pub fn init(device: *Device, fragShader: []const u8, vertShader: []const u8, con
 }
 
 pub fn deinit(self: *Self) void {
-    c.vkDestroyShaderModule(self.device.globalDevice, self.vertShaderModule, null);
-    c.vkDestroyShaderModule(self.device.globalDevice, self.fragShaderModule, null);
-    if (self.graphicsPipeline) |pipeline| {
-        c.vkDestroyPipeline(self.device.globalDevice, pipeline, null);
-    }
+    _ = self;
+    //FIXME: reenable
+    // c.vkDestroyShaderModule(self.device.globalDevice, self.vertShaderModule, null);
+    // c.vkDestroyShaderModule(self.device.globalDevice, self.fragShaderModule, null);
+    // if (self.graphicsPipeline) |pipeline| {
+    //     c.vkDestroyPipeline(self.device.globalDevice, pipeline, null);
+    // }
     std.log.scoped(.pipeline).info("deinit done", .{});
 }
 
