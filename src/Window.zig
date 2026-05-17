@@ -8,19 +8,26 @@ const Self = @This();
 instance: *c.GLFWwindow,
 width: i32,
 height: i32,
+framebufferResized: bool = false,
 
 pub fn init(width: i32, height: i32) !Self {
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
 
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
-    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
+    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_TRUE);
 
     const window = c.glfwCreateWindow(width, height, "Vulkan", null, null) orelse return error.GlfwCreateWindowFailed;
-    return .{
+
+    var w: Self = .{
         .instance = window,
         .width = width,
         .height = height,
     };
+
+    c.glfwSetWindowUserPointer(window, @ptrCast(&w));
+    _ = c.glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+
+    return w;
 }
 
 pub fn deinit(self: *Self) void {
@@ -42,6 +49,27 @@ pub fn getExtend(self: *Self) c.VkExtent2D {
         .height = @intCast(self.height),
     };
 }
+
+pub fn wasWindowResized(self: *Self) bool {
+    return self.framebufferResized;
+}
+
+pub fn resetWindowResized(self: *Self) void {
+    self.framebufferResized = false;
+}
+
+fn framebufferResizeCallback(
+    window: ?*c.GLFWwindow,
+    width: c_int,
+    height: c_int,
+) callconv(.c) void {
+    const ptr = c.glfwGetWindowUserPointer(window);
+    const w: *Self = @ptrCast(@alignCast(ptr));
+    w.framebufferResized = true;
+    w.width = width;
+    w.height = height;
+}
+
 // Helper for tests: try to bring up a Window, but skip the test when the
 // skipping as it's currently broken on (headless) Linux
 fn initOrSkip(width: i32, height: i32) !Self {
