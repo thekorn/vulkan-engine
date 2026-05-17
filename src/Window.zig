@@ -49,7 +49,7 @@ pub fn create_surface(self: *Self, instance: c.VkInstance, surface: *c.VkSurface
     try checkSuccess(c.glfwCreateWindowSurface(instance, self.instance, null, surface));
 }
 
-pub fn getExtend(self: *Self) c.VkExtent2D {
+pub fn getExtent(self: *Self) c.VkExtent2D {
     return .{
         .width = @intCast(self.width),
         .height = @intCast(self.height),

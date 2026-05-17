@@ -41,7 +41,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var loop = try Loop.init(window);
     errdefer loop.deinit();
 
-    var swapChain = try Swapchain.init(alloc, device, window.getExtend());
+    var swapChain = try Swapchain.init(alloc, device, window.getExtent());
     errdefer swapChain.deinit();
 
     var self: Self = .{
@@ -170,11 +170,11 @@ fn loadModels(self: *Self) !void {
 }
 
 fn recreateSwapChain(self: *Self) !void {
-    var extend = self.window.getExtend();
+    var extent = self.window.getExtent();
 
-    while (extend.width == 0 or extend.height == 0) {
+    while (extent.width == 0 or extent.height == 0) {
         c.glfwWaitEvents();
-        extend = self.window.getExtend();
+        extent = self.window.getExtent();
     }
 
     try checkSuccess(c.vkDeviceWaitIdle(self.device.globalDevice));
@@ -185,7 +185,7 @@ fn recreateSwapChain(self: *Self) !void {
     // with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR (surfaced here as
     // error.Unexpected from vkCreateSwapchainKHR).
     self.swapChain.deinit();
-    self.swapChain = try Swapchain.init(self.alloc, self.device, extend);
+    self.swapChain = try Swapchain.init(self.alloc, self.device, extent);
     try self.createPipeline();
 }
 
