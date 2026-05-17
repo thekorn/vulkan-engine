@@ -106,7 +106,7 @@ fn createPipeline(self: *Self) !void {
     // Destroy any previously created pipeline (e.g. from a prior
     // swapchain recreation) so its shader modules and VkPipeline are
     // released; otherwise they leak until vkDestroyDevice and trigger
-    // VUID-vkDestroyDevice-device-05137 validation errors.
+    // vkDestroyDevice-device validation errors.
     if (self.pipeline) |old| old.deinit();
     self.pipeline = null;
 
