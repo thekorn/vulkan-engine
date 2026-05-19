@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
+const cglm = @import("c.zig").cglm;
 const Device = @import("Device.zig");
 const Loop = @import("Loop.zig");
 const Pipeline = @import("Pipeline.zig");
@@ -33,8 +34,8 @@ commandBuffers: ArrayList(c.VkCommandBuffer),
 frame: usize = 30,
 
 const SimplePushConstantData = extern struct {
-    offset: @Vector(2, f32),
-    color: @Vector(3, f32) align(16),
+    offset: cglm.vec2,
+    color: cglm.vec3 align(16),
 };
 
 pub fn init(alloc: std.mem.Allocator) !Self {
