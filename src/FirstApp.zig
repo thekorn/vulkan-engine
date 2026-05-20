@@ -195,7 +195,11 @@ fn loadGameObjects(self: *Self) !void {
     const triangle = try GameObject.init(
         model,
         .{ 0.1, 0.8, 0.1 },
-        .{ .translation = .{ 0.2, 0.0 }, .scale = .{ 2.0, 0.5 } },
+        .{
+            .translation = .{ 0.2, 0.0 },
+            .scale = .{ 2.0, 0.5 },
+            .rotation = 2 * std.math.pi * 0.25,
+        },
     );
 
     try self.gameObjects.append(self.alloc, triangle);
@@ -204,6 +208,8 @@ fn loadGameObjects(self: *Self) !void {
 pub fn renderGameObjects(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
     self.pipeline.?.bind(commandBuffer);
     for (self.gameObjects.items) |*obj| {
+        obj.transform2d.rotation += 0.01;
+
         const push: SimplePushConstantData = .{
             .offset = obj.transform2d.translation,
             .color = obj.color,
