@@ -9,6 +9,8 @@ const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
+const vec2s = @import("utils.zig").vec2s;
+const vec3s = @import("utils.zig").vec3s;
 const ArrayList = std.ArrayList;
 
 const Self = @This();
@@ -34,8 +36,8 @@ commandBuffers: ArrayList(c.VkCommandBuffer),
 frame: usize = 30,
 
 const SimplePushConstantData = extern struct {
-    offset: cglm.vec2,
-    color: cglm.vec3 align(16),
+    offset: cglm.vec2s,
+    color: cglm.vec3s align(16),
 };
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -179,9 +181,9 @@ fn drawFrame(self: *Self) !void {
 
 fn loadModels(self: *Self) !void {
     const vertices = [_]Model.Vertex{
-        Model.Vertex{ .position = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        Model.Vertex{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        Model.Vertex{ .position = .{ .raw = .{ 0.0, -0.5 } }, .color = .{ .raw = .{ 1.0, 0.0, 0.0 } } },
+        Model.Vertex{ .position = .{ .raw = .{ 0.5, 0.5 } }, .color = .{ .raw = .{ 0.0, 1.0, 0.0 } } },
+        Model.Vertex{ .position = .{ .raw = .{ -0.5, 0.5 } }, .color = .{ .raw = .{ 0.0, 0.0, 1.0 } } },
     };
 
     self.model = try Model.init(self.device, vertices[0..]);
@@ -275,8 +277,8 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
 
     for (0..4) |i| {
         const push: SimplePushConstantData = .{
-            .offset = .{ -0.5 + @as(f32, @floatFromInt(self.frame)) * 0.02, -0.4 + @as(f32, @floatFromInt(i)) * 0.2 },
-            .color = .{ 0.0, 0.0, 0.2 + 0.2 * @as(f32, @floatFromInt(i)) },
+            .offset = vec2s(.{ -0.5 + @as(f32, @floatFromInt(self.frame)) * 0.02, -0.4 + @as(f32, @floatFromInt(i)) * 0.2 }),
+            .color = vec3s(.{ 0.0, 0.0, 0.2 + 0.2 * @as(f32, @floatFromInt(i)) }),
         };
 
         c.vkCmdPushConstants(
