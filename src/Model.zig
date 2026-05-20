@@ -13,8 +13,8 @@ vertexBuffer: c.VkBuffer = undefined,
 vertexBufferMemory: c.VkDeviceMemory = undefined,
 
 pub const Vertex = extern struct {
-    position: cglm.vec2s,
-    color: cglm.vec3s align(16),
+    position: cglm.vec2,
+    color: cglm.vec3 align(16),
 
     pub fn getBindingDescriptions() [1]c.VkVertexInputBindingDescription {
         return [1]c.VkVertexInputBindingDescription{
