@@ -8,6 +8,7 @@ const Pipeline = @import("Pipeline.zig");
 const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
+const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
 
@@ -28,12 +29,13 @@ device: *Device,
 loop: Loop,
 pipeline: ?*Pipeline,
 swapChain: ?Swapchain,
-model: Model,
+gameObjects: ArrayList(GameObject),
 pipelineLayout: c.VkPipelineLayout,
 commandBuffers: ArrayList(c.VkCommandBuffer),
-frame: usize = 30,
 
 const SimplePushConstantData = extern struct {
+    // TODO: should be cglm.GLM_MAT2_IDENTITY
+    transform: cglm.mat2 = .{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } },
     offset: cglm.vec2,
     color: cglm.vec3 align(16),
 };
@@ -55,12 +57,12 @@ pub fn init(alloc: std.mem.Allocator) !Self {
         .loop = loop,
         .pipeline = null,
         .swapChain = null,
-        .model = undefined,
+        .gameObjects = .empty,
         .pipelineLayout = undefined,
         .commandBuffers = .empty,
     };
 
-    try self.loadModels();
+    try self.loadGameObjects();
     try self.createPipelineLayout();
     try self.recreateSwapChain();
     try self.createCommandBuffers();
@@ -72,7 +74,8 @@ pub fn deinit(self: *Self) void {
     std.log.scoped(.firstApp).info("deinit first app", .{});
     self.commandBuffers.deinit(self.alloc);
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
-    self.model.deinit();
+    for (self.gameObjects.items) |*obj| obj.deinit();
+    self.gameObjects.deinit(self.alloc);
     if (self.swapChain) |*s| s.deinit();
     if (self.pipeline) |p| p.deinit();
     self.loop.deinit();
@@ -177,14 +180,47 @@ fn drawFrame(self: *Self) !void {
     }
 }
 
-fn loadModels(self: *Self) !void {
+fn loadGameObjects(self: *Self) !void {
     const vertices = [_]Model.Vertex{
         Model.Vertex{ .position = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
         Model.Vertex{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
         Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
     };
 
-    self.model = try Model.init(self.device, vertices[0..]);
+    // `Model` is moved into the `GameObject` which then owns its
+    // lifetime; ownership ends in `GameObject.deinit`.
+    var model = try Model.init(self.device, vertices[0..]);
+    errdefer model.deinit();
+
+    const triangle = try GameObject.init(
+        model,
+        .{ 0.1, 0.8, 0.1 },
+        .{ .translation = .{ 0.2, 0.0 } },
+    );
+
+    try self.gameObjects.append(self.alloc, triangle);
+}
+
+pub fn renderGameObjects(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
+    self.pipeline.?.bind(commandBuffer);
+    for (self.gameObjects.items) |*obj| {
+        const push: SimplePushConstantData = .{
+            .offset = obj.transform2d.translation,
+            .color = obj.color,
+            .transform = GameObject.Transform2dComponent.mat2(),
+        };
+
+        c.vkCmdPushConstants(
+            commandBuffer,
+            self.pipelineLayout,
+            c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            @sizeOf(SimplePushConstantData),
+            &push,
+        );
+        obj.model.bind(commandBuffer);
+        obj.model.draw(commandBuffer);
+    }
 }
 
 fn recreateSwapChain(self: *Self) !void {
@@ -222,7 +258,6 @@ fn recreateSwapChain(self: *Self) !void {
 }
 
 fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
-    self.frame = (self.frame + 1) % 100;
     const cmdBuf = self.commandBuffers.items[imageIndex];
     const beginInfo: c.VkCommandBufferBeginInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -270,25 +305,7 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
     c.vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
     c.vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 
-    self.pipeline.?.bind(cmdBuf);
-    self.model.bind(cmdBuf);
-
-    for (0..4) |i| {
-        const push: SimplePushConstantData = .{
-            .offset = .{ -0.5 + @as(f32, @floatFromInt(self.frame)) * 0.02, -0.4 + @as(f32, @floatFromInt(i)) * 0.2 },
-            .color = .{ 0.0, 0.0, 0.2 + 0.2 * @as(f32, @floatFromInt(i)) },
-        };
-
-        c.vkCmdPushConstants(
-            cmdBuf,
-            self.pipelineLayout,
-            c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            @sizeOf(SimplePushConstantData),
-            &push,
-        );
-        self.model.draw(cmdBuf);
-    }
+    try self.renderGameObjects(cmdBuf);
 
     c.vkCmdEndRenderPass(cmdBuf);
 
