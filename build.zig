@@ -56,12 +56,12 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    //exe.linkLibC();
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
     exe.root_module.linkSystemLibrary("cglm", .{});
 
     if (target.result.os.tag == .linux) {
+        exe.root_module.link_libc = true;
         exe.root_module.linkSystemLibrary("gl", .{});
     }
 

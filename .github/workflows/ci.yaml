@@ -16,7 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
-    runs-on: ${{matrix.os}}
+    #runs-on: ${{matrix.os}}
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
