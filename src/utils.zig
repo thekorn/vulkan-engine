@@ -1,11 +1,23 @@
 const std = @import("std");
 const c = @import("c.zig").c;
+const cglm = @import("c.zig").cglm;
 
 pub fn checkSuccess(result: c.VkResult) !void {
     switch (result) {
         c.VK_SUCCESS => {},
         else => return error.Unexpected,
     }
+}
+
+pub fn vec2s(v: cglm.vec2) cglm.vec2s {
+    return .{ .raw = v };
+}
+pub fn vec3s(v: cglm.vec3) cglm.vec3s {
+    return .{ .raw = v };
+}
+
+pub fn mat2s(v: cglm.mat2) cglm.mat2s {
+    return .{ .raw = v };
 }
 
 test "checkSuccess returns void on VK_SUCCESS" {

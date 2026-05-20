@@ -10,6 +10,9 @@ const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
+const vec2s = @import("utils.zig").vec2s;
+const vec3s = @import("utils.zig").vec3s;
+const mat2s = @import("utils.zig").mat2s;
 const ArrayList = std.ArrayList;
 
 const Self = @This();
@@ -35,9 +38,9 @@ commandBuffers: ArrayList(c.VkCommandBuffer),
 
 const SimplePushConstantData = extern struct {
     // TODO: should be cglm.GLM_MAT2_IDENTITY
-    transform: cglm.mat2 = .{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } },
-    offset: cglm.vec2,
-    color: cglm.vec3 align(16),
+    transform: cglm.mat2s = mat2s(.{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } }),
+    offset: cglm.vec2s,
+    color: cglm.vec3s align(16),
 };
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -182,9 +185,9 @@ fn drawFrame(self: *Self) !void {
 
 fn loadGameObjects(self: *Self) !void {
     const vertices = [_]Model.Vertex{
-        Model.Vertex{ .position = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        Model.Vertex{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        Model.Vertex{ .position = vec2s(.{ 0.0, -0.5 }), .color = vec3s(.{ 1.0, 0.0, 0.0 }) },
+        Model.Vertex{ .position = vec2s(.{ 0.5, 0.5 }), .color = vec3s(.{ 0.0, 1.0, 0.0 }) },
+        Model.Vertex{ .position = vec2s(.{ -0.5, 0.5 }), .color = vec3s(.{ 0.0, 0.0, 1.0 }) },
     };
 
     // `Model` is moved into the `GameObject` which then owns its
@@ -194,8 +197,8 @@ fn loadGameObjects(self: *Self) !void {
 
     const triangle = try GameObject.init(
         model,
-        .{ 0.1, 0.8, 0.1 },
-        .{ .translation = .{ 0.2, 0.0 } },
+        vec3s(.{ 0.1, 0.8, 0.1 }),
+        .{ .translation = vec2s(.{ 0.2, 0.0 }) },
     );
 
     try self.gameObjects.append(self.alloc, triangle);

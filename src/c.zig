@@ -31,4 +31,5 @@ pub const cglm = @cImport({
     @cUndef("__AVX__");
 
     @cInclude("cglm/cglm.h");
+    @cInclude("cglm/struct.h");
 });
