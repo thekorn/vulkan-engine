@@ -15,9 +15,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
-    #runs-on: ${{matrix.os}}
-    runs-on: macos-latest
+        # linux broken atm
+        # os: [macos-latest, ubuntu-latest]
+        os: [macos-latest]
+    runs-on: ${{matrix.os}}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
