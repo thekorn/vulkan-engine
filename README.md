@@ -14,6 +14,27 @@ Or even
 nix develop --command zig build run
 ```
 
+## tools
+
+### lines of code
+
+```
+nix develop --command cloc src shaders
+      14 text files.
+      14 unique files.
+       0 files ignored.
+
+github.com/AlDanial/cloc v 2.08  T=0.01 s (1393.9 files/s, 318794.2 lines/s)
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+Zig                             12            469            173           2533
+GLSL                             2              6              0             21
+-------------------------------------------------------------------------------
+SUM:                            14            475            173           2554
+-------------------------------------------------------------------------------
+```
+
 ## resources
 
 - [Vulkan Tutorial](https://vulkan-tutorial.com/)

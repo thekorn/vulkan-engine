@@ -25,6 +25,7 @@
               zig_0_16
               zls_0_16
               codebook
+              cloc
               shaderc
               pkg-config
               vulkan-headers
