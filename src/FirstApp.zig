@@ -192,24 +192,52 @@ fn loadGameObjects(self: *Self) !void {
     var model = try Model.init(self.device, vertices[0..]);
     errdefer model.deinit();
 
-    const triangle = try GameObject.init(
-        model,
-        .{ 0.1, 0.8, 0.1 },
-        .{
-            .translation = .{ 0.2, 0.0 },
-            .scale = .{ 2.0, 0.5 },
-            .rotation = 2 * std.math.pi * 0.25,
-        },
-    );
+    var colors = [_]cglm.vec3{
+        .{ 1.0, 0.7, 0.73 },
+        .{ 1.0, 0.87, 0.73 },
+        .{ 1.0, 1.0, 0.73 },
+        .{ 0.73, 1.0, 0.8 },
+        .{ 0.73, 0.88, 1.0 },
+    };
 
-    try self.gameObjects.append(self.alloc, triangle);
+    for (&colors) |*color| {
+        color.* = .{
+            @floatCast(cglm.pow(@as(f64, color[0]), 2.2)),
+            @floatCast(cglm.pow(@as(f64, color[1]), 2.2)),
+            @floatCast(cglm.pow(@as(f64, color[2]), 2.2)),
+        };
+    }
+
+    for (0..40) |i| {
+        const triangle = try GameObject.init(
+            model,
+            colors[i % colors.len],
+            .{
+                .scale = .{ 2.0, 0.5 },
+                .rotation = @as(f32, @floatFromInt(i)) * std.math.pi * 0.25,
+            },
+        );
+
+        try self.gameObjects.append(self.alloc, triangle);
+    }
 }
 
 pub fn renderGameObjects(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
+    //// update
+    //int i = 0;
+    //for (auto& obj : gameObjects) {
+    //  i += 1;
+    //  obj.transform2d.rotation =
+    //      glm::mod<float>(obj.transform2d.rotation + 0.001f * i, 2.f * glm::pi<float>());
+    //}
+    var i: u64 = 0;
+    for (self.gameObjects.items) |*obj| {
+        i += 1;
+        obj.transform2d.rotation = @floatCast(@mod(obj.transform2d.rotation + 0.001 * @as(f32, @floatFromInt(i)), 2 * std.math.pi));
+    }
+
     self.pipeline.?.bind(commandBuffer);
     for (self.gameObjects.items) |*obj| {
-        obj.transform2d.rotation += 0.01;
-
         const push: SimplePushConstantData = .{
             .offset = obj.transform2d.translation,
             .color = obj.color,
