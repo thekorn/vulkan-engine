@@ -187,11 +187,6 @@ fn loadGameObjects(self: *Self) !void {
         Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
     };
 
-    // `Model` is moved into the `GameObject` which then owns its
-    // lifetime; ownership ends in `GameObject.deinit`.
-    var model = try Model.init(self.device, vertices[0..]);
-    errdefer model.deinit();
-
     var colors = [_]cglm.vec3{
         .{ 1.0, 0.7, 0.73 },
         .{ 1.0, 0.87, 0.73 },
@@ -209,6 +204,14 @@ fn loadGameObjects(self: *Self) !void {
     }
 
     for (0..40) |i| {
+        // Each GameObject owns its Model (and therefore its VkBuffer /
+        // VkDeviceMemory), so allocate a fresh Model per object rather
+        // than copying one shared Model by value — copying would cause
+        // every GameObject.deinit() to destroy the same Vulkan handles,
+        // flooding the validation layer with errors on shutdown.
+        var model = try Model.init(self.device, vertices[0..]);
+        errdefer model.deinit();
+
         const triangle = try GameObject.init(
             model,
             colors[i % colors.len],
