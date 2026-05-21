@@ -165,9 +165,45 @@ test "createVertexBuffers rejects fewer than 3 vertices" {
     const empty: []const Vertex = &.{};
     try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, empty));
 
+    const one = [_]Vertex{
+        .{ .position = .{ 0.0, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+    };
+    try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, one[0..]));
+
     const two = [_]Vertex{
         .{ .position = .{ 0.0, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
         .{ .position = .{ 1.0, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
     };
     try std.testing.expectError(error.InvalidArgument, createVertexBuffers(&model, two[0..]));
+}
+
+test "Vertex.getBindingDescriptions stride equals @sizeOf(Vertex)" {
+    const bindings = Vertex.getBindingDescriptions();
+    try std.testing.expectEqual(@sizeOf(Vertex), bindings[0].stride);
+}
+
+test "Vertex.getAttributeDescriptions places color at @offsetOf(Vertex, \"color\")" {
+    const attrs = Vertex.getAttributeDescriptions();
+    try std.testing.expectEqual(@as(u32, 1), attrs[1].location);
+    try std.testing.expectEqual(@as(u32, 0), attrs[1].binding);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_FORMAT_R32G32B32_SFLOAT),
+        attrs[1].format,
+    );
+    try std.testing.expectEqual(@as(u32, @offsetOf(Vertex, "color")), attrs[1].offset);
+}
+
+test "Vertex.getAttributeDescriptions offsets are distinct" {
+    const attrs = Vertex.getAttributeDescriptions();
+    try std.testing.expect(attrs[0].offset != attrs[1].offset);
+}
+
+test "Model struct can be constructed with default undefined buffer fields" {
+    var device: Device = undefined;
+    const model = Self{
+        .device = &device,
+        .vertexCount = 42,
+    };
+    try std.testing.expectEqual(@as(u32, 42), model.vertexCount);
+    try std.testing.expectEqual(&device, model.device);
 }

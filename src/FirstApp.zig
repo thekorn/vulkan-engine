@@ -348,3 +348,39 @@ fn recordCommandBuffer(self: *Self, imageIndex: u32) !void {
 
     try checkSuccess(c.vkEndCommandBuffer(cmdBuf));
 }
+
+test "FirstApp default window dimensions are 800x600" {
+    try std.testing.expectEqual(@as(comptime_int, 800), width);
+    try std.testing.expectEqual(@as(comptime_int, 600), height);
+}
+
+test "SimplePushConstantData has the expected field layout" {
+    const fields = @typeInfo(SimplePushConstantData).@"struct".fields;
+    try std.testing.expectEqual(@as(usize, 3), fields.len);
+    try std.testing.expectEqualStrings("transform", fields[0].name);
+    try std.testing.expectEqual(cglm.mat2, fields[0].type);
+    try std.testing.expectEqualStrings("offset", fields[1].name);
+    try std.testing.expectEqual(cglm.vec2, fields[1].type);
+    try std.testing.expectEqualStrings("color", fields[2].name);
+    try std.testing.expectEqual(cglm.vec3, fields[2].type);
+}
+
+test "SimplePushConstantData defaults transform to the identity matrix" {
+    const p: SimplePushConstantData = .{
+        .offset = .{ 0, 0 },
+        .color = .{ 0, 0, 0 },
+    };
+    try std.testing.expectEqual(@as(f32, 1.0), p.transform[0][0]);
+    try std.testing.expectEqual(@as(f32, 0.0), p.transform[0][1]);
+    try std.testing.expectEqual(@as(f32, 0.0), p.transform[1][0]);
+    try std.testing.expectEqual(@as(f32, 1.0), p.transform[1][1]);
+}
+
+test "SimplePushConstantData color is 16-byte aligned (for std140 push constants)" {
+    // The color field carries an explicit `align(16)` declaration to
+    // match the alignment expected by the shader's push-constant block.
+    // We only assert the alignment property, not a specific offset, since
+    // the offset depends on the size of `transform` and `offset` above it.
+    try std.testing.expect(@offsetOf(SimplePushConstantData, "color") % 16 == 0);
+    try std.testing.expect(@offsetOf(SimplePushConstantData, "color") >= @offsetOf(SimplePushConstantData, "offset"));
+}

@@ -63,3 +63,46 @@ test "shutdown signal stops the loop" {
 
     try std.testing.expect(shutdown_requested.load(.acquire));
 }
+
+test "resetShutdownForTesting clears the shutdown flag" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    shutdown_requested.store(true, .release);
+    resetShutdownForTesting();
+
+    try std.testing.expect(!shutdown_requested.load(.acquire));
+}
+
+test "Loop has expected fields and types" {
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 1), info.fields.len);
+    try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
+}
+
+test "is_running returns false once shutdown is requested, regardless of window" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    resetShutdownForTesting();
+    defer resetShutdownForTesting();
+
+    // Window is never dereferenced when shutdown is requested, because
+    // the atomic check short-circuits before touching `self.window`.
+    var window: Window = undefined;
+    var loop: Self = .{ .window = &window };
+
+    shutdown_requested.store(true, .release);
+    try std.testing.expect(!loop.is_running());
+}
+
+test "handleSignal is idempotent (multiple deliveries leave flag true)" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    resetShutdownForTesting();
+    defer resetShutdownForTesting();
+
+    handleSignal(posix.SIG.INT);
+    handleSignal(posix.SIG.TERM);
+    handleSignal(posix.SIG.HUP);
+
+    try std.testing.expect(shutdown_requested.load(.acquire));
+}

@@ -139,3 +139,37 @@ test "Window.should_close becomes true after glfwSetWindowShouldClose" {
     c.glfwSetWindowShouldClose(window.instance, c.GLFW_TRUE);
     try std.testing.expect(window.should_close());
 }
+
+test "Window.getExtent reports the requested dimensions" {
+    const window = try initOrSkip(std.testing.allocator, 1024, 768);
+    defer window.deinit();
+
+    const extent = window.getExtent();
+    try std.testing.expectEqual(@as(u32, 1024), extent.width);
+    try std.testing.expectEqual(@as(u32, 768), extent.height);
+}
+
+test "Window.framebufferResized defaults to false" {
+    const window = try initOrSkip(std.testing.allocator, 320, 240);
+    defer window.deinit();
+
+    try std.testing.expect(!window.wasWindowResized());
+}
+
+test "Window.wasWindowResized reflects framebufferResized flag" {
+    const window = try initOrSkip(std.testing.allocator, 320, 240);
+    defer window.deinit();
+
+    window.framebufferResized = true;
+    try std.testing.expect(window.wasWindowResized());
+}
+
+test "Window.resetWindowResized clears the flag" {
+    const window = try initOrSkip(std.testing.allocator, 320, 240);
+    defer window.deinit();
+
+    window.framebufferResized = true;
+    window.resetWindowResized();
+    try std.testing.expect(!window.wasWindowResized());
+    try std.testing.expect(!window.framebufferResized);
+}
