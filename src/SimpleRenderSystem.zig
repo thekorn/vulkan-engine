@@ -15,10 +15,13 @@ pipeline: ?*Pipeline,
 pipelineLayout: c.VkPipelineLayout,
 
 pub const SimplePushConstantData = extern struct {
-    // TODO: should be cglm.GLM_MAT2_IDENTITY
-    transform: cglm.mat2 = .{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } },
-    offset: cglm.vec2,
-    color: cglm.vec3 align(16),
+    transform: cglm.mat4 = .{
+        .{ 1.0, 0.0, 0.0, 0.0 },
+        .{ 0.0, 1.0, 0.0, 0.0 },
+        .{ 0.0, 0.0, 1.0, 0.0 },
+        .{ 0.0, 0.0, 0.0, 1.0 },
+    },
+    color: cglm.vec3 align(16) = .{ 0, 0, 0 },
 };
 
 pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPass) !Self {
@@ -81,22 +84,15 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
 }
 
 pub fn renderGameObjects(self: *Self, commandBuffer: c.VkCommandBuffer, gameObjects: []GameObject) !void {
-    // update rotation
-    var i: u64 = 0;
-    for (gameObjects) |*obj| {
-        i += 1;
-        obj.transform2d.rotation = @floatCast(@mod(
-            obj.transform2d.rotation + 0.001 * @as(f32, @floatFromInt(i)),
-            2 * std.math.pi,
-        ));
-    }
-
     self.pipeline.?.bind(commandBuffer);
+    const two_pi: f32 = 2.0 * std.math.pi;
     for (gameObjects) |*obj| {
+        obj.transform.rotation[1] = @mod(obj.transform.rotation[1] + 0.01, two_pi);
+        obj.transform.rotation[0] = @mod(obj.transform.rotation[0] + 0.005, two_pi);
+
         const push: SimplePushConstantData = .{
-            .offset = obj.transform2d.translation,
             .color = obj.color,
-            .transform = obj.transform2d.mat2(),
+            .transform = obj.transform.mat4(),
         };
 
         c.vkCmdPushConstants(
@@ -121,27 +117,23 @@ test "SimpleRenderSystem has expected fields and types" {
 
 test "SimplePushConstantData has the expected field layout" {
     const fields = @typeInfo(SimplePushConstantData).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 3), fields.len);
+    try std.testing.expectEqual(@as(usize, 2), fields.len);
     try std.testing.expectEqualStrings("transform", fields[0].name);
-    try std.testing.expectEqual(cglm.mat2, fields[0].type);
-    try std.testing.expectEqualStrings("offset", fields[1].name);
-    try std.testing.expectEqual(cglm.vec2, fields[1].type);
-    try std.testing.expectEqualStrings("color", fields[2].name);
-    try std.testing.expectEqual(cglm.vec3, fields[2].type);
+    try std.testing.expectEqual(cglm.mat4, fields[0].type);
+    try std.testing.expectEqualStrings("color", fields[1].name);
+    try std.testing.expectEqual(cglm.vec3, fields[1].type);
 }
 
 test "SimplePushConstantData defaults transform to the identity matrix" {
-    const p: SimplePushConstantData = .{
-        .offset = .{ 0, 0 },
-        .color = .{ 0, 0, 0 },
-    };
-    try std.testing.expectEqual(@as(f32, 1.0), p.transform[0][0]);
-    try std.testing.expectEqual(@as(f32, 0.0), p.transform[0][1]);
-    try std.testing.expectEqual(@as(f32, 0.0), p.transform[1][0]);
-    try std.testing.expectEqual(@as(f32, 1.0), p.transform[1][1]);
+    const p: SimplePushConstantData = .{};
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            const expected: f32 = if (col == row) 1.0 else 0.0;
+            try std.testing.expectEqual(expected, p.transform[col][row]);
+        }
+    }
 }
 
 test "SimplePushConstantData color is 16-byte aligned (for std140 push constants)" {
     try std.testing.expect(@offsetOf(SimplePushConstantData, "color") % 16 == 0);
-    try std.testing.expect(@offsetOf(SimplePushConstantData, "color") >= @offsetOf(SimplePushConstantData, "offset"));
 }

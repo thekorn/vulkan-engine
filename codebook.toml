@@ -46,6 +46,7 @@ words = [
     "stdenv",
     "subpass",
     "swapchain",
+    "tait",
     "undefs",
     "unorm",
     "workson",

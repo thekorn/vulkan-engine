@@ -121,49 +121,81 @@ pub fn run(self: *Self) !void {
     _ = c.vkDeviceWaitIdle(self.device.globalDevice);
 }
 
+// temporary helper function, creates a 1x1x1 cube centered at offset
+fn createCubeModel(device: *Device, offset: cglm.vec3) !Model {
+    var vertices = [_]Model.Vertex{
+        // left face (white)
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
+
+        // right face (yellow)
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
+
+        // top face (orange, remember y axis points down)
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
+
+        // bottom face (red)
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
+
+        // nose face (blue)
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
+
+        // tail face (green)
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
+    };
+
+    for (&vertices) |*v| {
+        v.position[0] += offset[0];
+        v.position[1] += offset[1];
+        v.position[2] += offset[2];
+    }
+
+    return Model.init(device, vertices[0..]);
+}
+
 fn loadGameObjects(self: *Self) !void {
-    const vertices = [_]Model.Vertex{
-        Model.Vertex{ .position = .{ 0.0, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        Model.Vertex{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        Model.Vertex{ .position = .{ -0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
-    };
+    var model = try createCubeModel(self.device, .{ 0.0, 0.0, 0.0 });
+    errdefer model.deinit();
 
-    var colors = [_]cglm.vec3{
-        .{ 1.0, 0.7, 0.73 },
-        .{ 1.0, 0.87, 0.73 },
-        .{ 1.0, 1.0, 0.73 },
-        .{ 0.73, 1.0, 0.8 },
-        .{ 0.73, 0.88, 1.0 },
-    };
+    const cube = try GameObject.init(
+        model,
+        .{ 0, 0, 0 },
+        .{
+            .translation = .{ 0.0, 0.0, 0.5 },
+            .scale = .{ 0.5, 0.5, 0.5 },
+        },
+    );
 
-    for (&colors) |*color| {
-        color.* = .{
-            @floatCast(cglm.pow(@as(f64, color[0]), 2.2)),
-            @floatCast(cglm.pow(@as(f64, color[1]), 2.2)),
-            @floatCast(cglm.pow(@as(f64, color[2]), 2.2)),
-        };
-    }
-
-    for (0..40) |i| {
-        // Each GameObject owns its Model (and therefore its VkBuffer /
-        // VkDeviceMemory), so allocate a fresh Model per object rather
-        // than copying one shared Model by value — copying would cause
-        // every GameObject.deinit() to destroy the same Vulkan handles,
-        // flooding the validation layer with errors on shutdown.
-        var model = try Model.init(self.device, vertices[0..]);
-        errdefer model.deinit();
-
-        const triangle = try GameObject.init(
-            model,
-            colors[i % colors.len],
-            .{
-                .scale = .{ 2.0, 0.5 },
-                .rotation = @as(f32, @floatFromInt(i)) * std.math.pi * 0.25,
-            },
-        );
-
-        try self.gameObjects.append(self.alloc, triangle);
-    }
+    try self.gameObjects.append(self.alloc, cube);
 }
 
 test "FirstApp default window dimensions are 800x600" {
