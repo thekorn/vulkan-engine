@@ -1,5 +1,9 @@
 # Vulkan Engine
 
+A small Vulkan rendering engine written in Zig. It renders 3D `GameObject`s
+(currently a colored cube) through a layered architecture built around a
+swapchain, renderer, and pluggable render systems.
+
 ## local development
 
 Setup using nix
@@ -14,25 +18,25 @@ Or even
 nix develop --command zig build run
 ```
 
+## tests & spell checking
+
+Run the test suite **and** the spell checker before pushing changes:
+
+```
+nix develop --command zig build test --summary all
+nix develop --command codebook-lsp lint --unique -s .
+```
+
+The spell-check step uses [`codebook`](https://github.com/blopker/codebook) and
+respects the project dictionary in `codebook.toml`. CI runs both steps as part
+of the `build test` workflow.
+
 ## tools
 
 ### lines of code
 
 ```
 nix develop --command cloc src shaders
-      14 text files.
-      14 unique files.
-       0 files ignored.
-
-github.com/AlDanial/cloc v 2.08  T=0.01 s (1393.9 files/s, 318794.2 lines/s)
--------------------------------------------------------------------------------
-Language                     files          blank        comment           code
--------------------------------------------------------------------------------
-Zig                             12            469            173           2533
-GLSL                             2              6              0             21
--------------------------------------------------------------------------------
-SUM:                            14            475            173           2554
--------------------------------------------------------------------------------
 ```
 
 ## resources

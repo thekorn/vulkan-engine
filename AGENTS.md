@@ -36,7 +36,7 @@ nix develop --command zig build run
 **Option 2 - Manual Setup:**
 Install required dependencies:
 
-- Zig 0.15.2+
+- Zig 0.16.0
 - GLFW3
 - Vulkan SDK
 - shaderc/glslc (for shader compilation)
@@ -48,6 +48,24 @@ zig build              # Build executable
 zig build run          # Build and run
 zig build test         # Run tests
 ```
+
+### Spell Checking
+
+The project uses [`codebook`](https://github.com/blopker/codebook) for
+spell-checking source and documentation. The project dictionary lives in
+`codebook.toml`.
+
+Always run the spell checker together with the test suite:
+
+```bash
+nix develop --command zig build test --summary all
+nix develop --command codebook-lsp lint --unique -s .
+```
+
+CI (see `.github/workflows/ci.yaml`) runs both `codebook-lsp lint .` and
+`zig build test`; treat the spell check as a required part of "running the
+tests" and resolve any reported words either by fixing the spelling or, when
+the term is a legitimate technical word, by adding it to `codebook.toml`.
 
 ---
 
@@ -68,17 +86,37 @@ vulkan-engine/
 │   └── workflows/
 │       └── ci.yaml        # GitHub Actions CI/CD
 ├── src/                   # Core application source
-│   ├── main.zig           # Entry point
-│   ├── Vulkan.zig         # Vulkan instance & initialization
-│   ├── Device.zig         # Physical/logical device management
-│   ├── Window.zig         # GLFW window management
-│   ├── Pipeline.zig       # Graphics pipeline configuration
-│   ├── Loop.zig           # Main event loop
-│   ├── c.zig              # C interop definitions
-│   └── utils.zig          # Utility functions
+│   ├── main.zig             # Entry point (delegates to FirstApp)
+│   ├── FirstApp.zig         # Top-level application: owns window, device,
+│   │                        #   loop, renderer and game objects
+│   ├── Vulkan.zig           # Vulkan instance & initialization
+│   ├── Device.zig           # Physical/logical device management,
+│   │                        #   buffer / image / command-pool helpers
+│   ├── Window.zig           # GLFW window management & surface creation
+│   ├── Swapchain.zig        # Swapchain, depth resources, render pass,
+│   │                        #   framebuffers, synchronization, acquire /
+│   │                        #   submit-present (MAX_FRAMES_IN_FLIGHT = 2)
+│   ├── Renderer.zig         # High-level frame driver: owns the swapchain
+│   │                        #   and per-frame command buffers, exposes
+│   │                        #   beginFrame / beginSwapChainRenderPass /
+│   │                        #   endSwapChainRenderPass / endFrame
+│   ├── Pipeline.zig         # Graphics pipeline configuration & creation
+│   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
+│   │                          # that draws a list of GameObjects
+│   ├── Model.zig            # Vertex buffer wrapper; defines `Vertex`
+│   │                        #   (position + color) with binding /
+│   │                        #   attribute descriptions
+│   ├── GameObject.zig       # Renderable entity: id, model, color and
+│   │                        #   TransformComponent (translation / scale /
+│   │                        #   rotation -> mat4 via Tait-Bryan Y-X-Z)
+│   ├── Loop.zig             # Main event loop & POSIX signal handling
+│   ├── c.zig                # C interop: GLFW + Vulkan and a separate
+│   │                        #   cglm @cImport (scalar / no SIMD)
+│   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
-│   ├── shader.vert        # Vertex shader
-│   └── shader.frag        # Fragment shader
+│   ├── shader.vert        # Vertex shader (push-constant transform, color)
+│   └── shader.frag        # Fragment shader (writes vertex color)
+├── test_runner.zig        # Custom Zig test runner
 └── zig-out/               # Build output directory (generated)
 ```
 
@@ -88,38 +126,75 @@ vulkan-engine/
 
 ### 3.1 Component Overview
 
-The engine follows a layered architecture with clear separation of concerns:
+The engine follows a layered architecture with clear separation of concerns.
+`main.zig` is just a thin entry point; the real application lives in
+`FirstApp.zig`, which composes a window, device, loop, renderer and a list
+of `GameObject`s, and drives them via a `SimpleRenderSystem` inside its
+`run()` loop.
 
 ```
 main.zig (Entry Point)
     ↓
-Loop.zig (Event Loop) ←→ Window.zig (GLFW Window)
-                              ↓
-Device.zig (Vulkan Device) ← Device Selection & Creation
-    ↓
-Vulkan.zig (Instance & Core)
-    ↓
-Pipeline.zig (Graphics Pipeline)
-    ↓
-c.zig (C FFI Layer)
-    ↓
-External Libraries (GLFW, Vulkan)
+FirstApp.zig (Application root)
+    ├── Window.zig   (GLFW window + surface)
+    ├── Device.zig   (physical/logical device, queues, command pool,
+    │                 buffer/image helpers)
+    │     ↓
+    │   Vulkan.zig   (instance, validation layers, extension queries)
+    ├── Loop.zig     (event loop + signal handling)
+    ├── Renderer.zig (owns Swapchain + per-frame command buffers)
+    │     ↓
+    │   Swapchain.zig (images, image views, depth, render pass,
+    │                  framebuffers, sync, acquire/present)
+    ├── SimpleRenderSystem.zig
+    │     └── Pipeline.zig (graphics pipeline, shader modules)
+    └── GameObject.zig (Model + TransformComponent + color)
+              ↓
+          Model.zig (Vertex buffer)
+              ↓
+          c.zig (GLFW / Vulkan / cglm FFI)
+              ↓
+          External Libraries (GLFW, Vulkan, cglm)
 ```
 
 ### 3.2 Component Descriptions
 
 #### **main.zig** - Entry Point
 
-- **Purpose:** Application initialization and lifecycle management
-- **Window Size:** 800x600
+- **Purpose:** Construct the top-level application and run it.
 - **Key Functions:**
-  - `main()` - Initialize and run the application
-- **Initialization Order:**
-  1. Create window
-  2. Initialize device
-  3. Create event loop
-  4. Initialize graphics pipeline
-  5. Start event loop
+  - `main()` - Creates a page allocator, initializes `FirstApp`, runs it
+    and `defer`s `deinit`.
+- All test imports for the test runner are also registered here.
+
+#### **FirstApp.zig** - Application Root
+
+- **Purpose:** Owns the full application lifetime and the per-frame loop.
+- **Window Size:** 800x600 (`FirstApp.width` / `FirstApp.height`)
+- **Fields:**
+  - `alloc` - Allocator passed in from `main`
+  - `window: *Window`, `device: *Device` - heap-allocated, stable
+    back-references for sub-components
+  - `loop: Loop`, `renderer: Renderer`
+  - `gameObjects: ArrayList(GameObject)`
+- **Key Functions:**
+  - `init(alloc)` - Wires up window → device → loop → renderer, then calls
+    `loadGameObjects()`.
+  - `deinit()` - Tears everything down in reverse order.
+  - `run()` - Main loop:
+    1. Build a `SimpleRenderSystem` against the current swapchain render
+       pass.
+    2. Poll GLFW events.
+    3. `renderer.beginFrame()` → `beginSwapChainRenderPass` →
+       `simpleRenderSystem.renderGameObjects` →
+       `endSwapChainRenderPass` → `endFrame`.
+    4. If the swapchain has to be recreated and reports
+       `error.SwapChainFormatChanged`, the render system is rebuilt
+       against the new render pass and the frame is skipped.
+    5. `vkDeviceWaitIdle` before returning so the GPU is finished with
+       everything before resources are destroyed.
+  - `createCubeModel()` / `loadGameObjects()` - Temporary helpers that
+    build a single colored cube `Model` and wrap it in a `GameObject`.
 
 #### **Window.zig** - GLFW Window Management
 
@@ -183,34 +258,123 @@ External Libraries (GLFW, Vulkan)
   - Required extension support
   - Swapchain format availability
 
+#### **Swapchain.zig** - Swapchain & Frame Resources
+
+- **Purpose:** Owns everything needed to present rendered frames: the
+  swapchain itself, color images & views, depth images & views, the
+  render pass, framebuffers and per-frame synchronization primitives.
+- **Constants:**
+  - `MAX_FRAMES_IN_FLIGHT = 2`
+- **Key Fields:**
+  - `swapChain`, `swapChainImages`, `swapChainImageViews`,
+    `swapChainImageFormat`, `swapChainExtent`
+  - `depthImages`, `depthImageMemories`, `depthImageViews`,
+    `swapChainDepthFormat`
+  - `renderPass`, `swapChainFramebuffers`
+  - `imageAvailableSemaphores`, `renderFinishedSemaphores`,
+    `inFlightFences`, `imagesInFlight`, `currentFrame`
+- **Key Functions:**
+  - `init(alloc, device, extent, prevSwapChain)` - Builds the swapchain
+    (optionally reusing a previous one as `oldSwapchain`), image views,
+    render pass, depth resources, framebuffers and sync objects.
+  - `deinit()` - Waits for the device to be idle, then tears down every
+    Vulkan object it owns.
+  - `acquireNextImage(imageIndex)` - Waits on the per-frame fence and
+    calls `vkAcquireNextImageKHR`.
+  - `submitCommandBuffers(buffers, imageIndex)` - Submits the command
+    buffer with appropriate semaphores and presents the image.
+
+#### **Renderer.zig** - High-Level Frame Driver
+
+- **Purpose:** Hides swapchain recreation and command-buffer bookkeeping
+  behind a small `beginFrame` / `endFrame` API.
+- **Fields:** `alloc`, `window`, `device`, optional `swapChain`,
+  `commandBuffers`, `currentImageIndex`, `currentFrameIndex`,
+  `isFrameStarted`.
+- **Key Functions:**
+  - `init(alloc, window, device)` - Calls `recreateSwapChain()` and
+    allocates per-frame command buffers.
+  - `deinit()` - Frees command buffers and the swapchain.
+  - `getSwapChainRenderPass()` - Returns the render pass that render
+    systems should be built against.
+  - `beginFrame()` / `endFrame()` - Acquire/present a swapchain image
+    and submit the recorded command buffer. May return
+    `error.SwapChainFormatChanged` after a swapchain recreation if the
+    image/depth format changed, so callers can rebuild their pipelines.
+  - `beginSwapChainRenderPass(cb)` / `endSwapChainRenderPass(cb)` -
+    Begin/end the render pass with the current framebuffer, viewport
+    and scissor.
+
 #### **Pipeline.zig** - Graphics Pipeline Configuration
 
-- **Purpose:** Graphics pipeline creation and configuration
-- **Type:** Struct with pipeline handle, shader modules, layout, and render pass
-- **Fields:**
-  - `device` - Reference to device
-  - `graphicsPipeline` - Optional `VkPipeline` handle
-  - `vertShaderModule` - Vertex shader module
-  - `fragShaderModule` - Fragment shader module
-  - `pipelineLayout` - `VkPipelineLayout` handle
-  - `renderPass` - `VkRenderPass` handle
+- **Purpose:** Graphics pipeline creation and configuration.
+- **Type:** Struct with pipeline handle, shader modules and a reference
+  back to its `Device`.
 - **Key Structures:**
   - `PipelineConfigInfo` - Complete pipeline configuration state
+    (viewport / scissor info, rasterization, multisample, color blend,
+    depth/stencil, dynamic state, `renderPass`, `pipelineLayout`).
 - **Key Functions:**
-  - `init(device, fragShader, vertShader, configInfo)` - Create pipeline layout, render pass, shader modules and graphics pipeline
-  - `defaultPipelineConfigInfo(width, height)` - Generate default pipeline config
-  - `createPipelineLayout(device)` - Create empty pipeline layout (no descriptors / push constants)
-  - `createRenderPass(device)` - Create a single-subpass render pass with a `B8G8R8A8_UNORM` color attachment for swapchain presentation
+  - `init(alloc, device, fragSpv, vertSpv, configInfo)` - Creates the
+    shader modules from embedded SPIR-V and the graphics pipeline.
+    The `pipelineLayout` and `renderPass` come from the caller (e.g.
+    `SimpleRenderSystem` / `Renderer`).
+  - `defaultPipelineConfigInfo()` - Generates the default pipeline
+    config used by `SimpleRenderSystem`.
 - **Pipeline Configuration (defaultPipelineConfigInfo):**
-  - Viewport and scissor setup
-  - Input assembly (triangle list topology)
-  - Rasterization (fill mode, no culling)
-  - Multisampling (1x MSAA)
-  - Color blending (no blending)
-  - Depth/Stencil testing (depth test enabled, less comparison)
-- **Shader Stages:**
-  - Vertex: Generates triangle in NDC space
-  - Fragment: Outputs red color
+  - Triangle list topology
+  - Fill rasterization, no culling
+  - 1x MSAA
+  - No color blending
+  - Depth test enabled, `LESS` compare
+  - Dynamic viewport + scissor
+
+#### **SimpleRenderSystem.zig** - GameObject Renderer
+
+- **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` and draws a list
+  of `GameObject`s using push constants.
+- **Push Constants:**
+  - `SimplePushConstantData { transform: cglm.mat4, color: cglm.vec3 }`
+    (used by both vertex and fragment stages)
+- **Key Functions:**
+  - `init(alloc, device, renderPass)` - Creates the pipeline layout
+    (with one push-constant range) and the graphics pipeline against
+    `renderPass`.
+  - `deinit()` - Destroys the pipeline and layout.
+  - `renderGameObjects(commandBuffer, gameObjects)` - Binds the
+    pipeline, then for each `GameObject` uploads its transform/color as
+    push constants and issues a draw via the object's `Model`.
+- Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
+
+#### **Model.zig** - Vertex Buffer Wrapper
+
+- **Purpose:** Encapsulates a Vulkan vertex buffer and exposes a Zig
+  `Vertex` type matching the shader inputs.
+- **Vertex Layout:**
+  - `position: cglm.vec3` at location 0 (`R32G32B32_SFLOAT`)
+  - `color: cglm.vec3` at location 1 (`R32G32B32_SFLOAT`)
+- **Key Functions:**
+  - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
+    Used by `Pipeline` to wire up vertex input.
+  - `init(device, vertices)` - Allocates a host-visible / host-coherent
+    vertex buffer and uploads the vertex data.
+  - `deinit()` - Destroys the buffer and frees its memory.
+  - `bind(commandBuffer)` / `draw(commandBuffer)` - Bind the vertex
+    buffer and issue a non-indexed draw.
+
+#### **GameObject.zig** - Renderable Entity
+
+- **Purpose:** A simple renderable: id, owned `Model`, color and a
+  `TransformComponent`.
+- **TransformComponent:** `translation`, `scale`, `rotation` (all
+  `cglm.vec3`) with a `mat4()` method that builds
+  `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)
+  angles.
+- **Key Functions:**
+  - `init(model, color, transform)` - Auto-assigns a monotonically
+    increasing `id_t`.
+  - `deinit()` - Tears down the owned `Model`.
+  - `getId()` - Returns the object's id.
 
 #### **Loop.zig** - Main Event Loop
 
@@ -239,12 +403,18 @@ External Libraries (GLFW, Vulkan)
 
 #### **c.zig** - C FFI Layer
 
-- **Purpose:** C interoperability bindings
+- **Purpose:** C interoperability bindings.
 - **Content:**
-  - Defines `GLFW_INCLUDE_VULKAN` for GLFW/Vulkan integration
-  - Imports `GLFW/glfw3.h` - Window system
-  - Imports `vulkan/vulkan_beta.h` - Vulkan API
-- **Usage:** All C API calls go through `c.c` namespace
+  - `c` - `@cImport` of `GLFW/glfw3.h` and `vulkan/vulkan_beta.h` with
+    `GLFW_INCLUDE_VULKAN` defined.
+  - `cglm` - Separate `@cImport` of `cglm/cglm.h`. It maps
+    `__attribute(x)` to `__attribute__(x)` for translate-c and undefs
+    every NEON / SSE / AVX / FMA feature macro so cglm picks its plain
+    scalar code paths (translate-c can't parse the vendor intrinsic
+    headers). The runtime build of the engine itself still uses the
+    full instruction set.
+- **Usage:** Vulkan / GLFW calls go through `c`, math types through
+  `cglm` (e.g. `cglm.vec3`, `cglm.mat4`).
 
 #### **utils.zig** - Utility Functions
 
@@ -259,35 +429,43 @@ External Libraries (GLFW, Vulkan)
 
 ```
 main.zig
-  ├─→ Window.init()
-  │    └─→ glfwInit() + glfwCreateWindow()
-  │
-  ├─→ Device.init()
-  │    ├─→ Vulkan.init()
-  │    │    └─→ vkCreateInstance()
-  │    │
-  │    ├─→ Window.create_surface()
-  │    │    └─→ glfwCreateWindowSurface()
-  │    │
-  │    ├─→ Device.pickPhysicalDevice()
-  │    │    └─→ vkEnumeratePhysicalDevices()
-  │    │
-  │    └─→ Vulkan.createLogicalDevice()
-  │         └─→ vkCreateDevice()
-  │
-  ├─→ Loop.init()
-  │
-  └─→ Pipeline.init()
-       ├─→ Create shader modules
-       └─→ vkCreateGraphicsPipelines()
+  └─→ FirstApp.init(alloc)
+       ├─→ Window.init()      glfwInit() + glfwCreateWindow()
+       ├─→ Device.init()
+       │    ├─→ Vulkan.init()           vkCreateInstance()
+       │    ├─→ Window.create_surface() glfwCreateWindowSurface()
+       │    ├─→ pickPhysicalDevice()    vkEnumeratePhysicalDevices()
+       │    ├─→ createLogicalDevice()   vkCreateDevice()
+       │    └─→ createCommandPool()
+       ├─→ Loop.init()                  install signal handlers
+       ├─→ Renderer.init()
+       │    ├─→ recreateSwapChain()
+       │    │    └─→ Swapchain.init()   images, views, depth,
+       │    │                           render pass, framebuffers,
+       │    │                           sync objects
+       │    └─→ createCommandBuffers()
+       └─→ loadGameObjects()
+            └─→ Model.init() + GameObject.init()
 ```
 
-**Runtime Flow:**
+**Runtime Flow (`FirstApp.run`):**
 
 ```
+SimpleRenderSystem.init(renderer.getSwapChainRenderPass())
+
 while Loop.is_running():
-  glfwPollEvents()  // Handle window events
-  // TODO: Render pass execution
+  glfwPollEvents()
+
+  cb = renderer.beginFrame()    // acquires next image, begins recording
+  if cb != null:
+    renderer.beginSwapChainRenderPass(cb)
+    simpleRenderSystem.renderGameObjects(cb, gameObjects)
+    renderer.endSwapChainRenderPass(cb)
+    renderer.endFrame()         // submits + presents
+  // On error.SwapChainFormatChanged → rebuild SimpleRenderSystem
+  //   against the new render pass and continue.
+
+vkDeviceWaitIdle(device)        // before deinit
 ```
 
 ---
@@ -305,37 +483,45 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 - Selects suitable physical device
 - Creates logical device with graphics and presentation queues
 
-**2. Surface & Swapchain (Partial)**
+**2. Surface & Swapchain**
 
-- Location: `Window.zig` + `Vulkan.zig`
-- Creates presentation surface via GLFW
-- Swapchain capabilities are queried but not fully implemented
+- Location: `Window.zig` + `Swapchain.zig`
+- Surface is created via `glfwCreateWindowSurface`.
+- `Swapchain.zig` owns the swapchain, color/depth images, image views,
+  the render pass, framebuffers and per-frame sync primitives. It
+  supports recreation (e.g. on window resize) by passing in the
+  previous swapchain as `oldSwapchain`.
 
 **3. Shader Compilation**
 
 - Location: `build.zig` + `shaders/`
-- Build-time: GLSL shaders compiled to SPIR-V
-- Runtime: Shader binaries embedded and loaded into modules
+- Build-time: `glslc` compiles every file under `shaders/` to SPIR-V.
+- Runtime: SPIR-V is added as anonymous module imports and embedded via
+  `@embedFile` in `SimpleRenderSystem.zig`.
 - Files:
-  - `shader.vert` - Vertex shader
-  - `shader.frag` - Fragment shader
+  - `shader.vert` - Vertex shader (push-constant transform, vertex color)
+  - `shader.frag` - Fragment shader (writes interpolated vertex color)
 
-**4. Graphics Pipeline**
+**4. Graphics Pipeline & Render System**
 
-- Location: `Pipeline.zig`
-- Configures entire graphics pipeline state
-- Combines shader stages with rasterization configuration
-- Default configuration includes:
-  - Triangle list topology
-  - Fill polygon mode
-  - Depth testing with less comparison
-  - No color blending
+- Location: `Pipeline.zig` + `SimpleRenderSystem.zig`
+- `Pipeline` owns the shader modules and the `VkPipeline`.
+- `SimpleRenderSystem` owns the `VkPipelineLayout` (with one push
+  constant range covering `SimplePushConstantData`) and the `Pipeline`,
+  and is built against a render pass obtained from `Renderer`.
 
-**5. Rendering (TODO)**
+**5. Frame Rendering**
 
-- Command buffer recording
-- Render pass execution
-- Frame submission
+- Location: `Renderer.zig` + `FirstApp.zig`
+- `Renderer.beginFrame` acquires a swapchain image and starts recording
+  the per-frame command buffer; `beginSwapChainRenderPass` begins the
+  render pass with the current framebuffer, viewport and scissor.
+- `SimpleRenderSystem.renderGameObjects` binds the pipeline, uploads
+  push constants and issues draws per `GameObject` via its `Model`.
+- `endSwapChainRenderPass` + `endFrame` submit the command buffer and
+  present. Swapchain recreation is handled transparently; if the
+  format changes, `Renderer` returns `error.SwapChainFormatChanged` so
+  callers can rebuild their pipelines/render systems.
 
 ### 4.2 Shader Details
 
@@ -343,15 +529,20 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 
 ```glsl
 #version 450
-// Hardcoded triangle in NDC space
-vec2 positions[3] = vec2[](
-    vec2(0.0, -0.5),   // Bottom
-    vec2(0.5, 0.5),    // Right
-    vec2(-0.5, 0.5)    // Left
-);
+
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 color;
+
+layout(location = 0) out vec3 fragColor;
+
+layout(push_constant) uniform Push {
+    mat4 transform;
+    vec3 color;
+} push;
 
 void main() {
-    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+    gl_Position = push.transform * vec4(position, 1.0);
+    fragColor   = color;
 }
 ```
 
@@ -359,14 +550,22 @@ void main() {
 
 ```glsl
 #version 450
+
+layout(location = 0) in  vec3 fragColor;
 layout(location = 0) out vec4 outColor;
 
+layout(push_constant) uniform Push {
+    mat4 transform;
+    vec3 color;
+} push;
+
 void main() {
-    outColor = vec4(1.0, 0.0, 0.0, 1.0);  // Red
+    outColor = vec4(fragColor, 1.0);
 }
 ```
 
-**Current State:** Renders a static red triangle (proof of concept)
+**Current State:** Renders a single colored cube (`createCubeModel`) as
+a `GameObject` driven by `SimpleRenderSystem`.
 
 ### 4.3 Key Configuration Parameters
 
@@ -403,9 +602,10 @@ void main() {
 **build.zig**
 
 - Zig build system configuration
-- Handles shader compilation
-- Links system libraries (GLFW, Vulkan)
-- Defines build steps (run, test)
+- Handles shader compilation (`glslc` per file under `shaders/`)
+- Links system libraries (`glfw3`, `vulkan`, `cglm`; `gl` on Linux)
+- Defines build steps (`run`, `test`)
+- Uses a custom test runner (`test_runner.zig`, simple mode)
 - Target and optimization settings
 
 **build.zig.zon**
@@ -423,13 +623,17 @@ void main() {
 - Nix package manager configuration
 - Provides reproducible development environment
 - Dependencies:
-  - `zig` - Compiler
-  - `zls` - Language server
+  - `zig_0_16` - Compiler
+  - `zls_0_16` - Language server
+  - `codebook` - Spell checker (`codebook-lsp` binary)
+  - `cloc` - Lines-of-code report
   - `shaderc` - Shader compilation
-  - `vulkan-headers`, `vulkan-loader`, `vulkan-validation-layers`
+  - `vulkan-headers`, `vulkan-loader(.dev)`, `vulkan-validation-layers`
   - `glfw` - Window system
+  - `cglm` - C math library
   - `pkg-config` - Dependency discovery
-  - Platform-specific: `libGL` on Linux
+  - Platform-specific: `libGL(.dev)` on Linux
+- Sets `VK_LAYER_PATH` to the validation layers from `vulkan-validation-layers`.
 
 ### 5.3 CI/CD Configuration
 
@@ -440,9 +644,10 @@ void main() {
 - Runs on Ubuntu Linux
 - Steps:
   1. Checkout repository
-  2. Install Nix
+  2. Install Nix (Determinate Systems installer + magic Nix cache)
   3. Run `nix flake check`
-  4. Execute: `nix develop -c zig build test --summary all`
+  4. Spell check: `nix develop -c codebook-lsp lint .`
+  5. Build & tests: `nix develop -c zig build test --summary all`
 - Concurrency control to cancel outdated runs
 
 ### 5.4 Git Configuration
@@ -463,26 +668,38 @@ void main() {
 - Built into Zig language
 - Uses `@import("builtin")` for compile-time checks
 - Test declarations with `test` keyword
+- Custom runner: `test_runner.zig` (`mode = .simple`)
 
 **Current Test Setup:**
 
-- Located in: Individual source files
+- Located in: Individual source files; all aggregated via the `test {}`
+  block at the bottom of `src/main.zig` (which `_ = @import`s every
+  module so their tests are discovered).
 - Test execution: `zig build test`
-- CI integration: GitHub Actions runs tests on every PR/push
+- CI integration: GitHub Actions runs tests on every PR/push.
 
-**Running Tests:**
+**Running Tests (always run the spell checker alongside!):**
 
 ```bash
-zig build test                           # Local testing
-zig build test --summary all            # Detailed summary
-nix develop -c zig build test           # In Nix environment
+zig build test                                   # Local testing
+zig build test --summary all                     # Detailed summary
+nix develop -c zig build test --summary all      # In Nix environment
+
+# Spell check — REQUIRED part of "running the tests":
+nix develop --command codebook-lsp lint --unique -s .
 ```
+
+The `--unique` flag deduplicates findings and `-s` makes the output
+suitable for scripts / CI logs. When introducing a new word, prefer
+fixing the typo; if the word is a legitimate technical term, add it to
+the `words` array in `codebook.toml`.
 
 ### 6.2 Test Infrastructure in CI
 
 - Runs on Ubuntu Linux
 - Uses Nix for reproducible environment
-- Executes full build and test suite
+- Runs `codebook-lsp lint .` as a dedicated step
+- Executes full build and test suite via `zig build test --summary all`
 - Generates test summary
 
 ### 6.3 Notable Test Features
@@ -490,6 +707,8 @@ nix develop -c zig build test           # In Nix environment
 - No external test framework required (Zig built-in)
 - Tests run at compile time when possible
 - Can be run in debug and release modes
+- Spell checking is treated as a required check, equivalent in
+  importance to the Zig test suite.
 
 ---
 
@@ -578,13 +797,15 @@ defer extensions.deinit(alloc);
 
 ### 8.2 Known Limitations & TODOs
 
-- Swapchain not fully implemented (capabilities queried only)
-- Render pass created, but not yet wired into a draw loop
-- Command buffer recording / submission incomplete
-- No framebuffer creation, no synchronization primitives
-- Validation layer cleanup incomplete — debug messenger destruction is TODO (see `Device.deinit`)
-- Single hardcoded triangle (no vertex buffer)
-- No transform matrices or camera
+- Validation layer cleanup incomplete — debug messenger destruction is
+  TODO (see `Device.deinit`).
+- Only a single hardcoded scene (one colored cube wired up in
+  `FirstApp.loadGameObjects`).
+- No camera / view-projection matrix yet; transforms are applied directly
+  via push constants.
+- No descriptor sets / uniform buffers; only push constants are used.
+- No indexed drawing (`Model.draw` is `vkCmdDraw`, not `vkCmdDrawIndexed`).
+- No asset loading (models / textures); geometry is built in code.
 
 ### 8.3 Extension References
 
@@ -611,13 +832,19 @@ zig build              # Compile executable
 zig build run          # Compile and run
 zig build test         # Run test suite
 zig build --help       # Show all options
+
+# Spell check (always run with tests):
+nix develop --command codebook-lsp lint --unique -s .
 ```
 
 ### Key File Locations
 
 - Entry point: `/src/main.zig`
+- Application root: `/src/FirstApp.zig`
 - Shader sources: `/shaders/`
 - Build config: `/build.zig`
+- Custom test runner: `/test_runner.zig`
+- Spell-check dictionary: `/codebook.toml`
 - Dev environment: `/flake.nix`
 
 ### IDE Support
@@ -633,11 +860,14 @@ zig build --help       # Show all options
 
 **Tier Structure:**
 
-1. **Application Layer** (main.zig, Loop.zig)
-2. **High-Level Abstractions** (Window, Device, Pipeline)
-3. **Vulkan Core Layer** (Vulkan.zig)
-4. **FFI/Interop Layer** (c.zig, utils.zig)
-5. **Native Libraries** (GLFW, Vulkan SDK)
+1. **Application Layer** (`main.zig`, `FirstApp.zig`, `Loop.zig`)
+2. **Frame / Scene Layer** (`Renderer.zig`, `SimpleRenderSystem.zig`,
+   `GameObject.zig`, `Model.zig`)
+3. **High-Level Abstractions** (`Window.zig`, `Device.zig`,
+   `Swapchain.zig`, `Pipeline.zig`)
+4. **Vulkan Core Layer** (`Vulkan.zig`)
+5. **FFI/Interop Layer** (`c.zig` (GLFW / Vulkan / cglm), `utils.zig`)
+6. **Native Libraries** (GLFW, Vulkan SDK, cglm)
 
 **Key Strengths:**
 
@@ -646,5 +876,10 @@ zig build --help       # Show all options
 - Proper resource cleanup
 - Type-safe Vulkan bindings
 - Cross-platform support
+- Enforced spell checking on docs + code via `codebook`
 
-**Current Stage:** Foundation/Infrastructure complete, rendering pipeline work-in-progress
+**Current Stage:** End-to-end rendering pipeline working — `FirstApp`
+drives a `Renderer` + `SimpleRenderSystem` to draw a colored cube
+`GameObject` every frame, with swapchain recreation handled by the
+renderer. Next up: camera / view matrices, descriptor sets, indexed
+draws and asset loading.
