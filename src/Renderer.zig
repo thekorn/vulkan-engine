@@ -28,6 +28,8 @@ pub fn init(alloc: std.mem.Allocator, window: *Window, device: *Device) !Self {
         .commandBuffers = .empty,
     };
 
+    errdefer self.deinit();
+
     try self.recreateSwapChain();
     try self.createCommandBuffers();
 
@@ -100,50 +102,44 @@ pub fn endFrame(self: *Self) !void {
     self.currentFrameIndex = (self.currentFrameIndex + 1) % Swapchain.MAX_FRAMES_IN_FLIGHT;
 }
 
-pub fn beginSwapChainRenderPass(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
+pub fn beginSwapChainRenderPass(self: *Self, commandBuffer: c.VkCommandBuffer) void {
     std.debug.assert(self.isFrameStarted);
     std.debug.assert(commandBuffer == self.getCurrentCommandBuffer());
 
-    var swapchain = self.swapChain orelse unreachable;
+    if (self.swapChain) |*swapchain| {
+        const clearValues = [_]c.VkClearValue{
+            .{ .color = .{ .float32 = .{ 0.01, 0.01, 0.01, 1.0 } } },
+            .{ .depthStencil = .{ .depth = 1.0, .stencil = 0 } },
+        };
 
-    var clearValues: ArrayList(c.VkClearValue) = .empty;
-    defer clearValues.deinit(self.alloc);
-    try clearValues.append(self.alloc, .{
-        .color = .{
-            .float32 = .{ 0.01, 0.01, 0.01, 1.0 },
-        },
-    });
-    try clearValues.append(self.alloc, .{
-        .depthStencil = .{ .depth = 1.0, .stencil = 0 },
-    });
+        const renderPassInfo: c.VkRenderPassBeginInfo = .{
+            .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            .renderPass = swapchain.renderPass,
+            .framebuffer = swapchain.getFrameBuffer(self.currentImageIndex),
+            .renderArea = .{
+                .offset = .{ .x = 0, .y = 0 },
+                .extent = swapchain.swapChainExtent,
+            },
+            .clearValueCount = clearValues.len,
+            .pClearValues = &clearValues,
+        };
+        c.vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
 
-    const renderPassInfo: c.VkRenderPassBeginInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass = swapchain.renderPass,
-        .framebuffer = swapchain.getFrameBuffer(self.currentImageIndex),
-        .renderArea = .{
+        const viewport = c.VkViewport{
+            .x = 0.0,
+            .y = 0.0,
+            .width = @floatFromInt(swapchain.width()),
+            .height = @floatFromInt(swapchain.height()),
+            .minDepth = 0.0,
+            .maxDepth = 1.0,
+        };
+        const scissor = c.VkRect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = swapchain.swapChainExtent,
-        },
-        .clearValueCount = @intCast(clearValues.items.len),
-        .pClearValues = clearValues.items.ptr,
-    };
-    c.vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, c.VK_SUBPASS_CONTENTS_INLINE);
-
-    const viewport = c.VkViewport{
-        .x = 0.0,
-        .y = 0.0,
-        .width = @floatFromInt(swapchain.width()),
-        .height = @floatFromInt(swapchain.height()),
-        .minDepth = 0.0,
-        .maxDepth = 1.0,
-    };
-    const scissor = c.VkRect2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = swapchain.swapChainExtent,
-    };
-    c.vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    c.vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        };
+        c.vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        c.vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    } else unreachable;
 }
 
 pub fn endSwapChainRenderPass(self: *Self, commandBuffer: c.VkCommandBuffer) void {
@@ -196,7 +192,13 @@ fn recreateSwapChain(self: *Self) !void {
         const oldDepthFormat = sc.swapChainDepthFormat;
 
         sc.deinit();
-        self.swapChain = try Swapchain.init(self.alloc, self.device, extent, sc);
+        // Drop the torn-down swapchain immediately so a failing
+        // `Swapchain.init` below can't leave `self.swapChain` holding a
+        // deinitialized struct. After `deinit`, `sc.swapChain` is null
+        // anyway, so passing it as `prevSwapChain` is equivalent to
+        // passing null — be explicit about that.
+        self.swapChain = null;
+        self.swapChain = try Swapchain.init(self.alloc, self.device, extent, null);
 
         const new = self.swapChain orelse unreachable;
         if (oldImageFormat != new.swapChainImageFormat or

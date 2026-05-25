@@ -78,11 +78,40 @@ pub fn run(self: *Self) !void {
     while (self.loop.is_running()) {
         c.glfwPollEvents();
 
-        if (try self.renderer.beginFrame()) |commandBuffer| {
-            try self.renderer.beginSwapChainRenderPass(commandBuffer);
+        const beginResult = self.renderer.beginFrame() catch |err| switch (err) {
+            // If the swapchain had to be recreated and the formats
+            // changed under us, our pipeline / render-system was built
+            // against the old render pass and is now invalid. Tear it
+            // down and rebuild it against the new render pass, then
+            // skip this frame.
+            error.SwapChainFormatChanged => {
+                simpleRenderSystem.deinit();
+                simpleRenderSystem = try SimpleRenderSystem.init(
+                    self.alloc,
+                    self.device,
+                    self.renderer.getSwapChainRenderPass(),
+                );
+                continue;
+            },
+            else => return err,
+        };
+
+        if (beginResult) |commandBuffer| {
+            self.renderer.beginSwapChainRenderPass(commandBuffer);
             try simpleRenderSystem.renderGameObjects(commandBuffer, self.gameObjects.items);
             self.renderer.endSwapChainRenderPass(commandBuffer);
-            try self.renderer.endFrame();
+            self.renderer.endFrame() catch |err| switch (err) {
+                error.SwapChainFormatChanged => {
+                    simpleRenderSystem.deinit();
+                    simpleRenderSystem = try SimpleRenderSystem.init(
+                        self.alloc,
+                        self.device,
+                        self.renderer.getSwapChainRenderPass(),
+                    );
+                    continue;
+                },
+                else => return err,
+            };
         }
     }
 

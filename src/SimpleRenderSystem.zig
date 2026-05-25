@@ -30,6 +30,8 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPas
     };
 
     try self.createPipelineLayout();
+    errdefer c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
+
     try self.createPipeline(renderPass);
 
     return self;
