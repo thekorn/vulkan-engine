@@ -45,6 +45,10 @@ pub fn getSwapChainRenderPass(self: *Self) c.VkRenderPass {
     return self.swapChain.?.renderPass;
 }
 
+pub fn getAspectRatio(self: *Self) f32 {
+    return self.swapChain.?.extentAspectRatio();
+}
+
 pub fn isFrameInProgress(self: *const Self) bool {
     return self.isFrameStarted;
 }

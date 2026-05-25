@@ -21,5 +21,6 @@ test {
     _ = @import("Model.zig");
     _ = @import("Renderer.zig");
     _ = @import("SimpleRenderSystem.zig");
+    _ = @import("Camera.zig");
     _ = @import("FirstApp.zig");
 }

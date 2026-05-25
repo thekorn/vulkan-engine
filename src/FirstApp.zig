@@ -2,6 +2,7 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const cglm = @import("c.zig").cglm;
+const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const Loop = @import("Loop.zig");
 const Renderer = @import("Renderer.zig");
@@ -75,8 +76,14 @@ pub fn run(self: *Self) !void {
     );
     defer simpleRenderSystem.deinit();
 
+    var camera: Camera = .{};
+
     while (self.loop.is_running()) {
         c.glfwPollEvents();
+
+        const aspect = self.renderer.getAspectRatio();
+        // camera.setOrthographicProjection(-aspect, aspect, -1, 1, -1, 1);
+        camera.setPerspectiveProjection(std.math.degreesToRadians(50.0), aspect, 0.1, 10.0);
 
         const beginResult = self.renderer.beginFrame() catch |err| switch (err) {
             // If the swapchain had to be recreated and the formats
@@ -98,7 +105,7 @@ pub fn run(self: *Self) !void {
 
         if (beginResult) |commandBuffer| {
             self.renderer.beginSwapChainRenderPass(commandBuffer);
-            try simpleRenderSystem.renderGameObjects(commandBuffer, self.gameObjects.items);
+            try simpleRenderSystem.renderGameObjects(commandBuffer, self.gameObjects.items, &camera);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
@@ -190,7 +197,7 @@ fn loadGameObjects(self: *Self) !void {
         model,
         .{ 0, 0, 0 },
         .{
-            .translation = .{ 0.0, 0.0, 0.5 },
+            .translation = .{ 0.0, 0.0, 2.5 },
             .scale = .{ 0.5, 0.5, 0.5 },
         },
     );
