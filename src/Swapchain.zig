@@ -5,7 +5,7 @@ const Window = @import("Window.zig");
 const Vulkan = @import("Vulkan.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
-const MAX_FRAMES_IN_FLIGHT = 2;
+pub const MAX_FRAMES_IN_FLIGHT = 2;
 
 const Self = @This();
 swapChainFramebuffers: []c.VkFramebuffer,
@@ -13,6 +13,7 @@ renderPass: c.VkRenderPass,
 swapChainImageViews: []c.VkImageView,
 swapChainImages: []c.VkImage,
 swapChainImageFormat: c.VkFormat,
+swapChainDepthFormat: c.VkFormat,
 swapChainExtent: c.VkExtent2D,
 
 depthImages: []c.VkImage,
@@ -51,6 +52,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, extent: c.VkExtent2D, pre
         .swapChainImageViews = swapChainImageViews,
         .swapChainImages = createSwapChainResult.images,
         .swapChainImageFormat = createSwapChainResult.format,
+        .swapChainDepthFormat = depthResourcesResult.swapChainDepthFormat,
         .swapChainExtent = createSwapChainResult.extent,
 
         .depthImages = depthResourcesResult.depthImages,
@@ -119,6 +121,11 @@ pub fn deinit(self: *Self) void {
 
 pub fn getImageCount(self: *Self) usize {
     return self.swapChainImages.len;
+}
+
+pub fn compareSwapFormats(self: *const Self, other: *const Self) bool {
+    return self.swapChainImageFormat == other.swapChainImageFormat and
+        self.swapChainDepthFormat == other.swapChainDepthFormat;
 }
 
 pub fn getFrameBuffer(self: *Self, index: usize) c.VkFramebuffer {
@@ -581,6 +588,7 @@ test "Swapchain has expected fields and types" {
     try std.testing.expectEqual([]c.VkImageView, @FieldType(Self, "swapChainImageViews"));
     try std.testing.expectEqual([]c.VkImage, @FieldType(Self, "swapChainImages"));
     try std.testing.expectEqual(c.VkFormat, @FieldType(Self, "swapChainImageFormat"));
+    try std.testing.expectEqual(c.VkFormat, @FieldType(Self, "swapChainDepthFormat"));
     try std.testing.expectEqual(c.VkExtent2D, @FieldType(Self, "swapChainExtent"));
     try std.testing.expectEqual([]c.VkImage, @FieldType(Self, "depthImages"));
     try std.testing.expectEqual([]c.VkDeviceMemory, @FieldType(Self, "depthImageMemories"));
@@ -605,6 +613,7 @@ fn makeSelfWithExtent(extent: c.VkExtent2D) Self {
         .swapChainImageViews = &.{},
         .swapChainImages = &.{},
         .swapChainImageFormat = 0,
+        .swapChainDepthFormat = 0,
         .swapChainExtent = extent,
         .depthImages = &.{},
         .depthImageMemories = &.{},
@@ -657,6 +666,40 @@ test "getImageView returns the image view at the requested index" {
     try std.testing.expectEqual(iv0, self.getImageView(0));
     try std.testing.expectEqual(iv1, self.getImageView(1));
     try std.testing.expectEqual(iv2, self.getImageView(2));
+}
+
+test "compareSwapFormats returns true when image and depth formats match" {
+    var a = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    var b = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    a.swapChainImageFormat = c.VK_FORMAT_B8G8R8A8_SRGB;
+    a.swapChainDepthFormat = c.VK_FORMAT_D32_SFLOAT;
+    b.swapChainImageFormat = c.VK_FORMAT_B8G8R8A8_SRGB;
+    b.swapChainDepthFormat = c.VK_FORMAT_D32_SFLOAT;
+
+    try std.testing.expect(a.compareSwapFormats(&b));
+    try std.testing.expect(b.compareSwapFormats(&a));
+}
+
+test "compareSwapFormats returns false when image format differs" {
+    var a = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    var b = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    a.swapChainImageFormat = c.VK_FORMAT_B8G8R8A8_SRGB;
+    a.swapChainDepthFormat = c.VK_FORMAT_D32_SFLOAT;
+    b.swapChainImageFormat = c.VK_FORMAT_R8G8B8A8_UNORM;
+    b.swapChainDepthFormat = c.VK_FORMAT_D32_SFLOAT;
+
+    try std.testing.expect(!a.compareSwapFormats(&b));
+}
+
+test "compareSwapFormats returns false when depth format differs" {
+    var a = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    var b = makeSelfWithExtent(.{ .width = 1, .height = 1 });
+    a.swapChainImageFormat = c.VK_FORMAT_B8G8R8A8_SRGB;
+    a.swapChainDepthFormat = c.VK_FORMAT_D32_SFLOAT;
+    b.swapChainImageFormat = c.VK_FORMAT_B8G8R8A8_SRGB;
+    b.swapChainDepthFormat = c.VK_FORMAT_D24_UNORM_S8_UINT;
+
+    try std.testing.expect(!a.compareSwapFormats(&b));
 }
 
 test "chooseSwapSurfaceFormat picks B8G8R8A8_SRGB / SRGB_NONLINEAR when available" {
