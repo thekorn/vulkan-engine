@@ -28,7 +28,15 @@ pub const cglm = @cImport({
     // x86 SIMD detection (native x86_64 builds).
     @cUndef("__SSE__");
     @cUndef("__SSE2__");
+    @cUndef("__SSE3__");
+    @cUndef("__SSSE3__");
+    @cUndef("__SSE4__");
+    @cUndef("__SSE4_1__");
+    @cUndef("__SSE4_2__");
     @cUndef("__AVX__");
+    @cUndef("__AVX2__");
+    @cUndef("__FMA__");
+    @cUndef("__FMA4__");
 
     @cInclude("cglm/cglm.h");
     //@cInclude("cglm/struct.h");
