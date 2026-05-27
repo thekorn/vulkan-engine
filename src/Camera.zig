@@ -43,7 +43,11 @@ pub fn setPerspectiveProjection(
     near: f32,
     far: f32,
 ) void {
-    std.debug.assert(@abs(aspect - std.math.floatEps(f32)) > 0.0);
+    // Guard against a zero aspect ratio (which would cause a divide-by-zero
+    // in `1 / (aspect * tanHalfFovy)`). The upstream C++ tutorial writes
+    // `assert(glm::abs(aspect - epsilon) > 0.0f)`, which still passes when
+    // `aspect == 0`; use a more meaningful comparison here.
+    std.debug.assert(@abs(aspect) > std.math.floatEps(f32));
     const tanHalfFovy = std.math.tan(fovy / 2.0);
     self.projectionMatrix = .{
         .{ 0.0, 0.0, 0.0, 0.0 },
