@@ -77,6 +77,8 @@ pub fn run(self: *Self) !void {
     defer simpleRenderSystem.deinit();
 
     var camera: Camera = .{};
+    // camera.setViewDirection(.{ 0, 0, 0 }, .{ 0.5, 0, 1 }, Camera.default_up);
+    camera.setViewTarget(.{ -1.0, -2.0, -2.0 }, .{ 0.0, 0.0, 2.5 }, Camera.default_up);
 
     while (self.loop.is_running()) {
         c.glfwPollEvents();
