@@ -12,6 +12,7 @@ words = [
     "fba",
     "fma",
     "fmacro",
+    "fovy",
     "framebuffers",
     "freetype",
     "glfw",

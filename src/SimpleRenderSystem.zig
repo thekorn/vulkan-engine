@@ -2,6 +2,7 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const cglm = @import("c.zig").cglm;
+const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const Pipeline = @import("Pipeline.zig");
 const GameObject = @import("GameObject.zig");
@@ -83,16 +84,26 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
     );
 }
 
-pub fn renderGameObjects(self: *Self, commandBuffer: c.VkCommandBuffer, gameObjects: []GameObject) !void {
+pub fn renderGameObjects(
+    self: *Self,
+    commandBuffer: c.VkCommandBuffer,
+    gameObjects: []GameObject,
+    camera: *const Camera,
+) !void {
     self.pipeline.?.bind(commandBuffer);
     const two_pi: f32 = 2.0 * std.math.pi;
+    var projection = camera.getProjection();
     for (gameObjects) |*obj| {
         obj.transform.rotation[1] = @mod(obj.transform.rotation[1] + 0.01, two_pi);
         obj.transform.rotation[0] = @mod(obj.transform.rotation[0] + 0.005, two_pi);
 
+        var model_mat = obj.transform.mat4();
+        var transform: cglm.mat4 = undefined;
+        cglm.glm_mat4_mul(&projection[0], &model_mat[0], &transform[0]);
+
         const push: SimplePushConstantData = .{
             .color = obj.color,
-            .transform = obj.transform.mat4(),
+            .transform = transform,
         };
 
         c.vkCmdPushConstants(
