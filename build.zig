@@ -13,12 +13,16 @@ fn coverStep(
 ) *std.Build.Step {
     const dir = b.pathJoin(&.{ b.install_prefix, "cover" });
 
-    const coverage_command = b.addSystemCommand(&.{
-        "kcov",
-        "--clean",
-        "--include-pattern=src/",
-        dir,
-    });
+    // Only pass the kcov `--clean` flag when the caller asked for it, so
+    // a plain `zig build coverage` run with `clean=false` preserves the
+    // existing report directory.
+    var kcov_argv: std.ArrayList([]const u8) = .empty;
+    kcov_argv.append(b.allocator, "kcov") catch @panic("OOM");
+    if (clean) kcov_argv.append(b.allocator, "--clean") catch @panic("OOM");
+    kcov_argv.append(b.allocator, "--include-pattern=src/") catch @panic("OOM");
+    kcov_argv.append(b.allocator, dir) catch @panic("OOM");
+
+    const coverage_command = b.addSystemCommand(kcov_argv.items);
     coverage_command.addArtifactArg(artifact);
 
     const mkdir_command = b.addSystemCommand(&.{ "mkdir", "-p", dir });
@@ -146,6 +150,14 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&run_exe_tests.step);
     }
 
+    // Dedicated coverage step: always uses the LLVM backend so kcov has
+    // the DWARF debug info it needs, independent of the `-Dcover` flag
+    // that toggles coverage on the regular `test` step.
+    const coverage_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
+        .use_llvm = true,
+    });
     const coverage_step = b.step("coverage", "Run tests under kcov and write a coverage report to zig-out/cover");
-    coverage_step.dependOn(coverStep(b, exe_tests, true, false));
+    coverage_step.dependOn(coverStep(b, coverage_tests, true, false));
 }

@@ -5,6 +5,8 @@ words = [
     "cflags",
     "cglm",
     "cloc",
+    "dclean",
+    "dcover",
     "deflt",
     "deinit",
     "deinitialized",
