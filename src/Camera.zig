@@ -90,7 +90,9 @@ inline fn vec3Cross(a: cglm.vec3, b: cglm.vec3) cglm.vec3 {
 inline fn vec3Normalize(v: cglm.vec3) cglm.vec3 {
     const len = @sqrt(vec3Dot(v, v));
     // Match GLM behavior: normalizing a zero-length vector is undefined.
-    // Assert in debug builds so callers get a clear error.
+    // `std.debug.assert` is checked in Debug and ReleaseSafe builds (and
+    // stripped in ReleaseFast / ReleaseSmall), so callers get a clear
+    // error in any build that opts into safety.
     std.debug.assert(len > 0.0);
     const inv = 1.0 / len;
     return .{ v[0] * inv, v[1] * inv, v[2] * inv };
@@ -189,18 +191,39 @@ test "Camera default view is the identity matrix" {
     }
 }
 
-test "Camera.setViewDirection produces an orthonormal basis (columns of rotation)" {
+test "Camera.setViewDirection produces an orthonormal basis" {
     var cam: Self = .{};
     cam.setViewDirection(.{ 0.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 }, default_up);
     const m = cam.getView();
+
     // For position = origin, the translation row should be zero.
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][1], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][2], 1e-6);
-    // w (forward) ends up as the third column of the rotation.
-    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][2], 1e-6);
-    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[1][2], 1e-6);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[2][2], 1e-6);
+
+    // The view matrix stores the basis vectors u (right), v (up'), w
+    // (forward) such that `view * world_vec` rotates a world vector into
+    // camera space. Because the basis lives in the rows of the rotation
+    // sub-matrix in our column-major layout, row `i` is the vector whose
+    // components are `m[0][i], m[1][i], m[2][i]`.
+    const u: cglm.vec3 = .{ m[0][0], m[1][0], m[2][0] };
+    const v: cglm.vec3 = .{ m[0][1], m[1][1], m[2][1] };
+    const w: cglm.vec3 = .{ m[0][2], m[1][2], m[2][2] };
+
+    // Each basis vector must be unit length.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(u, u), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(v, v), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(w, w), 1e-6);
+
+    // And mutually orthogonal.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(u, v), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(u, w), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(v, w), 1e-6);
+
+    // For direction=(0,0,1) the forward (w) basis vector should be (0,0,1).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), w[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), w[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), w[2], 1e-6);
 }
 
 test "Camera.setViewTarget delegates to setViewDirection" {
