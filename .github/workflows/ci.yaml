@@ -32,3 +32,14 @@ jobs:
 
       - name: build & test
         run: nix develop -c zig build test --summary all
+
+      - name: coverage (kcov)
+        run: nix develop -c zig build coverage --summary all
+
+      - name: upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: zig-out/cover
+          if-no-files-found: ignore

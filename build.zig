@@ -1,6 +1,43 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const shaders_dir = "./shaders";
+
+/// A step that runs kcov on an artifact binary (requires kcov to be
+/// installed). Adapted from https://github.com/vancluever/z2d.
+fn coverStep(
+    b: *std.Build,
+    artifact: *std.Build.Step.Compile,
+    clean: bool,
+    open: bool,
+) *std.Build.Step {
+    const dir = b.pathJoin(&.{ b.install_prefix, "cover" });
+
+    const coverage_command = b.addSystemCommand(&.{
+        "kcov",
+        "--clean",
+        "--include-pattern=src/",
+        dir,
+    });
+    coverage_command.addArtifactArg(artifact);
+
+    const mkdir_command = b.addSystemCommand(&.{ "mkdir", "-p", dir });
+    coverage_command.step.dependOn(&mkdir_command.step);
+
+    if (clean) {
+        const clean_command = b.addSystemCommand(&.{ "rm", "-rf", dir });
+        mkdir_command.step.dependOn(&clean_command.step);
+    }
+
+    if (!open) return &coverage_command.step;
+
+    const open_command = b.addSystemCommand(&.{
+        if (builtin.target.os.tag == .linux) "xdg-open" else "open",
+        b.pathJoin(&.{ dir, "index.html" }),
+    });
+    open_command.step.dependOn(&coverage_command.step);
+    return &open_command.step;
+}
 
 fn compileAllShaders(b: *std.Build, exe: anytype) !void {
     const io = b.graph.io;
@@ -78,11 +115,37 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
+    const cover = b.option(
+        bool,
+        "cover",
+        "Generate a coverage report for the test step using kcov (implies use_llvm=true)",
+    ) orelse false;
+    const clean = b.option(
+        bool,
+        "clean",
+        "Clean the coverage output directory before running kcov",
+    ) orelse false;
+    const open = b.option(
+        bool,
+        "open",
+        "Open the generated coverage report after the test step finishes",
+    ) orelse false;
+
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
+        // kcov needs DWARF debug info, which the LLVM backend reliably
+        // produces. Force LLVM whenever coverage is requested.
+        .use_llvm = if (cover) true else null,
     });
-    const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_exe_tests.step);
+    if (cover) {
+        test_step.dependOn(coverStep(b, exe_tests, clean, open));
+    } else {
+        const run_exe_tests = b.addRunArtifact(exe_tests);
+        test_step.dependOn(&run_exe_tests.step);
+    }
+
+    const coverage_step = b.step("coverage", "Run tests under kcov and write a coverage report to zig-out/cover");
+    coverage_step.dependOn(coverStep(b, exe_tests, true, false));
 }
