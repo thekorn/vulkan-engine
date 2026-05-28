@@ -93,13 +93,16 @@ pub fn renderGameObjects(
     self.pipeline.?.bind(commandBuffer);
     const two_pi: f32 = 2.0 * std.math.pi;
     var projection = camera.getProjection();
+    var view = camera.getView();
+    var projectionView: cglm.mat4 = undefined;
+    cglm.glm_mat4_mul(&projection[0], &view[0], &projectionView[0]);
     for (gameObjects) |*obj| {
         obj.transform.rotation[1] = @mod(obj.transform.rotation[1] + 0.01, two_pi);
         obj.transform.rotation[0] = @mod(obj.transform.rotation[0] + 0.005, two_pi);
 
         var model_mat = obj.transform.mat4();
         var transform: cglm.mat4 = undefined;
-        cglm.glm_mat4_mul(&projection[0], &model_mat[0], &transform[0]);
+        cglm.glm_mat4_mul(&projectionView[0], &model_mat[0], &transform[0]);
 
         const push: SimplePushConstantData = .{
             .color = obj.color,
