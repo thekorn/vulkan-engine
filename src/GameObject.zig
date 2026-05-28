@@ -139,6 +139,68 @@ test "GameObject.init assigns strictly increasing ids and getId matches id_t" {
     try std.testing.expectEqual(cc.id_t, cc.getId());
 }
 
+test "TransformComponent.mat4 rotation submatrix is orthonormal for pure rotation" {
+    var t = TransformComponent{ .rotation = .{ 0.4, -1.1, 0.7 } };
+    const m = t.mat4();
+
+    // Columns 0..2 of the rotation submatrix (excluding the bottom row).
+    const c0: [3]f32 = .{ m[0][0], m[0][1], m[0][2] };
+    const c1: [3]f32 = .{ m[1][0], m[1][1], m[1][2] };
+    const c2: [3]f32 = .{ m[2][0], m[2][1], m[2][2] };
+
+    inline for ([_][3]f32{ c0, c1, c2 }) |col| {
+        const len2 = col[0] * col[0] + col[1] * col[1] + col[2] * col[2];
+        try std.testing.expectApproxEqAbs(@as(f32, 1.0), len2, 1e-5);
+    }
+    const dot01 = c0[0] * c1[0] + c0[1] * c1[1] + c0[2] * c1[2];
+    const dot02 = c0[0] * c2[0] + c0[1] * c2[1] + c0[2] * c2[2];
+    const dot12 = c1[0] * c2[0] + c1[1] * c2[1] + c1[2] * c2[2];
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dot01, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dot02, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dot12, 1e-5);
+
+    // Bottom row (homogeneous) must remain (0,0,0,1).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[1][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[2][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][3], 1e-6);
+}
+
+test "TransformComponent.mat4 combines translation and scale (rotation=0)" {
+    var t = TransformComponent{
+        .translation = .{ 1.0, 2.0, 3.0 },
+        .scale = .{ 4.0, 5.0, 6.0 },
+    };
+    const m = t.mat4();
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), m[0][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), m[1][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), m[2][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), m[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), m[3][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][3], 1e-6);
+}
+
+test "TransformComponent.mat4 is deterministic for identical inputs" {
+    var a = TransformComponent{
+        .translation = .{ -0.5, 1.5, 2.0 },
+        .scale = .{ 0.75, 0.75, 0.75 },
+        .rotation = .{ 0.2, 0.4, -0.6 },
+    };
+    var b = TransformComponent{
+        .translation = .{ -0.5, 1.5, 2.0 },
+        .scale = .{ 0.75, 0.75, 0.75 },
+        .rotation = .{ 0.2, 0.4, -0.6 },
+    };
+    const ma = a.mat4();
+    const mb = b.mat4();
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            try std.testing.expectEqual(ma[col][row], mb[col][row]);
+        }
+    }
+}
+
 test "GameObject.init copies color and transform fields" {
     var device: Device = undefined;
     const model = Model{ .device = &device, .vertexCount = 0 };

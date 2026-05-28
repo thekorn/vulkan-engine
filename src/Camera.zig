@@ -302,3 +302,90 @@ test "Camera.setPerspectiveProjection fills the expected entries" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][1], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][3], 1e-6);
 }
+
+test "Camera.setPerspectiveProjection scales X by 1/aspect for non-square aspect" {
+    var cam: Self = .{};
+    const fovy: f32 = std.math.pi / 2.0;
+    const aspect: f32 = 16.0 / 9.0;
+    cam.setPerspectiveProjection(fovy, aspect, 0.1, 100.0);
+    const m = cam.getProjection();
+    const tanHalf = std.math.tan(fovy / 2.0);
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 1.0 / (aspect * tanHalf)),
+        m[0][0],
+        1e-6,
+    );
+    // Y entry should be independent of aspect.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / tanHalf), m[1][1], 1e-6);
+}
+
+test "Camera.setOrthographicProjection places translation in the last column" {
+    var cam: Self = .{};
+    // Non-symmetric box so the translation row is non-zero.
+    cam.setOrthographicProjection(0.0, 4.0, 0.0, 2.0, 0.0, 10.0);
+    const m = cam.getProjection();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), m[0][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[1][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), m[2][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), m[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), m[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][3], 1e-6);
+}
+
+test "Camera.setViewDirection places -dot(basis, position) in the translation row" {
+    var cam: Self = .{};
+    const position: cglm.vec3 = .{ 1.0, 2.0, 3.0 };
+    cam.setViewDirection(position, .{ 0.0, 0.0, 1.0 }, default_up);
+    const m = cam.getView();
+
+    // With direction=(0,0,1) and up=(0,-1,0):
+    //   w = (0,0,1), u = normalize(w x up) = normalize((0*0-1*-1, 1*0-0*0, 0*-1-0*0))
+    //                                       = (1, 0, 0)
+    //   v = w x u = (0*0 - 1*0, 1*1 - 0*0, 0*0 - 0*1) = (0, 1, 0)
+    const u: cglm.vec3 = .{ 1.0, 0.0, 0.0 };
+    const v: cglm.vec3 = .{ 0.0, 1.0, 0.0 };
+    const w: cglm.vec3 = .{ 0.0, 0.0, 1.0 };
+
+    try std.testing.expectApproxEqAbs(-vec3Dot(u, position), m[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(-vec3Dot(v, position), m[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(-vec3Dot(w, position), m[3][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][3], 1e-6);
+}
+
+test "Camera.setViewYXZ produces an orthonormal basis for non-zero rotation" {
+    var cam: Self = .{};
+    cam.setViewYXZ(.{ 0.0, 0.0, 0.0 }, .{ 0.3, -0.7, 1.2 });
+    const m = cam.getView();
+
+    const u: cglm.vec3 = .{ m[0][0], m[1][0], m[2][0] };
+    const v: cglm.vec3 = .{ m[0][1], m[1][1], m[2][1] };
+    const w: cglm.vec3 = .{ m[0][2], m[1][2], m[2][2] };
+
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(u, u), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(v, v), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), vec3Dot(w, w), 1e-5);
+
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(u, v), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(u, w), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), vec3Dot(v, w), 1e-5);
+
+    // No position offset => zero translation row.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][2], 1e-6);
+}
+
+test "Camera.getProjection / getView return the stored matrices" {
+    var cam: Self = .{};
+    cam.setOrthographicProjection(-2.0, 2.0, -1.0, 1.0, 0.0, 5.0);
+    cam.setViewYXZ(.{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 0.0 });
+    const projection = cam.getProjection();
+    const view = cam.getView();
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            try std.testing.expectEqual(cam.projectionMatrix[col][row], projection[col][row]);
+            try std.testing.expectEqual(cam.viewMatrix[col][row], view[col][row]);
+        }
+    }
+}

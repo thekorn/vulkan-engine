@@ -151,3 +151,21 @@ test "SimplePushConstantData defaults transform to the identity matrix" {
 test "SimplePushConstantData color is 16-byte aligned (for std140 push constants)" {
     try std.testing.expect(@offsetOf(SimplePushConstantData, "color") % 16 == 0);
 }
+
+test "SimplePushConstantData transform is at offset 0 (matches push-constant range)" {
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(SimplePushConstantData, "transform"));
+}
+
+test "SimplePushConstantData size fits in the Vulkan-mandated minimum (128 bytes)" {
+    // The Vulkan spec guarantees maxPushConstantsSize >= 128 bytes; the
+    // single range we register covers the whole struct, so it must not
+    // exceed that minimum to remain portable.
+    try std.testing.expect(@sizeOf(SimplePushConstantData) <= 128);
+}
+
+test "SimplePushConstantData default color is zero-initialized" {
+    const p: SimplePushConstantData = .{};
+    try std.testing.expectEqual(@as(f32, 0.0), p.color[0]);
+    try std.testing.expectEqual(@as(f32, 0.0), p.color[1]);
+    try std.testing.expectEqual(@as(f32, 0.0), p.color[2]);
+}
