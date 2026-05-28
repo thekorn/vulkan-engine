@@ -47,6 +47,8 @@ Install required dependencies:
 zig build              # Build executable
 zig build run          # Build and run
 zig build test         # Run tests
+zig build coverage     # Run tests under kcov, write report to zig-out/cover (Linux only)
+zig build test -Dcover -Dopen   # Run tests under kcov and open the HTML report
 ```
 
 ### Spell Checking

@@ -38,7 +38,10 @@
               #freetype.out
               #freetype.dev
             ]
-            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL.dev ]);
+            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [
+              libGL.dev
+              kcov # only packaged for Linux in nixpkgs
+            ]);
 
           nativeBuildInputs =
             with pkgs;
