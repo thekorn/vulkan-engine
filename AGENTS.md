@@ -659,15 +659,14 @@ a `GameObject` driven by `SimpleRenderSystem`.
   4. Spell check: `nix develop -c codebook-lsp lint .`
   5. Build & tests: `nix develop -c zig build test --summary all`
   6. Coverage: `nix develop -c zig build coverage --summary all`
-  7. Normalize per-run kcov output paths to stable filenames
-     (`zig-out/cover/{cobertura.xml,coverage.json}`)
-  8. Upload the full HTML report as the `coverage-report` artifact
-  9. On `push` to `main`: upload `coverage.json` as the `coverage-main`
-     artifact so PRs can diff against it
-  10. On `pull_request`: download the latest `coverage-main` artifact
-      from `main` and post a sticky PR comment with the overall
-      coverage and the per-file delta vs `main` (via
-      `actions/github-script`).
+  7. Upload the full HTML report as the `coverage-report` artifact
+  8. On `push` to `main`: upload `coverage.json` (via the stable
+     `zig-out/cover/test/` symlink kcov maintains) as the
+     `coverage-main` artifact so PRs can diff against it
+  9. On `pull_request`: download the latest `coverage-main` artifact
+     from `main` and post a sticky PR comment with the overall
+     coverage and the per-file delta vs `main` (via
+     `actions/github-script`).
 - Concurrency control to cancel outdated runs
 - The PR comment uses `<!-- coverage-comment -->` as a marker so it is
   updated in place on subsequent pushes instead of accumulating.

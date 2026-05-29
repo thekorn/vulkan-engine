@@ -40,16 +40,6 @@ jobs:
       - name: coverage (kcov)
         run: nix develop -c zig build coverage --summary all
 
-      # kcov writes its outputs to a per-run subdirectory whose name
-      # depends on the test binary hash. Copy the artifacts we care
-      # about to stable filenames so downstream steps can reference
-      # them without globbing.
-      - name: normalize coverage artifact paths
-        run: |
-          set -eu
-          cp zig-out/cover/*/cobertura.xml zig-out/cover/cobertura.xml
-          cp zig-out/cover/*/coverage.json  zig-out/cover/coverage.json
-
       - name: upload coverage report
         uses: actions/upload-artifact@v4
         if: always()
@@ -59,13 +49,14 @@ jobs:
           if-no-files-found: ignore
 
       # On pushes to main, publish the coverage.json so PRs can diff
-      # against the latest mainline coverage numbers.
+      # against the latest mainline coverage numbers. kcov maintains a
+      # stable `test` symlink to the latest per-run output.
       - name: upload baseline coverage (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-main
-          path: zig-out/cover/coverage.json
+          path: zig-out/cover/test/coverage.json
           if-no-files-found: error
 
       # On PRs, pull down the latest main baseline (best-effort) and
@@ -89,7 +80,7 @@ jobs:
             const fs = require('fs');
 
             const current = JSON.parse(
-              fs.readFileSync('zig-out/cover/coverage.json', 'utf8'),
+              fs.readFileSync('zig-out/cover/test/coverage.json', 'utf8'),
             );
 
             let baseline = null;

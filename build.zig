@@ -34,22 +34,18 @@ fn coverStep(
     }
 
     // Compact terminal summary of the kcov report so the user can see
-    // the coverage numbers without opening the HTML report. The per-run
-    // JSON lives at `<dir>/<binary>.<hash>/coverage.json`; we glob for
-    // it and let `jq` format totals plus a per-file breakdown sorted
-    // by ascending coverage (worst first).
+    // the coverage numbers without opening the HTML report. kcov
+    // maintains a stable `<dir>/test` symlink pointing at the latest
+    // per-run output, so we can read `coverage.json` directly without
+    // globbing.
+    const coverage_json = b.pathJoin(&.{ dir, "test", "coverage.json" });
     const summary_script = b.fmt(
         \\set -eu
-        \\f=$(ls {s}/*/coverage.json 2>/dev/null | head -n1)
-        \\if [ -z "$f" ]; then
-        \\  echo "coverage: no coverage.json found under {s}" >&2
-        \\  exit 0
-        \\fi
         \\echo
-        \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "$f"
-        \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "$f"
+        \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "{s}"
+        \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "{s}"
         \\echo
-    , .{ dir, dir });
+    , .{ coverage_json, coverage_json });
 
     const summary_command = b.addSystemCommand(&.{ "sh", "-c", summary_script });
     summary_command.step.dependOn(&coverage_command.step);
