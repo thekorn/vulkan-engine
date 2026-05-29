@@ -9,7 +9,10 @@ var currentId: u64 = 0;
 const Self = @This();
 
 id_t: u64,
-model: Model,
+// The model is optional because some game objects exist purely to carry
+// a `TransformComponent` (e.g. the camera "viewer" object that is driven
+// by the keyboard controller). `null` means "nothing to render".
+model: ?Model,
 color: cglm.vec3,
 transform: TransformComponent,
 
@@ -64,8 +67,23 @@ pub fn init(model: Model, color: cglm.vec3, transform: TransformComponent) !Self
     };
 }
 
+/// Construct a game object without a renderable model. Mirrors the
+/// `LveGameObject::createGameObject()` factory in the C++ tutorial and
+/// is used for non-rendered entities such as the camera "viewer" object
+/// that only carries a `TransformComponent`.
+pub fn createGameObject() Self {
+    const id = currentId;
+    currentId += 1;
+    return Self{
+        .id_t = id,
+        .model = null,
+        .color = .{ 0, 0, 0 },
+        .transform = .{},
+    };
+}
+
 pub fn deinit(self: *Self) void {
-    self.model.deinit();
+    if (self.model) |*m| m.deinit();
 }
 
 pub fn getId(self: Self) u64 {
@@ -119,7 +137,7 @@ test "GameObject has expected fields" {
     const info = @typeInfo(Self).@"struct";
     try std.testing.expectEqual(@as(usize, 4), info.fields.len);
     try std.testing.expectEqual(u64, @FieldType(Self, "id_t"));
-    try std.testing.expectEqual(Model, @FieldType(Self, "model"));
+    try std.testing.expectEqual(?Model, @FieldType(Self, "model"));
     try std.testing.expectEqual(cglm.vec3, @FieldType(Self, "color"));
     try std.testing.expectEqual(TransformComponent, @FieldType(Self, "transform"));
 }
@@ -199,6 +217,24 @@ test "TransformComponent.mat4 is deterministic for identical inputs" {
             try std.testing.expectEqual(ma[col][row], mb[col][row]);
         }
     }
+}
+
+test "GameObject.createGameObject yields a model-less object with default transform" {
+    const obj = Self.createGameObject();
+
+    try std.testing.expect(obj.model == null);
+    try std.testing.expectEqual(@as(f32, 0.0), obj.color[0]);
+    try std.testing.expectEqual(@as(f32, 0.0), obj.color[1]);
+    try std.testing.expectEqual(@as(f32, 0.0), obj.color[2]);
+    try std.testing.expectEqual(@as(f32, 0.0), obj.transform.translation[0]);
+    try std.testing.expectEqual(@as(f32, 1.0), obj.transform.scale[0]);
+    try std.testing.expectEqual(@as(f32, 0.0), obj.transform.rotation[0]);
+}
+
+test "GameObject.createGameObject still assigns strictly increasing ids" {
+    const a = Self.createGameObject();
+    const b = Self.createGameObject();
+    try std.testing.expect(b.id_t > a.id_t);
 }
 
 test "GameObject.init copies color and transform fields" {
