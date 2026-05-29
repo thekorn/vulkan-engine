@@ -33,13 +33,30 @@ fn coverStep(
         mkdir_command.step.dependOn(&clean_command.step);
     }
 
-    if (!open) return &coverage_command.step;
+    // Compact terminal summary of the kcov report so the user can see
+    // the coverage numbers without opening the HTML report. kcov
+    // maintains a stable `<dir>/test` symlink pointing at the latest
+    // per-run output, so we can read `coverage.json` directly without
+    // globbing.
+    const coverage_json = b.pathJoin(&.{ dir, "test", "coverage.json" });
+    const summary_script = b.fmt(
+        \\set -eu
+        \\echo
+        \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "{s}"
+        \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "{s}"
+        \\echo
+    , .{ coverage_json, coverage_json });
+
+    const summary_command = b.addSystemCommand(&.{ "sh", "-c", summary_script });
+    summary_command.step.dependOn(&coverage_command.step);
+
+    if (!open) return &summary_command.step;
 
     const open_command = b.addSystemCommand(&.{
         if (builtin.target.os.tag == .linux) "xdg-open" else "open",
         b.pathJoin(&.{ dir, "index.html" }),
     });
-    open_command.step.dependOn(&coverage_command.step);
+    open_command.step.dependOn(&summary_command.step);
     return &open_command.step;
 }
 

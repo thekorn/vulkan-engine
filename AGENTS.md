@@ -51,6 +51,12 @@ zig build coverage     # Run tests under kcov, write report to zig-out/cover (Li
 zig build test -Dcover -Dopen   # Run tests under kcov and open the HTML report
 ```
 
+Whenever kcov runs (via either `zig build coverage` or `zig build test
+-Dcover`), a compact summary is printed at the end of the terminal
+output: an overall percentage followed by a per-file breakdown sorted
+worst-first. It reads the per-run `coverage.json` produced by kcov via
+`jq`, so `jq` must be on `PATH` (provided by the Nix dev shell).
+
 ### Spell Checking
 
 The project uses [`codebook`](https://github.com/blopker/codebook) for
@@ -683,6 +689,8 @@ a `GameObject` driven by `SimpleRenderSystem`.
   - `zls_0_16` - Language server
   - `codebook` - Spell checker (`codebook-lsp` binary)
   - `cloc` - Lines-of-code report
+  - `jq` - JSON formatter, used by the coverage summary printer in
+    `build.zig`
   - `shaderc` - Shader compilation
   - `vulkan-headers`, `vulkan-loader(.dev)`, `vulkan-validation-layers`
   - `glfw` - Window system
@@ -704,7 +712,18 @@ a `GameObject` driven by `SimpleRenderSystem`.
   3. Run `nix flake check`
   4. Spell check: `nix develop -c codebook-lsp lint .`
   5. Build & tests: `nix develop -c zig build test --summary all`
+  6. Coverage: `nix develop -c zig build coverage --summary all`
+  7. Upload the full HTML report as the `coverage-report` artifact
+  8. On `push` to `main`: upload `coverage.json` (via the stable
+     `zig-out/cover/test/` symlink kcov maintains) as the
+     `coverage-main` artifact so PRs can diff against it
+  9. On `pull_request`: download the latest `coverage-main` artifact
+     from `main` and post a sticky PR comment with the overall
+     coverage and the per-file delta vs `main` (via
+     `actions/github-script`).
 - Concurrency control to cancel outdated runs
+- The PR comment uses `<!-- coverage-comment -->` as a marker so it is
+  updated in place on subsequent pushes instead of accumulating.
 
 ### 5.4 Git Configuration
 
