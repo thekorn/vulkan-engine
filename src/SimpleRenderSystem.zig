@@ -91,14 +91,14 @@ pub fn renderGameObjects(
     camera: *const Camera,
 ) !void {
     self.pipeline.?.bind(commandBuffer);
-    const two_pi: f32 = 2.0 * std.math.pi;
     var projection = camera.getProjection();
     var view = camera.getView();
     var projectionView: cglm.mat4 = undefined;
     cglm.glm_mat4_mul(&projection[0], &view[0], &projectionView[0]);
     for (gameObjects) |*obj| {
-        obj.transform.rotation[1] = @mod(obj.transform.rotation[1] + 0.01, two_pi);
-        obj.transform.rotation[0] = @mod(obj.transform.rotation[0] + 0.005, two_pi);
+        // Skip model-less objects (e.g. the camera viewer object that
+        // only carries a transform component).
+        if (obj.model == null) continue;
 
         var model_mat = obj.transform.mat4();
         var transform: cglm.mat4 = undefined;
@@ -117,8 +117,8 @@ pub fn renderGameObjects(
             @sizeOf(SimplePushConstantData),
             &push,
         );
-        obj.model.bind(commandBuffer);
-        obj.model.draw(commandBuffer);
+        obj.model.?.bind(commandBuffer);
+        obj.model.?.draw(commandBuffer);
     }
 }
 

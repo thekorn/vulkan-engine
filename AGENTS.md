@@ -114,9 +114,21 @@ vulkan-engine/
 │   ├── Model.zig            # Vertex buffer wrapper; defines `Vertex`
 │   │                        #   (position + color) with binding /
 │   │                        #   attribute descriptions
-│   ├── GameObject.zig       # Renderable entity: id, model, color and
-│   │                        #   TransformComponent (translation / scale /
-│   │                        #   rotation -> mat4 via Tait-Bryan Y-X-Z)
+│   ├── GameObject.zig       # Renderable entity: id, optional model,
+│   │                        #   color and TransformComponent
+│   │                        #   (translation / scale / rotation -> mat4
+│   │                        #   via Tait-Bryan Y-X-Z); also provides a
+│   │                        #   `createGameObject()` factory for
+│   │                        #   model-less objects (e.g. the camera
+│   │                        #   "viewer" object)
+│   ├── KeyboardMovementController.zig
+│   │                        # WASD + QE position + arrow-key look
+│   │                        #   controller that drives a GameObject's
+│   │                        #   TransformComponent
+│   ├── Camera.zig           # View/projection matrix helpers
+│   │                        #   (orthographic, perspective,
+│   │                        #   setViewDirection / setViewTarget /
+│   │                        #   setViewYXZ)
 │   ├── Loop.zig             # Main event loop & POSIX signal handling
 │   ├── c.zig                # C interop: GLFW + Vulkan and a separate
 │   │                        #   cglm @cImport (scalar / no SIMD)
@@ -156,7 +168,10 @@ FirstApp.zig (Application root)
     │                  framebuffers, sync, acquire/present)
     ├── SimpleRenderSystem.zig
     │     └── Pipeline.zig (graphics pipeline, shader modules)
-    └── GameObject.zig (Model + TransformComponent + color)
+    ├── Camera.zig (projection + view matrices)
+    ├── KeyboardMovementController.zig (drives a viewer GameObject
+    │                                    from keyboard input)
+    └── GameObject.zig (optional Model + TransformComponent + color)
               ↓
           Model.zig (Vertex buffer)
               ↓
@@ -190,16 +205,23 @@ FirstApp.zig (Application root)
     `loadGameObjects()`.
   - `deinit()` - Tears everything down in reverse order.
   - `run()` - Main loop:
-    1. Build a `SimpleRenderSystem` against the current swapchain render
-       pass.
+    1. Build a `SimpleRenderSystem`, a `Camera`, a model-less
+       `viewerObject` (via `GameObject.createGameObject`) and a
+       `KeyboardMovementController`.
     2. Poll GLFW events.
-    3. `renderer.beginFrame()` → `beginSwapChainRenderPass` →
+    3. Compute `frameTime` (seconds) from `glfwGetTime()`.
+    4. `cameraController.moveInPlaneXZ(...)` updates the viewer
+       object's transform from keyboard input.
+    5. `camera.setViewYXZ(...)` syncs the camera to the viewer
+       object's translation/rotation, then `setPerspectiveProjection`
+       updates the projection.
+    6. `renderer.beginFrame()` → `beginSwapChainRenderPass` →
        `simpleRenderSystem.renderGameObjects` →
        `endSwapChainRenderPass` → `endFrame`.
-    4. If the swapchain has to be recreated and reports
+    7. If the swapchain has to be recreated and reports
        `error.SwapChainFormatChanged`, the render system is rebuilt
        against the new render pass and the frame is skipped.
-    5. `vkDeviceWaitIdle` before returning so the GPU is finished with
+    8. `vkDeviceWaitIdle` before returning so the GPU is finished with
        everything before resources are destroyed.
   - `createCubeModel()` / `loadGameObjects()` - Temporary helpers that
     build a single colored cube `Model` and wrap it in a `GameObject`.
@@ -372,17 +394,36 @@ FirstApp.zig (Application root)
 
 #### **GameObject.zig** - Renderable Entity
 
-- **Purpose:** A simple renderable: id, owned `Model`, color and a
-  `TransformComponent`.
+- **Purpose:** A simple renderable: id, optionally owned `Model`, color
+  and a `TransformComponent`.
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
   `cglm.vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)
   angles.
 - **Key Functions:**
   - `init(model, color, transform)` - Auto-assigns a monotonically
-    increasing `id_t`.
-  - `deinit()` - Tears down the owned `Model`.
+    increasing `id_t`; the object owns the model.
+  - `createGameObject()` - Factory for a model-less object (used for
+    the camera "viewer" object driven by the keyboard controller).
+  - `deinit()` - Tears down the owned `Model` if any.
   - `getId()` - Returns the object's id.
+
+#### **KeyboardMovementController.zig** - Camera Input
+
+- **Purpose:** Translate keyboard input into transform changes on a
+  `GameObject`. Used by `FirstApp` to drive the camera's view object.
+- **Default key mappings** (overridable via `keys: KeyMappings`):
+  - Movement: `W` / `S` (forward / back), `A` / `D` (strafe left /
+    right), `E` / `Q` (up / down in world space).
+  - Look: arrow keys for yaw (`Left` / `Right`) and pitch (`Up` /
+    `Down`).
+- **Tunables:** `moveSpeed` (default `3.0` units/s), `lookSpeed`
+  (default `1.5` rad/s).
+- **Key Functions:**
+  - `moveInPlaneXZ(window, dt, gameObject)` - Reads currently-pressed
+    keys, normalizes the rotation/translation deltas, integrates them
+    over `dt`, clamps pitch to roughly +/- 85° and wraps yaw into
+    `[0, 2*pi)`.
 
 #### **Loop.zig** - Main Event Loop
 
@@ -460,14 +501,27 @@ main.zig
 
 ```
 SimpleRenderSystem.init(renderer.getSwapChainRenderPass())
+camera           = Camera{}
+viewerObject     = GameObject.createGameObject()   // no model
+cameraController = KeyboardMovementController{}
+currentTime      = glfwGetTime()
 
 while Loop.is_running():
   glfwPollEvents()
 
+  newTime   = glfwGetTime()
+  frameTime = newTime - currentTime
+  currentTime = newTime
+
+  cameraController.moveInPlaneXZ(window, frameTime, &viewerObject)
+  camera.setViewYXZ(viewerObject.transform.translation,
+                    viewerObject.transform.rotation)
+  camera.setPerspectiveProjection(radians(50), aspect, 0.1, 10)
+
   cb = renderer.beginFrame()    // acquires next image, begins recording
   if cb != null:
     renderer.beginSwapChainRenderPass(cb)
-    simpleRenderSystem.renderGameObjects(cb, gameObjects)
+    simpleRenderSystem.renderGameObjects(cb, gameObjects, &camera)
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
   // On error.SwapChainFormatChanged → rebuild SimpleRenderSystem

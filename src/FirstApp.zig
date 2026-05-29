@@ -4,6 +4,7 @@ const c = @import("c.zig").c;
 const cglm = @import("c.zig").cglm;
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
+const KeyboardMovementController = @import("KeyboardMovementController.zig");
 const Loop = @import("Loop.zig");
 const Renderer = @import("Renderer.zig");
 const SimpleRenderSystem = @import("SimpleRenderSystem.zig");
@@ -77,11 +78,25 @@ pub fn run(self: *Self) !void {
     defer simpleRenderSystem.deinit();
 
     var camera: Camera = .{};
-    // camera.setViewDirection(.{ 0, 0, 0 }, .{ 0.5, 0, 1 }, Camera.default_up);
-    camera.setViewTarget(.{ -1.0, -2.0, -2.0 }, .{ 0.0, 0.0, 2.5 }, Camera.default_up);
+
+    var viewerObject = GameObject.createGameObject();
+    const cameraController: KeyboardMovementController = .{};
+
+    // Use the monotonic clock from GLFW — seconds (as f64) since
+    // `glfwInit` — to compute per-frame delta time. This avoids
+    // depending on the `std.time` clock APIs that were reworked in Zig
+    // 0.16.
+    var currentTime: f64 = c.glfwGetTime();
 
     while (self.loop.is_running()) {
         c.glfwPollEvents();
+
+        const newTime: f64 = c.glfwGetTime();
+        const frameTime: f32 = @floatCast(newTime - currentTime);
+        currentTime = newTime;
+
+        cameraController.moveInPlaneXZ(self.window.instance, frameTime, &viewerObject);
+        camera.setViewYXZ(viewerObject.transform.translation, viewerObject.transform.rotation);
 
         const aspect = self.renderer.getAspectRatio();
         // camera.setOrthographicProjection(-aspect, aspect, -1, 1, -1, 1);
