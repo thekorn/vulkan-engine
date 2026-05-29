@@ -22,6 +22,8 @@ words = [
     "glsl",
     "glslang",
     "glslc",
+    "cobertura",
+    "dawidd",
     "infos",
     "kcov",
     "khr",

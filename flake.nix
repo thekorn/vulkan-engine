@@ -27,6 +27,7 @@
               codebook
               cloc
               shaderc
+              jq
               pkg-config
               vulkan-headers
               vulkan-loader.dev

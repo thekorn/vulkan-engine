@@ -33,13 +33,34 @@ fn coverStep(
         mkdir_command.step.dependOn(&clean_command.step);
     }
 
-    if (!open) return &coverage_command.step;
+    // Compact terminal summary of the kcov report so the user can see
+    // the coverage numbers without opening the HTML report. The per-run
+    // JSON lives at `<dir>/<binary>.<hash>/coverage.json`; we glob for
+    // it and let `jq` format totals plus a per-file breakdown sorted
+    // by ascending coverage (worst first).
+    const summary_script = b.fmt(
+        \\set -eu
+        \\f=$(ls {s}/*/coverage.json 2>/dev/null | head -n1)
+        \\if [ -z "$f" ]; then
+        \\  echo "coverage: no coverage.json found under {s}" >&2
+        \\  exit 0
+        \\fi
+        \\echo
+        \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "$f"
+        \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "$f"
+        \\echo
+    , .{ dir, dir });
+
+    const summary_command = b.addSystemCommand(&.{ "sh", "-c", summary_script });
+    summary_command.step.dependOn(&coverage_command.step);
+
+    if (!open) return &summary_command.step;
 
     const open_command = b.addSystemCommand(&.{
         if (builtin.target.os.tag == .linux) "xdg-open" else "open",
         b.pathJoin(&.{ dir, "index.html" }),
     });
-    open_command.step.dependOn(&coverage_command.step);
+    open_command.step.dependOn(&summary_command.step);
     return &open_command.step;
 }
 
