@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const cglm = @import("c.zig").cglm;
+const math = @import("math.zig");
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
@@ -146,7 +146,7 @@ pub fn run(self: *Self) !void {
 }
 
 // temporary helper function, creates a 1x1x1 cube centered at offset
-fn createCubeModel(device: *Device, offset: cglm.vec3) !Model {
+fn createCubeModel(device: *Device, offset: math.Vec3) !Model {
     var vertices = [_]Model.Vertex{
         // left face (white)
         .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
@@ -198,9 +198,7 @@ fn createCubeModel(device: *Device, offset: cglm.vec3) !Model {
     };
 
     for (&vertices) |*v| {
-        v.position[0] += offset[0];
-        v.position[1] += offset[1];
-        v.position[2] += offset[2];
+        v.position += offset;
     }
 
     return Model.init(device, vertices[0..]);

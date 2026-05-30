@@ -1,7 +1,9 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const cglm = @import("c.zig").cglm;
+const math = @import("math.zig");
+const Vec3 = math.Vec3;
+const Mat4 = math.Mat4;
 const Device = @import("Device.zig");
 const Model = @import("Model.zig");
 var currentId: u64 = 0;
@@ -13,18 +15,18 @@ id_t: u64,
 // a `TransformComponent` (e.g. the camera "viewer" object that is driven
 // by the keyboard controller). `null` means "nothing to render".
 model: ?Model,
-color: cglm.vec3,
+color: Vec3,
 transform: TransformComponent,
 
-pub const TransformComponent = extern struct {
-    translation: cglm.vec3 = .{ 0, 0, 0 },
-    scale: cglm.vec3 = .{ 1.0, 1.0, 1.0 },
-    rotation: cglm.vec3 = .{ 0, 0, 0 },
+pub const TransformComponent = struct {
+    translation: Vec3 = .{ 0, 0, 0 },
+    scale: Vec3 = .{ 1.0, 1.0, 1.0 },
+    rotation: Vec3 = .{ 0, 0, 0 },
 
     // Matrix corresponds to Translate * Ry * Rx * Rz * Scale
     // Rotations correspond to Tait-Bryan angles of Y(1), X(2), Z(3)
     // https://en.wikipedia.org/wiki/Euler_angles#Rotation_matrix
-    pub fn mat4(self: *TransformComponent) cglm.mat4 {
+    pub fn mat4(self: *TransformComponent) Mat4 {
         const c3 = std.math.cos(self.rotation[2]);
         const s3 = std.math.sin(self.rotation[2]);
         const c2 = std.math.cos(self.rotation[0]);
@@ -32,7 +34,7 @@ pub const TransformComponent = extern struct {
         const c1 = std.math.cos(self.rotation[1]);
         const s1 = std.math.sin(self.rotation[1]);
 
-        return cglm.mat4{
+        return Mat4{
             .{
                 self.scale[0] * (c1 * c3 + s1 * s2 * s3),
                 self.scale[0] * (c2 * s3),
@@ -56,7 +58,7 @@ pub const TransformComponent = extern struct {
     }
 };
 
-pub fn init(model: Model, color: cglm.vec3, transform: TransformComponent) !Self {
+pub fn init(model: Model, color: Vec3, transform: TransformComponent) !Self {
     const id = currentId;
     currentId += 1;
     return Self{
@@ -106,7 +108,7 @@ test "TransformComponent default values" {
 test "TransformComponent.mat4 returns identity for rotation=0 and scale=1" {
     var t = TransformComponent{};
     const m = t.mat4();
-    // cglm mat4 is `vec4[4]` (column-major): m[col][row]
+    // Mat4 is `[4]Vec4` (column-major): m[col][row]
     inline for (0..4) |col| {
         inline for (0..4) |row| {
             const expected: f32 = if (col == row) 1.0 else 0.0;
@@ -138,7 +140,7 @@ test "GameObject has expected fields" {
     try std.testing.expectEqual(@as(usize, 4), info.fields.len);
     try std.testing.expectEqual(u64, @FieldType(Self, "id_t"));
     try std.testing.expectEqual(?Model, @FieldType(Self, "model"));
-    try std.testing.expectEqual(cglm.vec3, @FieldType(Self, "color"));
+    try std.testing.expectEqual(Vec3, @FieldType(Self, "color"));
     try std.testing.expectEqual(TransformComponent, @FieldType(Self, "transform"));
 }
 
