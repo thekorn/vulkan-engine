@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const shaders_dir = "./shaders";
+const models_dir = "./models";
 
 /// A step that runs kcov on an artifact binary (requires kcov to be
 /// installed). Adapted from https://github.com/vancluever/z2d.
@@ -101,6 +102,36 @@ fn addShader(b: *std.Build, exe: anytype, in_file: []const u8, out_file: []const
     });
 }
 
+/// Walk `models/` and expose each asset file (e.g. `.obj`) to the
+/// executable as an anonymous module import keyed by the file's basename
+/// (e.g. `smooth_vase.obj`), so call sites can use
+/// `@embedFile("smooth_vase.obj")`.
+fn embedAllModels(b: *std.Build, exe: anytype) !void {
+    const io = b.graph.io;
+    var dir = std.Io.Dir.openDir(std.Io.Dir.cwd(), io, models_dir, .{ .iterate = true }) catch |err| switch (err) {
+        // Tolerate a missing `models/` directory so the project still
+        // builds before any asset has been added.
+        error.FileNotFound => return,
+        else => return err,
+    };
+    defer dir.close(io);
+
+    var walker = try dir.walk(b.allocator);
+    defer walker.deinit();
+
+    while (try walker.next(io)) |entry| {
+        // Only embed regular files. Skip directories (we still want to
+        // walk into them to find files) and other entry kinds.
+        if (entry.kind != .file) continue;
+
+        const full_path = try std.fs.path.join(b.allocator, &[_][]const u8{ models_dir, entry.path });
+        std.debug.print("embedding model: {s}\n", .{full_path});
+        exe.root_module.addAnonymousImport(entry.path, .{
+            .root_source_file = b.path(full_path),
+        });
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -124,6 +155,10 @@ pub fn build(b: *std.Build) void {
 
     compileAllShaders(b, exe) catch |e| {
         std.debug.print("Failed to compile shaders: {}\n", .{e});
+    };
+
+    embedAllModels(b, exe) catch |e| {
+        std.debug.print("Failed to embed models: {}\n", .{e});
     };
 
     b.installArtifact(exe);

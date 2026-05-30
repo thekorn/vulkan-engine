@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const math = @import("math.zig");
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
@@ -145,80 +144,24 @@ pub fn run(self: *Self) !void {
     _ = c.vkDeviceWaitIdle(self.device.globalDevice);
 }
 
-// temporary helper function, creates a 1x1x1 cube centered at offset
-// using an index buffer (24 unique vertices, 36 indices).
-fn createCubeModel(device: *Device, offset: math.Vec3) !Model {
-    var vertices = [_]Model.Vertex{
-        // left face (white)
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
-        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.9, 0.9, 0.9 } },
-
-        // right face (yellow)
-        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.8, 0.1 } },
-
-        // top face (orange, remember y axis points down)
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
-        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
-        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.9, 0.6, 0.1 } },
-
-        // bottom face (red)
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.8, 0.1, 0.1 } },
-
-        // nose face (blue)
-        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 0.1, 0.1, 0.8 } },
-
-        // tail face (green)
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
-        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.1, 0.8, 0.1 } },
-    };
-
-    for (&vertices) |*v| {
-        v.position += offset;
-    }
-
-    const indices = [_]u32{
-        0,  1,  2,  0,  3,  1,
-        4,  5,  6,  4,  7,  5,
-        8,  9,  10, 8,  11, 9,
-        12, 13, 14, 12, 15, 13,
-        16, 17, 18, 16, 19, 17,
-        20, 21, 22, 20, 23, 21,
-    };
-
-    return Model.init(device, .{
-        .vertices = vertices[0..],
-        .indices = indices[0..],
-    });
-}
-
 fn loadGameObjects(self: *Self) !void {
-    var model = try createCubeModel(self.device, .{ 0.0, 0.0, 0.0 });
+    // The `.obj` asset is embedded at build time by `embedAllModels` in
+    // `build.zig` (the asset key is its basename under `models/`).
+    const obj_bytes = @embedFile("smooth_vase.obj");
+
+    var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
     errdefer model.deinit();
 
-    const cube = try GameObject.init(
+    const gameObj = try GameObject.init(
         model,
         .{ 0, 0, 0 },
         .{
             .translation = .{ 0.0, 0.0, 2.5 },
-            .scale = .{ 0.5, 0.5, 0.5 },
+            .scale = .{ 3.0, 3.0, 3.0 },
         },
     );
 
-    try self.gameObjects.append(self.alloc, cube);
+    try self.gameObjects.append(self.alloc, gameObj);
 }
 
 test "FirstApp default window dimensions are 800x600" {
