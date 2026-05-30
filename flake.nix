@@ -33,7 +33,6 @@
               vulkan-loader.dev
               vulkan-loader
               vulkan-validation-layers
-              tinyobjloader
 
               # for [rift engine]
               #glslang.bin

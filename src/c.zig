@@ -3,5 +3,5 @@ pub const c = @cImport({
     @cDefine("GLFW_INCLUDE_VULKAN", {});
     @cInclude("GLFW/glfw3.h");
     @cInclude("vulkan/vulkan_beta.h");
-    @cInclude("tinyobj_wrapper.h");
+    @cInclude("tinyobj_loader_c.h");
 });

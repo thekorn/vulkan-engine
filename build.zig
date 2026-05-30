@@ -19,9 +19,7 @@ fn coverStep(
     // existing report directory.
     // Anchor the include pattern to this project's `src/` directory so
     // kcov doesn't also pick up unrelated files that happen to live
-    // under a `src/` path — most notably the C++ standard library
-    // sources (`<zig>/lib/zig/libcxx/src/...`, `libcxxabi/src/...`)
-    // that get pulled in by the tinyobjloader C++ wrapper.
+    // under a `src/` path (e.g. dependencies fetched into `zig-pkg/`).
     const include_pattern = b.fmt("--include-pattern={s}/", .{b.pathFromRoot("src")});
 
     var kcov_argv: std.ArrayList([]const u8) = .empty;
@@ -155,18 +153,19 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
 
-    // The OBJ loader is a thin C-ABI wrapper around the C++
-    // tinyobjloader library. Compiling the wrapper requires libc++ and
-    // libc; pulling in tinyobjloader via `linkSystemLibrary` lets
-    // pkg-config wire up its include path and static archive.
+    // tinyobjloader-c is a pure C99 single-header library fetched via
+    // `build.zig.zon`. We add the dependency's root as an include path
+    // so both Zig (`@cInclude("tinyobj_loader_c.h")` in `c.zig`) and
+    // the tiny C stub that compiles the implementation
+    // (`src/wrapper/tinyobj/tinyobj_loader_c_impl.c`) can find the
+    // header. Only `libc` is needed; no C++ runtime.
+    const tinyobj_c = b.dependency("tinyobjloader_c", .{});
     exe.root_module.link_libc = true;
-    exe.root_module.link_libcpp = true;
-    exe.root_module.addIncludePath(b.path("src/wrapper/tinyobj"));
+    exe.root_module.addIncludePath(tinyobj_c.path("."));
     exe.root_module.addCSourceFile(.{
-        .file = b.path("src/wrapper/tinyobj/tinyobj_wrapper.cpp"),
-        .flags = &.{ "-std=c++17", "-fno-exceptions" },
+        .file = b.path("src/wrapper/tinyobj/tinyobj_loader_c_impl.c"),
+        .flags = &.{"-std=c99"},
     });
-    exe.root_module.linkSystemLibrary("tinyobjloader", .{});
 
     if (target.result.os.tag == .linux) {
         exe.root_module.linkSystemLibrary("gl", .{});

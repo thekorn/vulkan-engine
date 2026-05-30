@@ -81,10 +81,12 @@ pub const Builder = struct {
 
     /// Parse a Wavefront OBJ file (`bytes`) into this builder, replacing
     /// any previously stored vertices/indices. Delegates to
-    /// tinyobjloader via the small C-ABI wrapper in
-    /// `src/wrapper/tinyobj/tinyobj_wrapper.cpp`; tinyobjloader triangulates polygonal
-    /// faces and the wrapper performs per-vertex deduplication, exactly
-    /// as in the upstream C++ tutorial.
+    /// [tinyobjloader-c](https://github.com/syoyo/tinyobjloader-c)
+    /// (vendored via `build.zig.zon`); the parser triangulates polygonal
+    /// faces, and this function deduplicates exactly-matching vertices
+    /// (same position / color / normal / uv) using a hash map — mirroring
+    /// the `std::unordered_map<Vertex, uint32_t>` loop in `lve_model.cpp`
+    /// from the upstream C++ tutorial.
     pub fn loadModel(
         self: *Builder,
         alloc: std.mem.Allocator,
@@ -93,47 +95,142 @@ pub const Builder = struct {
         self.vertices.clearRetainingCapacity();
         self.indices.clearRetainingCapacity();
 
-        var vertices_ptr: [*c]c.tinyobj_wrapper_vertex = null;
-        var vertices_count: usize = 0;
-        var indices_ptr: [*c]u32 = null;
-        var indices_count: usize = 0;
-        var err_msg: [*c]u8 = null;
+        // tinyobjloader-c does all I/O through a user callback so it
+        // can transparently support virtual file systems. We feed it
+        // the in-memory OBJ bytes directly and ignore `.mtl` requests
+        // since this engine doesn't consume materials.
+        var ctx: MemReaderCtx = .{ .bytes = bytes };
 
-        const ok = c.tinyobj_load_bytes(
-            bytes.ptr,
-            bytes.len,
-            &vertices_ptr,
-            &vertices_count,
-            &indices_ptr,
-            &indices_count,
-            &err_msg,
+        var attrib: c.tinyobj_attrib_t = undefined;
+        c.tinyobj_attrib_init(&attrib);
+        defer c.tinyobj_attrib_free(&attrib);
+
+        var shapes: [*c]c.tinyobj_shape_t = null;
+        var num_shapes: usize = 0;
+        var materials: [*c]c.tinyobj_material_t = null;
+        var num_materials: usize = 0;
+
+        const rc = c.tinyobj_parse_obj(
+            &attrib,
+            &shapes,
+            &num_shapes,
+            &materials,
+            &num_materials,
+            // The library passes this string back into the reader
+            // callback as the `filename` argument; we ignore it.
+            "<memory>",
+            memReaderCallback,
+            &ctx,
+            c.TINYOBJ_FLAG_TRIANGULATE,
         );
-        defer {
-            c.tinyobj_free(vertices_ptr);
-            c.tinyobj_free(indices_ptr);
-            c.tinyobj_free(err_msg);
-        }
+        defer c.tinyobj_shapes_free(shapes, num_shapes);
+        defer c.tinyobj_materials_free(materials, num_materials);
 
-        if (ok == 0) {
-            if (err_msg != null) {
-                std.log.scoped(.model).err("tinyobjloader: {s}", .{err_msg});
-            }
+        if (rc != c.TINYOBJ_SUCCESS) {
+            std.log.scoped(.model).err("tinyobjloader-c: parse failed ({d})", .{rc});
             return error.InvalidObj;
         }
 
-        try self.vertices.ensureTotalCapacityPrecise(alloc, vertices_count);
-        if (vertices_count > 0) for (vertices_ptr[0..vertices_count]) |wv| {
-            self.vertices.appendAssumeCapacity(.{
-                .position = .{ wv.position[0], wv.position[1], wv.position[2] },
-                .color = .{ wv.color[0], wv.color[1], wv.color[2] },
-                .normal = .{ wv.normal[0], wv.normal[1], wv.normal[2] },
-                .uv = .{ wv.uv[0], wv.uv[1] },
-            });
-        };
+        // Per-corner dedup: walk every triangle corner across every
+        // shape, build the matching `Vertex`, and look it up in a hash
+        // map keyed by exact field equality. New vertices get the next
+        // available index.
+        var unique: std.HashMapUnmanaged(Vertex, u32, VertexHashCtx, 80) = .empty;
+        defer unique.deinit(alloc);
 
-        if (indices_count > 0) {
-            try self.indices.appendSlice(alloc, indices_ptr[0..indices_count]);
+        const num_corners = attrib.num_faces;
+        try self.indices.ensureTotalCapacity(alloc, num_corners);
+
+        var corner: usize = 0;
+        while (corner < num_corners) : (corner += 1) {
+            const idx = attrib.faces[corner];
+
+            var v: Vertex = .{};
+            if (idx.v_idx >= 0) {
+                const base: usize = @intCast(@as(c_int, idx.v_idx) * 3);
+                v.position = .{
+                    attrib.vertices[base + 0],
+                    attrib.vertices[base + 1],
+                    attrib.vertices[base + 2],
+                };
+                // tinyobjloader-c doesn't parse the optional
+                // `v x y z r g b` color extension, so default to white
+                // (matching the C++ tinyobjloader behavior when no
+                // color is provided).
+                v.color = .{ 1.0, 1.0, 1.0 };
+            }
+            if (idx.vn_idx >= 0) {
+                const base: usize = @intCast(@as(c_int, idx.vn_idx) * 3);
+                v.normal = .{
+                    attrib.normals[base + 0],
+                    attrib.normals[base + 1],
+                    attrib.normals[base + 2],
+                };
+            }
+            if (idx.vt_idx >= 0) {
+                const base: usize = @intCast(@as(c_int, idx.vt_idx) * 2);
+                v.uv = .{
+                    attrib.texcoords[base + 0],
+                    attrib.texcoords[base + 1],
+                };
+            }
+
+            const gop = try unique.getOrPut(alloc, v);
+            if (!gop.found_existing) {
+                const new_id: u32 = @intCast(self.vertices.items.len);
+                gop.value_ptr.* = new_id;
+                try self.vertices.append(alloc, v);
+            }
+            self.indices.appendAssumeCapacity(gop.value_ptr.*);
         }
+    }
+};
+
+/// Context carried through the tinyobjloader-c file-reader callback.
+/// The library never frees `*buf`, so we point it straight at the
+/// caller-provided OBJ byte slice and let Zig keep ownership.
+const MemReaderCtx = struct {
+    bytes: []const u8,
+};
+
+fn memReaderCallback(
+    ctx_opaque: ?*anyopaque,
+    filename: [*c]const u8,
+    is_mtl: c_int,
+    obj_filename: [*c]const u8,
+    out_buf: [*c][*c]u8,
+    out_len: [*c]usize,
+) callconv(.c) void {
+    _ = filename;
+    _ = obj_filename;
+
+    // tinyobjloader-c calls back into us twice: once for the OBJ
+    // (is_mtl=0) and, if the file references `mtllib`, once more for
+    // the .mtl (is_mtl=1). This engine ignores materials, so signal
+    // "not found" for any .mtl request and the library will continue
+    // without materials.
+    if (is_mtl != 0) {
+        out_buf.* = null;
+        out_len.* = 0;
+        return;
+    }
+
+    const ctx: *MemReaderCtx = @ptrCast(@alignCast(ctx_opaque.?));
+    out_buf.* = @constCast(@ptrCast(ctx.bytes.ptr));
+    out_len.* = ctx.bytes.len;
+}
+
+/// Hash-map context for byte-exact `Vertex` equality. Safe because
+/// `Vertex` is an `extern struct` of `@Vector`-backed `f32`
+/// components with no padding holes (its size is a multiple of
+/// `@alignOf(Vertex)`), so two semantically-equal vertices have
+/// identical byte representations.
+const VertexHashCtx = struct {
+    pub fn hash(_: VertexHashCtx, v: Vertex) u64 {
+        return std.hash.Wyhash.hash(0, std.mem.asBytes(&v));
+    }
+    pub fn eql(_: VertexHashCtx, a: Vertex, b: Vertex) bool {
+        return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
     }
 };
 
@@ -577,7 +674,12 @@ test "Builder.loadModel handles v//vn (no texcoords) face syntax" {
     }
 }
 
-test "Builder.loadModel reads optional per-vertex color from `v x y z r g b`" {
+test "Builder.loadModel ignores the `v x y z r g b` color extension (defaults to white)" {
+    // tinyobjloader-c does not parse the non-standard per-vertex color
+    // extension `v x y z r g b`; the trailing `r g b` floats are
+    // silently dropped and every vertex's color defaults to white.
+    // This matches plain OBJ semantics (colors normally come from
+    // materials, not from `v` lines).
     const alloc = std.testing.allocator;
     const obj =
         \\v 0 0 0 0.5 0.25 0.75
@@ -589,11 +691,11 @@ test "Builder.loadModel reads optional per-vertex color from `v x y z r g b`" {
     defer builder.deinit(alloc);
     try builder.loadModel(alloc, obj);
 
-    try std.testing.expectEqual(@as(f32, 0.5), builder.vertices.items[0].color[0]);
-    try std.testing.expectEqual(@as(f32, 0.25), builder.vertices.items[0].color[1]);
-    try std.testing.expectEqual(@as(f32, 0.75), builder.vertices.items[0].color[2]);
-    try std.testing.expectEqual(@as(f32, 1.0), builder.vertices.items[1].color[0]);
-    try std.testing.expectEqual(@as(f32, 1.0), builder.vertices.items[2].color[1]);
+    for (builder.vertices.items) |v| {
+        try std.testing.expectEqual(@as(f32, 1.0), v.color[0]);
+        try std.testing.expectEqual(@as(f32, 1.0), v.color[1]);
+        try std.testing.expectEqual(@as(f32, 1.0), v.color[2]);
+    }
 }
 
 test "Builder.loadModel ignores comments, blank lines, and unsupported directives" {
