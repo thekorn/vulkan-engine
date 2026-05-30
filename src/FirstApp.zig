@@ -1,17 +1,31 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
+const math = @import("math.zig");
+const Buffer = @import("Buffer.zig");
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
+const FrameInfo = @import("FrameInfo.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
 const Loop = @import("Loop.zig");
 const Renderer = @import("Renderer.zig");
 const SimpleRenderSystem = @import("SimpleRenderSystem.zig");
+const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
+
+/// Per-frame uniform data uploaded to the global UBO. Mirrors
+/// `GlobalUbo` in `first_app.cpp`.
+///
+/// Stored as an `extern struct` so the field layout matches what GLSL
+/// will see once a descriptor set lands in a later tutorial.
+pub const GlobalUbo = extern struct {
+    projectionView: math.Mat4 = math.identity_mat4,
+    lightDirection: math.Vec3 = math.normalize3(.{ 1.0, -3.0, -1.0 }),
+};
 
 const Self = @This();
 
@@ -69,6 +83,23 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
+    // A single host-visible buffer big enough to hold
+    // `MAX_FRAMES_IN_FLIGHT` `GlobalUbo` instances, each padded up to
+    // the device's `minUniformBufferOffsetAlignment` so individual
+    // slices can later be bound through descriptor sets at the proper
+    // offset. The buffer is left persistently mapped via `map()` so
+    // per-frame updates avoid the cost of repeatedly mapping/unmapping.
+    var globalUboBuffer = try Buffer.init(
+        self.device,
+        @sizeOf(GlobalUbo),
+        Swapchain.MAX_FRAMES_IN_FLIGHT,
+        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        self.device.properties.limits.minUniformBufferOffsetAlignment,
+    );
+    defer globalUboBuffer.deinit();
+    try globalUboBuffer.map(c.VK_WHOLE_SIZE, 0);
+
     var simpleRenderSystem = try SimpleRenderSystem.init(
         self.alloc,
         self.device,
@@ -120,8 +151,27 @@ pub fn run(self: *Self) !void {
         };
 
         if (beginResult) |commandBuffer| {
+            const frameIndex = self.renderer.getFrameIndex();
+            var frameInfo: FrameInfo = .{
+                .frameIndex = frameIndex,
+                .frameTime = frameTime,
+                .commandBuffer = commandBuffer,
+                .camera = &camera,
+            };
+
+            // update
+            var ubo: GlobalUbo = .{
+                .projectionView = math.mul4(camera.getProjection(), camera.getView()),
+            };
+            globalUboBuffer.writeToIndex(@ptrCast(&ubo), frameIndex);
+            // The UBO buffer is HOST_VISIBLE but not HOST_COHERENT, so
+            // an explicit flush is required to make the host write
+            // visible to the device.
+            try globalUboBuffer.flushIndex(frameIndex);
+
+            // render
             self.renderer.beginSwapChainRenderPass(commandBuffer);
-            try simpleRenderSystem.renderGameObjects(commandBuffer, self.gameObjects.items, &camera);
+            try simpleRenderSystem.renderGameObjects(&frameInfo, self.gameObjects.items);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
