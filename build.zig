@@ -17,10 +17,17 @@ fn coverStep(
     // Only pass the kcov `--clean` flag when the caller asked for it, so
     // a plain `zig build coverage` run with `clean=false` preserves the
     // existing report directory.
+    // Anchor the include pattern to this project's `src/` directory so
+    // kcov doesn't also pick up unrelated files that happen to live
+    // under a `src/` path — most notably the C++ standard library
+    // sources (`<zig>/lib/zig/libcxx/src/...`, `libcxxabi/src/...`)
+    // that get pulled in by the tinyobjloader C++ wrapper.
+    const include_pattern = b.fmt("--include-pattern={s}/", .{b.pathFromRoot("src")});
+
     var kcov_argv: std.ArrayList([]const u8) = .empty;
     kcov_argv.append(b.allocator, "kcov") catch @panic("OOM");
     if (clean) kcov_argv.append(b.allocator, "--clean") catch @panic("OOM");
-    kcov_argv.append(b.allocator, "--include-pattern=src/") catch @panic("OOM");
+    kcov_argv.append(b.allocator, include_pattern) catch @panic("OOM");
     kcov_argv.append(b.allocator, dir) catch @panic("OOM");
 
     const coverage_command = b.addSystemCommand(kcov_argv.items);
