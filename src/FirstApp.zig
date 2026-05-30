@@ -4,6 +4,7 @@ const c = @import("c.zig").c;
 const math = @import("math.zig");
 const Buffer = @import("Buffer.zig");
 const Camera = @import("Camera.zig");
+const Descriptors = @import("Descriptors.zig");
 const Device = @import("Device.zig");
 const FrameInfo = @import("FrameInfo.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
@@ -42,6 +43,11 @@ window: *Window,
 device: *Device,
 loop: Loop,
 renderer: Renderer,
+/// Pool used to allocate the per-frame global descriptor sets in
+/// `run()`. Sized for one uniform-buffer descriptor per frame in
+/// flight. Owned by `FirstApp` so its lifetime spans every
+/// `SimpleRenderSystem` rebuild triggered by swapchain recreation.
+globalPool: Descriptors.DescriptorPool,
 gameObjects: ArrayList(GameObject),
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -57,12 +63,23 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     var renderer = try Renderer.init(alloc, window, device);
     errdefer renderer.deinit();
 
+    var poolBuilder = Descriptors.DescriptorPool.Builder.init(alloc, device);
+    errdefer poolBuilder.deinit();
+    poolBuilder.setMaxSets(Swapchain.MAX_FRAMES_IN_FLIGHT);
+    try poolBuilder.addPoolSize(
+        c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        Swapchain.MAX_FRAMES_IN_FLIGHT,
+    );
+    var globalPool = try poolBuilder.build();
+    errdefer globalPool.deinit();
+
     var self: Self = .{
         .alloc = alloc,
         .window = window,
         .device = device,
         .loop = loop,
         .renderer = renderer,
+        .globalPool = globalPool,
         .gameObjects = .empty,
     };
 
@@ -75,6 +92,7 @@ pub fn deinit(self: *Self) void {
     std.log.scoped(.firstApp).info("deinit first app", .{});
     for (self.gameObjects.items) |*obj| obj.deinit();
     self.gameObjects.deinit(self.alloc);
+    self.globalPool.deinit();
     self.renderer.deinit();
     self.loop.deinit();
     self.device.deinit();
@@ -112,10 +130,46 @@ pub fn run(self: *Self) !void {
         try ub.map(c.VK_WHOLE_SIZE, 0);
     }
 
+    // Global descriptor set layout: one uniform buffer at binding 0,
+    // accessed from the vertex stage. Mirrors `globalSetLayout` in
+    // the upstream tutorial's `FirstApp::run()`.
+    var globalSetLayoutBuilder = Descriptors.DescriptorSetLayout.Builder.init(
+        self.alloc,
+        self.device,
+    );
+    errdefer globalSetLayoutBuilder.deinit();
+    try globalSetLayoutBuilder.addBinding(
+        0,
+        c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        c.VK_SHADER_STAGE_VERTEX_BIT,
+        1,
+    );
+    var globalSetLayout = try globalSetLayoutBuilder.build();
+    defer globalSetLayout.deinit();
+
+    // One descriptor set per frame in flight, each pointing at the
+    // matching `uboBuffers[i]`. The `bufferInfos` array must outlive
+    // the `DescriptorWriter` calls below — `writeBuffer` stores the
+    // pointer, not a copy.
+    var globalDescriptorSets: [Swapchain.MAX_FRAMES_IN_FLIGHT]c.VkDescriptorSet = undefined;
+    var bufferInfos: [Swapchain.MAX_FRAMES_IN_FLIGHT]c.VkDescriptorBufferInfo = undefined;
+    for (&globalDescriptorSets, 0..) |*set, i| {
+        bufferInfos[i] = uboBuffers[i].descriptorInfo(c.VK_WHOLE_SIZE, 0);
+        var writer = Descriptors.DescriptorWriter.init(
+            self.alloc,
+            &globalSetLayout,
+            &self.globalPool,
+        );
+        defer writer.deinit();
+        try writer.writeBuffer(0, &bufferInfos[i]);
+        if (!try writer.build(set)) return error.DescriptorAllocationFailed;
+    }
+
     var simpleRenderSystem = try SimpleRenderSystem.init(
         self.alloc,
         self.device,
         self.renderer.getSwapChainRenderPass(),
+        globalSetLayout.getDescriptorSetLayout(),
     );
     defer simpleRenderSystem.deinit();
 
@@ -156,6 +210,7 @@ pub fn run(self: *Self) !void {
                     self.alloc,
                     self.device,
                     self.renderer.getSwapChainRenderPass(),
+                    globalSetLayout.getDescriptorSetLayout(),
                 );
                 continue;
             },
@@ -169,6 +224,7 @@ pub fn run(self: *Self) !void {
                 .frameTime = frameTime,
                 .commandBuffer = commandBuffer,
                 .camera = &camera,
+                .globalDescriptorSet = globalDescriptorSets[frameIndex],
             };
 
             // update: write into this frame's dedicated UBO buffer
@@ -192,6 +248,7 @@ pub fn run(self: *Self) !void {
                         self.alloc,
                         self.device,
                         self.renderer.getSwapChainRenderPass(),
+                        globalSetLayout.getDescriptorSetLayout(),
                     );
                     continue;
                 },
@@ -250,11 +307,12 @@ test "FirstApp default window dimensions are 800x600" {
 
 test "FirstApp has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 6), fields.len);
+    try std.testing.expectEqual(@as(usize, 7), fields.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
     try std.testing.expectEqual(*Device, @FieldType(Self, "device"));
     try std.testing.expectEqual(Loop, @FieldType(Self, "loop"));
     try std.testing.expectEqual(Renderer, @FieldType(Self, "renderer"));
+    try std.testing.expectEqual(Descriptors.DescriptorPool, @FieldType(Self, "globalPool"));
     try std.testing.expectEqual(ArrayList(GameObject), @FieldType(Self, "gameObjects"));
 }

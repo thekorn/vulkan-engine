@@ -158,8 +158,11 @@ vulkan-engine/
 │   │                        #   UBO slices aligned to a configurable
 │   │                        #   minOffsetAlignment.
 │   ├── FrameInfo.zig        # Per-frame context (frameIndex, frameTime,
-│   │                        #   commandBuffer, camera) passed into the
-│   │                        #   render systems each frame.
+│   │                        #   commandBuffer, camera, globalDescriptorSet)
+│   │                        #   passed into the render systems each frame.
+│   ├── Descriptors.zig      # Descriptor set layouts, pools and writers
+│   │                        #   (DescriptorSetLayout / DescriptorPool /
+│   │                        #   DescriptorWriter, each with a Builder).
 │   ├── Model.zig            # Vertex + (optional) index buffer wrapper
 │   │                        #   built via a `Builder` struct, uploaded
 │   │                        #   through a host-visible staging buffer
@@ -245,6 +248,7 @@ FirstApp.zig (Application root)
     ├── SimpleRenderSystem.zig (consumes FrameInfo per frame)
     │     └── Pipeline.zig (graphics pipeline, shader modules)
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
+    ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
     ├── FrameInfo.zig (per-frame context bundle)
     ├── Camera.zig (projection + view matrices)
     ├── KeyboardMovementController.zig (drives a viewer GameObject
@@ -277,11 +281,16 @@ FirstApp.zig (Application root)
   - `window: *Window`, `device: *Device` - heap-allocated, stable
     back-references for sub-components
   - `loop: Loop`, `renderer: Renderer`
+  - `globalPool: Descriptors.DescriptorPool` - owned for the full
+    application lifetime; sized for one uniform-buffer descriptor per
+    frame in flight. Used by `run()` to allocate the per-frame global
+    descriptor sets that point at the per-frame UBO buffers.
   - `gameObjects: ArrayList(GameObject)`
 - **Types:**
   - `GlobalUbo` - `extern struct` with `projectionView: Mat4` and
     `lightDirection: Vec3`. Written into the global UBO buffer once
-    per frame; not yet bound through descriptor sets.
+    per frame and exposed to the vertex shader via a descriptor set
+    at `set = 0, binding = 0`.
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer, then calls
     `loadGameObjects()`.
@@ -296,27 +305,36 @@ FirstApp.zig (Application root)
        *and* `nonCoherentAtomSize`, which isn't generally true. Each
        independent allocation is `nonCoherentAtomSize`-aligned, and
        the per-frame buffer is always written and flushed in whole.
-    2. Build a `SimpleRenderSystem`, a `Camera`, a model-less
-       `viewerObject` (via `GameObject.createGameObject`) and a
-       `KeyboardMovementController`.
-    3. Poll GLFW events.
-    4. Compute `frameTime` (seconds) from `glfwGetTime()`.
-    5. `cameraController.moveInPlaneXZ(...)` updates the viewer
+    2. Build a `globalSetLayout` (one `UNIFORM_BUFFER` binding at
+       binding 0, vertex stage) via
+       `Descriptors.DescriptorSetLayout.Builder`, then allocate one
+       `globalDescriptorSets[i]` per frame in flight out of
+       `self.globalPool`, each pointing at the matching `uboBuffers[i]`
+       via `Descriptors.DescriptorWriter`.
+    3. Build a `SimpleRenderSystem` (passing `globalSetLayout`), a
+       `Camera`, a model-less `viewerObject` (via
+       `GameObject.createGameObject`) and a `KeyboardMovementController`.
+    4. Poll GLFW events.
+    5. Compute `frameTime` (seconds) from `glfwGetTime()`.
+    6. `cameraController.moveInPlaneXZ(...)` updates the viewer
        object's transform from keyboard input.
-    6. `camera.setViewYXZ(...)` syncs the camera to the viewer
+    7. `camera.setViewYXZ(...)` syncs the camera to the viewer
        object's translation/rotation, then `setPerspectiveProjection`
        updates the projection.
-    7. `renderer.beginFrame()` → build a `FrameInfo` for the current
-       frame → write `projectionView` into the current frame's UBO
-       buffer via `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)`
-       → `beginSwapChainRenderPass` →
+    8. `renderer.beginFrame()` → build a `FrameInfo` for the current
+       frame (including `globalDescriptorSets[frameIndex]`) → write
+       `projectionView` into the current frame's UBO buffer via
+       `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)` →
+       `beginSwapChainRenderPass` →
        `simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)`
-       → `endSwapChainRenderPass` → `endFrame`.
-    8. If the swapchain has to be recreated and reports
+       (which binds the global descriptor set once and then issues a
+       draw per `GameObject` with just the model + normal matrices as
+       push constants) → `endSwapChainRenderPass` → `endFrame`.
+    9. If the swapchain has to be recreated and reports
        `error.SwapChainFormatChanged`, the render system is rebuilt
        against the new render pass and the frame is skipped.
-    9. `vkDeviceWaitIdle` before returning so the GPU is finished with
-       everything before resources are destroyed.
+    10. `vkDeviceWaitIdle` before returning so the GPU is finished with
+        everything before resources are destroyed.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj` and
     `smooth_vase.obj` via `Model.createModelFromFile` and wraps each
     in a `GameObject` (translations `{-0.5, 0.5, 2.5}` and
@@ -500,23 +518,28 @@ FirstApp.zig (Application root)
 #### **SimpleRenderSystem.zig** - GameObject Renderer
 
 - **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` and draws a list
-  of `GameObject`s using push constants.
+  of `GameObject`s using a per-frame global descriptor set plus
+  per-object push constants.
 - **Push Constants:**
-  - `SimplePushConstantData { transform: math.Mat4, normalMatrix: math.Mat4 }`
-    (used by both vertex and fragment stages). `normalMatrix` is stored
-    as a `Mat4` to satisfy std140 alignment; the shader extracts it as
-    `mat3(push.normalMatrix)`.
+  - `SimplePushConstantData { modelMatrix: math.Mat4, normalMatrix: math.Mat4 }`
+    (used by both vertex and fragment stages). `normalMatrix` is
+    stored as a `Mat4` to satisfy std140 alignment; the shader
+    extracts it as `mat3(push.normalMatrix)`. The CPU no longer
+    multiplies by `projection * view` — that lives in the global UBO
+    and the shader does the final multiplication.
 - **Key Functions:**
-  - `init(alloc, device, renderPass)` - Creates the pipeline layout
-    (with one push-constant range) and the graphics pipeline against
+  - `init(alloc, device, renderPass, globalSetLayout)` - Creates the
+    pipeline layout (with one descriptor set at set 0 and one
+    push-constant range) and the graphics pipeline against
     `renderPass`.
   - `deinit()` - Destroys the pipeline and layout.
-  - `renderGameObjects(frameInfo, gameObjects)` - Binds the
-    pipeline, then for each `GameObject` uploads its
-    `projection * view * model` matrix and its `TransformComponent.normalMatrix()`
-    as push constants and issues a draw via the object's `Model`.
-    Pulls the command buffer and camera out of the `*FrameInfo`
-    bundle.
+  - `renderGameObjects(frameInfo, gameObjects)` - Binds the pipeline,
+    calls `vkCmdBindDescriptorSets` once with
+    `frameInfo.globalDescriptorSet` (set = 0), then for each
+    `GameObject` uploads `obj.transform.mat4()` and
+    `obj.transform.normalMatrix()` as push constants and issues a
+    draw via the object's `Model`. Pulls the command buffer and the
+    per-frame descriptor set out of the `*FrameInfo` bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
 #### **Buffer.zig** - VkBuffer + Memory Wrapper
@@ -560,10 +583,40 @@ FirstApp.zig (Application root)
 
 - **Purpose:** Small struct bundling the per-frame state passed into
   render systems each frame, so signatures stay stable as more
-  per-frame state (descriptor sets, lights, …) is added in later
-  tutorials.
+  per-frame state (lights, …) is added in later tutorials.
 - **Fields:** `frameIndex: usize`, `frameTime: f32`,
-  `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`.
+  `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`,
+  `globalDescriptorSet: c.VkDescriptorSet`.
+
+#### **Descriptors.zig** - Descriptor Set Layouts, Pools & Writers
+
+- **Purpose:** Small wrappers around `VkDescriptorSetLayout`,
+  `VkDescriptorPool` and `vkUpdateDescriptorSets`, mirroring the
+  upstream `LveDescriptorSetLayout` / `LveDescriptorPool` /
+  `LveDescriptorWriter` classes.
+- **Types:**
+  - `DescriptorSetLayout` - Owns a `VkDescriptorSetLayout` and the
+    `AutoHashMapUnmanaged(u32, VkDescriptorSetLayoutBinding)` map
+    used by `DescriptorWriter` to validate writes.
+    - `Builder.init(alloc, device)` / `addBinding(binding,
+      descriptorType, stageFlags, count)` / `build()` constructs the
+      layout, transferring ownership of the bindings map into the
+      returned `DescriptorSetLayout`.
+  - `DescriptorPool` - Owns a `VkDescriptorPool`.
+    - `Builder.init(alloc, device)` / `addPoolSize(descriptorType,
+      count)` / `setPoolFlags(flags)` / `setMaxSets(count)` /
+      `build()` constructs the pool (default `maxSets = 1000`).
+    - `allocateDescriptor(layout, &set) -> bool`,
+      `freeDescriptors([]VkDescriptorSet)`, `resetPool()`.
+  - `DescriptorWriter` - Accumulates `VkWriteDescriptorSet`s and
+    either allocates a new descriptor set from a pool (`build`) or
+    updates an existing one (`overwrite`).
+    - `init(alloc, *DescriptorSetLayout, *DescriptorPool)`,
+      `writeBuffer(binding, *VkDescriptorBufferInfo)`,
+      `writeImage(binding, *VkDescriptorImageInfo)`,
+      `build(&set) -> bool`, `overwrite(set)`.
+- None of these own a `*Device`; the caller (typically `FirstApp`)
+  manages that lifetime.
 
 #### **Model.zig** - Vertex + Index Buffer Wrapper
 
@@ -749,7 +802,22 @@ for ub in uboBuffers:
                    1)                    // no per-instance offset alignment
   ub.map(VK_WHOLE_SIZE, 0)               // persistently mapped
 
-SimpleRenderSystem.init(renderer.getSwapChainRenderPass())
+// Build the global descriptor set layout (UNIFORM_BUFFER at binding 0,
+// vertex stage) and one descriptor set per frame in flight pointing
+// at the matching uboBuffers[i].
+globalSetLayout = DescriptorSetLayout.Builder(alloc, device)
+                      .addBinding(0, UNIFORM_BUFFER, VERTEX_STAGE_BIT, 1)
+                      .build()
+
+globalDescriptorSets: [MAX_FRAMES_IN_FLIGHT]VkDescriptorSet
+for (set, i) in globalDescriptorSets:
+  bufferInfo = uboBuffers[i].descriptorInfo(VK_WHOLE_SIZE, 0)
+  DescriptorWriter(alloc, &globalSetLayout, &self.globalPool)
+      .writeBuffer(0, &bufferInfo)
+      .build(&set)
+
+SimpleRenderSystem.init(renderer.getSwapChainRenderPass(),
+                        globalSetLayout.getDescriptorSetLayout())
 camera           = Camera{}
 viewerObject     = GameObject.createGameObject()   // no model
 cameraController = KeyboardMovementController{}
@@ -769,10 +837,11 @@ while Loop.is_running():
 
   cb = renderer.beginFrame()    // acquires next image, begins recording
   if cb != null:
-    frameInfo = FrameInfo{ frameIndex   = renderer.getFrameIndex(),
-                           frameTime    = frameTime,
-                           commandBuffer = cb,
-                           camera        = &camera }
+    frameInfo = FrameInfo{ frameIndex          = renderer.getFrameIndex(),
+                           frameTime           = frameTime,
+                           commandBuffer       = cb,
+                           camera              = &camera,
+                           globalDescriptorSet = globalDescriptorSets[frameInfo.frameIndex] }
 
     // update: write this frame's dedicated UBO buffer in whole
     ubo = GlobalUbo{ projectionView = camera.projection * camera.view }
@@ -821,10 +890,12 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 - Runtime: SPIR-V is added as anonymous module imports and embedded via
   `@embedFile` in `SimpleRenderSystem.zig`.
 - Files:
-  - `shader.vert` - Vertex shader (push-constant `transform` +
-    `normalMatrix`; computes ambient + directional diffuse lighting
-    against `DIRECTION_TO_LIGHT = normalize(vec3(1, -3, -1))` with
-    ambient `0.02`, and writes the modulated vertex color)
+  - `shader.vert` - Vertex shader. Reads the global UBO at
+    `set = 0, binding = 0` (`mat4 projectionViewMatrix` + `vec3
+    directionToLight`), then uses push constants (`mat4 modelMatrix`
+    + `mat4 normalMatrix`) to compute
+    `gl_Position = ubo.projectionViewMatrix * push.modelMatrix * vec4(position, 1)`
+    and the modulated ambient + directional diffuse vertex color.
   - `shader.frag` - Fragment shader (writes interpolated vertex color)
 
 **4. Graphics Pipeline & Render System**
@@ -862,19 +933,23 @@ layout(location = 3) in vec2 uv;
 
 layout(location = 0) out vec3 fragColor;
 
+layout(set = 0, binding = 0) uniform GlobalUbo {
+    mat4 projectionViewMatrix;
+    vec3 directionToLight;
+} ubo;
+
 layout(push_constant) uniform Push {
-    mat4 transform;     // projection * view * model
+    mat4 modelMatrix;
     mat4 normalMatrix;
 } push;
 
-const vec3 DIRECTION_TO_LIGHT = normalize(vec3(1.0, -3.0, -1.0));
 const float AMBIENT = 0.02;
 
 void main() {
-    gl_Position = push.transform * vec4(position, 1.0);
+    gl_Position = ubo.projectionViewMatrix * push.modelMatrix * vec4(position, 1.0);
 
     vec3 normalWorldSpace = normalize(mat3(push.normalMatrix) * normal);
-    float lightIntensity = AMBIENT + max(dot(normalWorldSpace, DIRECTION_TO_LIGHT), 0);
+    float lightIntensity = AMBIENT + max(dot(normalWorldSpace, ubo.directionToLight), 0);
 
     fragColor = lightIntensity * color;
 }
@@ -889,7 +964,7 @@ layout(location = 0) in  vec3 fragColor;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform Push {
-    mat4 transform;     // projection * view * model
+    mat4 modelMatrix;
     mat4 normalMatrix;
 } push;
 
@@ -901,7 +976,10 @@ void main() {
 **Current State:** Renders the two vase models (`flat_vase.obj` and
 `smooth_vase.obj`) side-by-side as `GameObject`s driven by
 `SimpleRenderSystem`, lit by a single directional light plus a small
-ambient term.
+ambient term. The directional light direction now comes from the
+per-frame `GlobalUbo` (bound via descriptor set 0, binding 0) rather
+than a shader-side constant, and `projection * view` is applied in
+the shader instead of being baked into the push-constant transform.
 
 ### 4.3 Key Configuration Parameters
 
@@ -1160,14 +1238,11 @@ defer extensions.deinit(alloc);
   TODO (see `Device.deinit`).
 - Only a small hardcoded scene (two `.obj`-loaded vases wired up in
   `FirstApp.loadGameObjects`).
-- The per-frame `GlobalUbo` is created, persistently mapped, written
-  and flushed every frame, but it is not yet bound to the pipeline
-  through descriptor sets — render systems still consume their
-  `projection * view * model` matrix through push constants. The
-  descriptor-set wiring lands in a later tutorial.
-- Lighting is a single hardcoded directional light (`DIRECTION_TO_LIGHT`)
-  plus a constant ambient term inside the vertex shader; there is no
-  scene-level light list or per-light data structure yet.
+- Lighting is a single directional light + constant ambient term. The
+  light direction now comes from the per-frame `GlobalUbo`, but it is
+  still set once at startup (`GlobalUbo` default) rather than driven
+  by a scene-level light list, and the ambient factor still lives
+  inside the vertex shader.
 - The shader still ignores `uv` (uploaded to the GPU but unused), so
   there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but
@@ -1250,8 +1325,10 @@ nix develop --command zlint src/*
 - Enforced spell checking on docs + code via `codebook`
 
 **Current Stage:** End-to-end rendering pipeline working — `FirstApp`
-drives a `Renderer` + `SimpleRenderSystem` to draw a `GameObject` loaded
-from an embedded Wavefront `.obj` file (`smooth_vase.obj`) every frame,
-with swapchain recreation handled by the renderer. Next up: per-vertex
-normals consumed by the shader for diffuse lighting, descriptor sets /
-uniform buffers, and (eventually) texturing.
+drives a `Renderer` + `SimpleRenderSystem` to draw two embedded
+Wavefront `.obj` vases every frame with directional + ambient
+lighting. The projection-view matrix and light direction are now
+delivered through a per-frame global UBO bound at descriptor set 0,
+binding 0; only the per-object model + normal matrices still travel
+as push constants. Next up: a scene-level light list, fragment-side
+lighting and (eventually) texturing.

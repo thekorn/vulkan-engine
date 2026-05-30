@@ -22,6 +22,7 @@ test {
     _ = @import("Loop.zig");
     _ = @import("Model.zig");
     _ = @import("Buffer.zig");
+    _ = @import("Descriptors.zig");
     _ = @import("Renderer.zig");
     _ = @import("SimpleRenderSystem.zig");
     _ = @import("FrameInfo.zig");

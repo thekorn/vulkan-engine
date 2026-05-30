@@ -16,7 +16,9 @@ pipeline: ?*Pipeline,
 pipelineLayout: c.VkPipelineLayout,
 
 pub const SimplePushConstantData = extern struct {
-    transform: math.Mat4 = math.identity_mat4,
+    /// Per-object model-to-world matrix. The shader multiplies this by
+    /// `ubo.projectionViewMatrix` to get the final clip-space transform.
+    modelMatrix: math.Mat4 = math.identity_mat4,
     // `normalMatrix` is stored as a `Mat4` (rather than a `Mat3`) so
     // that the std140 push-constant layout matches the GLSL side
     // without needing per-column padding. The shader extracts it as
@@ -24,7 +26,12 @@ pub const SimplePushConstantData = extern struct {
     normalMatrix: math.Mat4 = math.identity_mat4,
 };
 
-pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPass) !Self {
+pub fn init(
+    alloc: std.mem.Allocator,
+    device: *Device,
+    renderPass: c.VkRenderPass,
+    globalSetLayout: c.VkDescriptorSetLayout,
+) !Self {
     var self: Self = .{
         .alloc = alloc,
         .device = device,
@@ -33,7 +40,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPas
         .pipelineLayout = undefined,
     };
 
-    try self.createPipelineLayout();
+    try self.createPipelineLayout(globalSetLayout);
     errdefer c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
 
     try self.createPipeline(renderPass);
@@ -46,17 +53,19 @@ pub fn deinit(self: *Self) void {
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
 }
 
-fn createPipelineLayout(self: *Self) !void {
+fn createPipelineLayout(self: *Self, globalSetLayout: c.VkDescriptorSetLayout) !void {
     const pushConstantRange: c.VkPushConstantRange = .{
         .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = @sizeOf(SimplePushConstantData),
     };
 
+    const descriptorSetLayouts = [_]c.VkDescriptorSetLayout{globalSetLayout};
+
     const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 0,
-        .pSetLayouts = null,
+        .setLayoutCount = @intCast(descriptorSetLayouts.len),
+        .pSetLayouts = &descriptorSetLayouts,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange,
     };
@@ -90,16 +99,27 @@ pub fn renderGameObjects(
     gameObjects: []GameObject,
 ) !void {
     self.pipeline.?.bind(frameInfo.commandBuffer);
-    const projectionView = math.mul4(frameInfo.camera.getProjection(), frameInfo.camera.getView());
+
+    // Bind the global descriptor set (set = 0) once for this draw
+    // pass; every object uses the same projection-view + light data.
+    c.vkCmdBindDescriptorSets(
+        frameInfo.commandBuffer,
+        c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+        self.pipelineLayout,
+        0,
+        1,
+        &frameInfo.globalDescriptorSet,
+        0,
+        null,
+    );
+
     for (gameObjects) |*obj| {
         // Skip model-less objects (e.g. the camera viewer object that
         // only carries a transform component).
         if (obj.model == null) continue;
 
-        const transform = math.mul4(projectionView, obj.transform.mat4());
-
         const push: SimplePushConstantData = .{
-            .transform = transform,
+            .modelMatrix = obj.transform.mat4(),
             .normalMatrix = obj.transform.normalMatrix(),
         };
 
@@ -126,18 +146,18 @@ test "SimpleRenderSystem has expected fields and types" {
 test "SimplePushConstantData has the expected field layout" {
     const fields = @typeInfo(SimplePushConstantData).@"struct".fields;
     try std.testing.expectEqual(@as(usize, 2), fields.len);
-    try std.testing.expectEqualStrings("transform", fields[0].name);
+    try std.testing.expectEqualStrings("modelMatrix", fields[0].name);
     try std.testing.expectEqual(math.Mat4, fields[0].type);
     try std.testing.expectEqualStrings("normalMatrix", fields[1].name);
     try std.testing.expectEqual(math.Mat4, fields[1].type);
 }
 
-test "SimplePushConstantData defaults transform to the identity matrix" {
+test "SimplePushConstantData defaults modelMatrix to the identity matrix" {
     const p: SimplePushConstantData = .{};
     inline for (0..4) |col| {
         inline for (0..4) |row| {
             const expected: f32 = if (col == row) 1.0 else 0.0;
-            try std.testing.expectEqual(expected, p.transform[col][row]);
+            try std.testing.expectEqual(expected, p.modelMatrix[col][row]);
         }
     }
 }
@@ -146,8 +166,8 @@ test "SimplePushConstantData normalMatrix is 16-byte aligned (for std140 push co
     try std.testing.expect(@offsetOf(SimplePushConstantData, "normalMatrix") % 16 == 0);
 }
 
-test "SimplePushConstantData transform is at offset 0 (matches push-constant range)" {
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(SimplePushConstantData, "transform"));
+test "SimplePushConstantData modelMatrix is at offset 0 (matches push-constant range)" {
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(SimplePushConstantData, "modelMatrix"));
 }
 
 test "SimplePushConstantData size fits in the Vulkan-mandated minimum (128 bytes)" {
