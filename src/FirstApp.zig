@@ -145,23 +145,40 @@ pub fn run(self: *Self) !void {
 }
 
 fn loadGameObjects(self: *Self) !void {
-    // The `.obj` asset is embedded at build time by `embedAllModels` in
-    // `build.zig` (the asset key is its basename under `models/`).
-    const obj_bytes = @embedFile("smooth_vase.obj");
+    // The `.obj` assets are embedded at build time by `embedAllModels`
+    // in `build.zig` (the asset key is each file's basename under
+    // `models/`).
+    {
+        const obj_bytes = @embedFile("flat_vase.obj");
+        var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
+        errdefer model.deinit();
 
-    var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
-    errdefer model.deinit();
+        const flatVase = try GameObject.init(
+            model,
+            .{ 0, 0, 0 },
+            .{
+                .translation = .{ -0.5, 0.5, 2.5 },
+                .scale = .{ 3.0, 1.5, 3.0 },
+            },
+        );
+        try self.gameObjects.append(self.alloc, flatVase);
+    }
 
-    const gameObj = try GameObject.init(
-        model,
-        .{ 0, 0, 0 },
-        .{
-            .translation = .{ 0.0, 0.0, 2.5 },
-            .scale = .{ 3.0, 3.0, 3.0 },
-        },
-    );
+    {
+        const obj_bytes = @embedFile("smooth_vase.obj");
+        var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
+        errdefer model.deinit();
 
-    try self.gameObjects.append(self.alloc, gameObj);
+        const smoothVase = try GameObject.init(
+            model,
+            .{ 0, 0, 0 },
+            .{
+                .translation = .{ 0.5, 0.5, 2.5 },
+                .scale = .{ 3.0, 1.5, 3.0 },
+            },
+        );
+        try self.gameObjects.append(self.alloc, smoothVase);
+    }
 }
 
 test "FirstApp default window dimensions are 800x600" {

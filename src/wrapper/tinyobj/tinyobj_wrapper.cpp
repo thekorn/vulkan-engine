@@ -116,18 +116,12 @@ extern "C" int tinyobj_load_bytes(
 
                 // tinyobjloader stores per-vertex colors in `attrib.colors`
                 // (same indexing as `attrib.vertices`) when the OBJ file
-                // uses the `v x y z r g b` form, otherwise defaults to
-                // white.
-                auto color_index = 3 * index.vertex_index + 2;
-                if (color_index < static_cast<int>(attrib.colors.size())) {
-                    vertex.color[0] = attrib.colors[color_index - 2];
-                    vertex.color[1] = attrib.colors[color_index - 1];
-                    vertex.color[2] = attrib.colors[color_index - 0];
-                } else {
-                    vertex.color[0] = 1.0f;
-                    vertex.color[1] = 1.0f;
-                    vertex.color[2] = 1.0f;
-                }
+                // uses the `v x y z r g b` form, otherwise it defaults
+                // them to white — so we can read them unconditionally,
+                // matching the upstream Little Vulkan Engine tutorial.
+                vertex.color[0] = attrib.colors[3 * index.vertex_index + 0];
+                vertex.color[1] = attrib.colors[3 * index.vertex_index + 1];
+                vertex.color[2] = attrib.colors[3 * index.vertex_index + 2];
             }
 
             if (index.normal_index >= 0) {

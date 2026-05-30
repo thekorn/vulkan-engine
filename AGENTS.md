@@ -167,11 +167,14 @@ vulkan-engine/
 │   │                                #   the C++/C boundary rationale.
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
-│   ├── shader.vert        # Vertex shader (push-constant transform, color)
+│   ├── shader.vert        # Vertex shader (push-constant transform +
+│   │                      #   normalMatrix; computes ambient + directional
+│   │                      #   diffuse lighting and writes vertex color)
 │   └── shader.frag        # Fragment shader (writes vertex color)
 ├── models/                # Wavefront .obj model assets (embedded at
 │   │                      #   build time via embedAllModels())
-│   └── smooth_vase.obj    # Default scene model
+│   ├── flat_vase.obj      # Default scene model (flat-shaded normals)
+│   └── smooth_vase.obj    # Default scene model (smoothed normals)
 ├── test_runner.zig        # Custom Zig test runner
 └── zig-out/               # Build output directory (generated)
 ```
@@ -259,9 +262,10 @@ FirstApp.zig (Application root)
        against the new render pass and the frame is skipped.
     8. `vkDeviceWaitIdle` before returning so the GPU is finished with
        everything before resources are destroyed.
-  - `loadGameObjects()` - Loads the embedded `smooth_vase.obj` via
-    `Model.createModelFromFile` and wraps it in a single `GameObject`
-    (translation `{0, 0, 2.5}`, uniform scale `3.0`).
+  - `loadGameObjects()` - Loads the embedded `flat_vase.obj` and
+    `smooth_vase.obj` via `Model.createModelFromFile` and wraps each
+    in a `GameObject` (translations `{-0.5, 0.5, 2.5}` and
+    `{0.5, 0.5, 2.5}`, scale `{3, 1.5, 3}`).
 
 #### **Window.zig** - GLFW Window Management
 
@@ -439,16 +443,19 @@ FirstApp.zig (Application root)
 - **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` and draws a list
   of `GameObject`s using push constants.
 - **Push Constants:**
-  - `SimplePushConstantData { transform: math.Mat4, color: math.Vec3 }`
-    (used by both vertex and fragment stages)
+  - `SimplePushConstantData { transform: math.Mat4, normalMatrix: math.Mat4 }`
+    (used by both vertex and fragment stages). `normalMatrix` is stored
+    as a `Mat4` to satisfy std140 alignment; the shader extracts it as
+    `mat3(push.normalMatrix)`.
 - **Key Functions:**
   - `init(alloc, device, renderPass)` - Creates the pipeline layout
     (with one push-constant range) and the graphics pipeline against
     `renderPass`.
   - `deinit()` - Destroys the pipeline and layout.
   - `renderGameObjects(commandBuffer, gameObjects)` - Binds the
-    pipeline, then for each `GameObject` uploads its transform/color as
-    push constants and issues a draw via the object's `Model`.
+    pipeline, then for each `GameObject` uploads its
+    `projection * view * model` matrix and its `TransformComponent.normalMatrix()`
+    as push constants and issues a draw via the object's `Model`.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
 #### **Model.zig** - Vertex + Index Buffer Wrapper
@@ -505,7 +512,9 @@ FirstApp.zig (Application root)
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
   `math.Vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)
-  angles.
+  angles, plus a `normalMatrix()` helper that returns the matching
+  normal matrix (`R * diag(1/scale)`, identity-extended to `Mat4` so
+  it fits in the push-constant layout the shader expects).
 - **Key Functions:**
   - `init(model, color, transform)` - Auto-assigns a monotonically
     increasing `id_t`; the object owns the model.
@@ -681,7 +690,10 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 - Runtime: SPIR-V is added as anonymous module imports and embedded via
   `@embedFile` in `SimpleRenderSystem.zig`.
 - Files:
-  - `shader.vert` - Vertex shader (push-constant transform, vertex color)
+  - `shader.vert` - Vertex shader (push-constant `transform` +
+    `normalMatrix`; computes ambient + directional diffuse lighting
+    against `DIRECTION_TO_LIGHT = normalize(vec3(1, -3, -1))` with
+    ambient `0.02`, and writes the modulated vertex color)
   - `shader.frag` - Fragment shader (writes interpolated vertex color)
 
 **4. Graphics Pipeline & Render System**
@@ -714,17 +726,26 @@ The rendering pipeline is structured in stages following the Vulkan graphics pip
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
+layout(location = 2) in vec3 normal;
+layout(location = 3) in vec2 uv;
 
 layout(location = 0) out vec3 fragColor;
 
 layout(push_constant) uniform Push {
-    mat4 transform;
-    vec3 color;
+    mat4 transform;     // projection * view * model
+    mat4 normalMatrix;
 } push;
+
+const vec3 DIRECTION_TO_LIGHT = normalize(vec3(1.0, -3.0, -1.0));
+const float AMBIENT = 0.02;
 
 void main() {
     gl_Position = push.transform * vec4(position, 1.0);
-    fragColor   = color;
+
+    vec3 normalWorldSpace = normalize(mat3(push.normalMatrix) * normal);
+    float lightIntensity = AMBIENT + max(dot(normalWorldSpace, DIRECTION_TO_LIGHT), 0);
+
+    fragColor = lightIntensity * color;
 }
 ```
 
@@ -737,8 +758,8 @@ layout(location = 0) in  vec3 fragColor;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform Push {
-    mat4 transform;
-    vec3 color;
+    mat4 transform;     // projection * view * model
+    mat4 normalMatrix;
 } push;
 
 void main() {
@@ -746,8 +767,10 @@ void main() {
 }
 ```
 
-**Current State:** Renders a single colored cube (`createCubeModel`) as
-a `GameObject` driven by `SimpleRenderSystem`.
+**Current State:** Renders the two vase models (`flat_vase.obj` and
+`smooth_vase.obj`) side-by-side as `GameObject`s driven by
+`SimpleRenderSystem`, lit by a single directional light plus a small
+ambient term.
 
 ### 4.3 Key Configuration Parameters
 
@@ -996,12 +1019,14 @@ defer extensions.deinit(alloc);
 
 - Validation layer cleanup incomplete — debug messenger destruction is
   TODO (see `Device.deinit`).
-- Only a single hardcoded scene (one `.obj`-loaded model wired up in
+- Only a small hardcoded scene (two `.obj`-loaded vases wired up in
   `FirstApp.loadGameObjects`).
 - No descriptor sets / uniform buffers; only push constants are used.
-- The shader currently consumes only `position` and `color` from the
-  `Vertex` — `normal` and `uv` are uploaded to the GPU but not yet
-  used for lighting or texturing.
+- Lighting is a single hardcoded directional light (`DIRECTION_TO_LIGHT`)
+  plus a constant ambient term inside the vertex shader; there is no
+  scene-level light list or per-light data structure yet.
+- The shader still ignores `uv` (uploaded to the GPU but unused), so
+  there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but
   ignores materials (`mtllib` / `usemtl`) and only forwards the
   attributes consumed by `Vertex`.
