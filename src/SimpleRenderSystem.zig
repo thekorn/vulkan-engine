@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const cglm = @import("c.zig").cglm;
+const math = @import("math.zig");
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const Pipeline = @import("Pipeline.zig");
@@ -16,13 +16,8 @@ pipeline: ?*Pipeline,
 pipelineLayout: c.VkPipelineLayout,
 
 pub const SimplePushConstantData = extern struct {
-    transform: cglm.mat4 = .{
-        .{ 1.0, 0.0, 0.0, 0.0 },
-        .{ 0.0, 1.0, 0.0, 0.0 },
-        .{ 0.0, 0.0, 1.0, 0.0 },
-        .{ 0.0, 0.0, 0.0, 1.0 },
-    },
-    color: cglm.vec3 align(16) = .{ 0, 0, 0 },
+    transform: math.Mat4 = math.identity_mat4,
+    color: math.Vec3 align(16) = .{ 0, 0, 0 },
 };
 
 pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPass) !Self {
@@ -91,18 +86,13 @@ pub fn renderGameObjects(
     camera: *const Camera,
 ) !void {
     self.pipeline.?.bind(commandBuffer);
-    var projection = camera.getProjection();
-    var view = camera.getView();
-    var projectionView: cglm.mat4 = undefined;
-    cglm.glm_mat4_mul(&projection[0], &view[0], &projectionView[0]);
+    const projectionView = math.mul4(camera.getProjection(), camera.getView());
     for (gameObjects) |*obj| {
         // Skip model-less objects (e.g. the camera viewer object that
         // only carries a transform component).
         if (obj.model == null) continue;
 
-        var model_mat = obj.transform.mat4();
-        var transform: cglm.mat4 = undefined;
-        cglm.glm_mat4_mul(&projectionView[0], &model_mat[0], &transform[0]);
+        const transform = math.mul4(projectionView, obj.transform.mat4());
 
         const push: SimplePushConstantData = .{
             .color = obj.color,
@@ -133,9 +123,9 @@ test "SimplePushConstantData has the expected field layout" {
     const fields = @typeInfo(SimplePushConstantData).@"struct".fields;
     try std.testing.expectEqual(@as(usize, 2), fields.len);
     try std.testing.expectEqualStrings("transform", fields[0].name);
-    try std.testing.expectEqual(cglm.mat4, fields[0].type);
+    try std.testing.expectEqual(math.Mat4, fields[0].type);
     try std.testing.expectEqualStrings("color", fields[1].name);
-    try std.testing.expectEqual(cglm.vec3, fields[1].type);
+    try std.testing.expectEqual(math.Vec3, fields[1].type);
 }
 
 test "SimplePushConstantData defaults transform to the identity matrix" {

@@ -116,7 +116,6 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
-    exe.root_module.linkSystemLibrary("cglm", .{});
 
     if (target.result.os.tag == .linux) {
         exe.root_module.link_libc = true;

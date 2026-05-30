@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
-const cglm = @import("c.zig").cglm;
+const math = @import("math.zig");
 const Device = @import("Device.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
@@ -13,8 +13,8 @@ vertexBuffer: c.VkBuffer = undefined,
 vertexBufferMemory: c.VkDeviceMemory = undefined,
 
 pub const Vertex = extern struct {
-    position: cglm.vec3 = .{ 0, 0, 0 },
-    color: cglm.vec3 = .{ 0, 0, 0 },
+    position: math.Vec3 = .{ 0, 0, 0 },
+    color: math.Vec3 = .{ 0, 0, 0 },
 
     pub fn getBindingDescriptions() [1]c.VkVertexInputBindingDescription {
         return [1]c.VkVertexInputBindingDescription{
