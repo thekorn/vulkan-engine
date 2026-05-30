@@ -148,8 +148,20 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
 
+    // The OBJ loader is a thin C-ABI wrapper around the C++
+    // tinyobjloader library. Compiling the wrapper requires libc++ and
+    // libc; pulling in tinyobjloader via `linkSystemLibrary` lets
+    // pkg-config wire up its include path and static archive.
+    exe.root_module.link_libc = true;
+    exe.root_module.link_libcpp = true;
+    exe.root_module.addIncludePath(b.path("src"));
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/tinyobj_wrapper.cpp"),
+        .flags = &.{ "-std=c++17", "-fno-exceptions" },
+    });
+    exe.root_module.linkSystemLibrary("tinyobjloader", .{});
+
     if (target.result.os.tag == .linux) {
-        exe.root_module.link_libc = true;
         exe.root_module.linkSystemLibrary("gl", .{});
     }
 

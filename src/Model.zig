@@ -63,28 +63,6 @@ pub const Vertex = extern struct {
     }
 };
 
-/// Hash-map context for deduplicating identical `Vertex` values while
-/// parsing OBJ files. Compares by field-wise vector equality (not raw
-/// bytes, to avoid being thrown off by any structure padding) and
-/// hashes the raw bytes of the individual vector fields.
-const VertexContext = struct {
-    pub fn hash(_: VertexContext, v: Vertex) u64 {
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(std.mem.asBytes(&v.position));
-        hasher.update(std.mem.asBytes(&v.color));
-        hasher.update(std.mem.asBytes(&v.normal));
-        hasher.update(std.mem.asBytes(&v.uv));
-        return hasher.final();
-    }
-
-    pub fn eql(_: VertexContext, a: Vertex, b: Vertex) bool {
-        return @reduce(.And, a.position == b.position) and
-            @reduce(.And, a.color == b.color) and
-            @reduce(.And, a.normal == b.normal) and
-            @reduce(.And, a.uv == b.uv);
-    }
-};
-
 /// Builder mirrors the upstream C++ tutorial's `LveModel::Builder`. It
 /// bundles the vertex / index arrays used to construct a `Model`.
 /// Indices may be empty, in which case the model falls back to
@@ -102,10 +80,11 @@ pub const Builder = struct {
     }
 
     /// Parse a Wavefront OBJ file (`bytes`) into this builder, replacing
-    /// any previously stored vertices/indices. Triangulates polygonal
-    /// faces using a simple fan and deduplicates exactly-matching
-    /// vertices via a hash map. Mirrors `LveModel::Builder::loadModel`
-    /// in the C++ tutorial (which delegates to tinyobjloader).
+    /// any previously stored vertices/indices. Delegates to
+    /// tinyobjloader via the small C-ABI wrapper in
+    /// `src/tinyobj_wrapper.cpp`; tinyobjloader triangulates polygonal
+    /// faces and the wrapper performs per-vertex deduplication, exactly
+    /// as in the upstream C++ tutorial.
     pub fn loadModel(
         self: *Builder,
         alloc: std.mem.Allocator,
@@ -114,139 +93,49 @@ pub const Builder = struct {
         self.vertices.clearRetainingCapacity();
         self.indices.clearRetainingCapacity();
 
-        var positions: ArrayList(math.Vec3) = .empty;
-        defer positions.deinit(alloc);
-        // Per-position color (taken from `v x y z r g b` form, or
-        // defaulted to white). Indexed by the same vertex index as
-        // `positions`.
-        var colors: ArrayList(math.Vec3) = .empty;
-        defer colors.deinit(alloc);
-        var normals: ArrayList(math.Vec3) = .empty;
-        defer normals.deinit(alloc);
-        var texcoords: ArrayList(math.Vec2) = .empty;
-        defer texcoords.deinit(alloc);
+        var vertices_ptr: [*c]c.tinyobj_wrapper_vertex = null;
+        var vertices_count: usize = 0;
+        var indices_ptr: [*c]u32 = null;
+        var indices_count: usize = 0;
+        var err_msg: [*c]u8 = null;
 
-        var uniqueVertices: std.HashMapUnmanaged(
-            Vertex,
-            u32,
-            VertexContext,
-            std.hash_map.default_max_load_percentage,
-        ) = .empty;
-        defer uniqueVertices.deinit(alloc);
+        const ok = c.tinyobj_load_bytes(
+            bytes.ptr,
+            bytes.len,
+            &vertices_ptr,
+            &vertices_count,
+            &indices_ptr,
+            &indices_count,
+            &err_msg,
+        );
+        defer {
+            c.tinyobj_free(vertices_ptr);
+            c.tinyobj_free(indices_ptr);
+            c.tinyobj_free(err_msg);
+        }
 
-        var face_verts: ArrayList(Vertex) = .empty;
-        defer face_verts.deinit(alloc);
-
-        var lines = std.mem.splitScalar(u8, bytes, '\n');
-        while (lines.next()) |raw_line| {
-            // Trim trailing CR (Windows line endings) and surrounding
-            // whitespace.
-            const line = std.mem.trim(u8, raw_line, " \t\r");
-            if (line.len == 0 or line[0] == '#') continue;
-
-            var tokens = std.mem.tokenizeAny(u8, line, " \t");
-            const kw = tokens.next() orelse continue;
-
-            if (std.mem.eql(u8, kw, "v")) {
-                const x = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                const y = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                const z = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                try positions.append(alloc, .{ x, y, z });
-
-                if (tokens.next()) |rs| {
-                    const r = try parseFloat(rs);
-                    const g = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                    const b = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                    try colors.append(alloc, .{ r, g, b });
-                } else {
-                    try colors.append(alloc, .{ 1, 1, 1 });
-                }
-            } else if (std.mem.eql(u8, kw, "vn")) {
-                const x = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                const y = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                const z = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                try normals.append(alloc, .{ x, y, z });
-            } else if (std.mem.eql(u8, kw, "vt")) {
-                const u = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                const v = try parseFloat(tokens.next() orelse return error.InvalidObj);
-                try texcoords.append(alloc, .{ u, v });
-            } else if (std.mem.eql(u8, kw, "f")) {
-                face_verts.clearRetainingCapacity();
-
-                while (tokens.next()) |tok| {
-                    var fields = std.mem.splitScalar(u8, tok, '/');
-                    const vi_s = fields.next() orelse return error.InvalidObj;
-                    // `vt` and `vn` are optional, and `vt` may be empty
-                    // for the `v//vn` form.
-                    const ti_s_opt = fields.next();
-                    const ni_s_opt = fields.next();
-
-                    var vertex: Vertex = .{};
-
-                    const vi = try resolveObjIndex(vi_s, positions.items.len);
-                    vertex.position = positions.items[vi];
-                    vertex.color = colors.items[vi];
-
-                    if (ti_s_opt) |ti_s| if (ti_s.len > 0) {
-                        const ti = try resolveObjIndex(ti_s, texcoords.items.len);
-                        vertex.uv = texcoords.items[ti];
-                    };
-
-                    if (ni_s_opt) |ni_s| if (ni_s.len > 0) {
-                        const ni = try resolveObjIndex(ni_s, normals.items.len);
-                        vertex.normal = normals.items[ni];
-                    };
-
-                    try face_verts.append(alloc, vertex);
-                }
-
-                if (face_verts.items.len < 3) continue;
-
-                // Triangulate as a fan: (0, i, i+1) for i in [1, n-1).
-                var i: usize = 1;
-                while (i + 1 < face_verts.items.len) : (i += 1) {
-                    const tri = [_]Vertex{
-                        face_verts.items[0],
-                        face_verts.items[i],
-                        face_verts.items[i + 1],
-                    };
-                    for (tri) |v| {
-                        const gop = try uniqueVertices.getOrPut(alloc, v);
-                        if (!gop.found_existing) {
-                            gop.value_ptr.* = @intCast(self.vertices.items.len);
-                            try self.vertices.append(alloc, v);
-                        }
-                        try self.indices.append(alloc, gop.value_ptr.*);
-                    }
-                }
+        if (ok == 0) {
+            if (err_msg != null) {
+                std.log.scoped(.model).err("tinyobjloader: {s}", .{err_msg});
             }
-            // Silently skip other directives: `mtllib`, `usemtl`, `o`,
-            // `g`, `s`, `l`, etc. They're either irrelevant to our
-            // pipeline or unsupported.
+            return error.InvalidObj;
+        }
+
+        try self.vertices.ensureTotalCapacityPrecise(alloc, vertices_count);
+        if (vertices_count > 0) for (vertices_ptr[0..vertices_count]) |wv| {
+            self.vertices.appendAssumeCapacity(.{
+                .position = .{ wv.position[0], wv.position[1], wv.position[2] },
+                .color = .{ wv.color[0], wv.color[1], wv.color[2] },
+                .normal = .{ wv.normal[0], wv.normal[1], wv.normal[2] },
+                .uv = .{ wv.uv[0], wv.uv[1] },
+            });
+        };
+
+        if (indices_count > 0) {
+            try self.indices.appendSlice(alloc, indices_ptr[0..indices_count]);
         }
     }
 };
-
-fn parseFloat(s: []const u8) !f32 {
-    return std.fmt.parseFloat(f32, s);
-}
-
-/// Resolve a single OBJ index token. OBJ indices are 1-based and may
-/// be negative (offset from the end of the corresponding array).
-fn resolveObjIndex(s: []const u8, count: usize) !usize {
-    const v = try std.fmt.parseInt(i64, s, 10);
-    if (v > 0) {
-        const u: usize = @intCast(v);
-        if (u > count) return error.InvalidObj;
-        return u - 1;
-    }
-    if (v < 0) {
-        const off: usize = @intCast(-v);
-        if (off == 0 or off > count) return error.InvalidObj;
-        return count - off;
-    }
-    return error.InvalidObj;
-}
 
 pub fn init(device: *Device, builder: Builder) !Self {
     var model = Self{
@@ -565,18 +454,6 @@ test "Builder defaults to empty vertex and index lists" {
     const builder: Builder = .{};
     try std.testing.expectEqual(@as(usize, 0), builder.vertices.items.len);
     try std.testing.expectEqual(@as(usize, 0), builder.indices.items.len);
-}
-
-test "resolveObjIndex handles positive, negative and out-of-range indices" {
-    try std.testing.expectEqual(@as(usize, 0), try resolveObjIndex("1", 3));
-    try std.testing.expectEqual(@as(usize, 2), try resolveObjIndex("3", 3));
-    // negative: -1 means "the last" -> count - 1
-    try std.testing.expectEqual(@as(usize, 2), try resolveObjIndex("-1", 3));
-    try std.testing.expectEqual(@as(usize, 0), try resolveObjIndex("-3", 3));
-
-    try std.testing.expectError(error.InvalidObj, resolveObjIndex("0", 3));
-    try std.testing.expectError(error.InvalidObj, resolveObjIndex("4", 3));
-    try std.testing.expectError(error.InvalidObj, resolveObjIndex("-4", 3));
 }
 
 test "Builder.loadModel parses a minimal triangle" {
