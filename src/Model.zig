@@ -2,20 +2,23 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const math = @import("math.zig");
+const Buffer = @import("Buffer.zig");
 const Device = @import("Device.zig");
-const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
 
 const Self = @This();
 device: *Device,
 vertexCount: u32,
-vertexBuffer: c.VkBuffer = undefined,
-vertexBufferMemory: c.VkDeviceMemory = undefined,
+// `vertexBuffer` and `indexBuffer` are owned `Buffer` wrappers so that
+// the underlying `VkBuffer` + `VkDeviceMemory` (and any active mapping)
+// are released together when the model is destroyed. Mirrors the
+// `std::unique_ptr<LveBuffer>` fields used in the upstream C++
+// tutorial.
+vertexBuffer: Buffer = undefined,
 
 hasIndexBuffer: bool = false,
 indexCount: u32 = 0,
-indexBuffer: c.VkBuffer = undefined,
-indexBufferMemory: c.VkDeviceMemory = undefined,
+indexBuffer: ?Buffer = null,
 
 pub const Vertex = extern struct {
     position: math.Vec3 = .{ 0, 0, 0 },
@@ -143,10 +146,7 @@ pub fn init(device: *Device, builder: Builder) !Self {
         .vertexCount = @intCast(builder.vertices.items.len),
     };
     try createVertexBuffers(&model, builder.vertices.items);
-    errdefer {
-        c.vkDestroyBuffer(device.globalDevice, model.vertexBuffer, null);
-        c.vkFreeMemory(device.globalDevice, model.vertexBufferMemory, null);
-    }
+    errdefer model.vertexBuffer.deinit();
     try createIndexBuffers(&model, builder.indices.items);
 
     return model;
@@ -167,58 +167,39 @@ pub fn createModelFromFile(
 }
 
 pub fn deinit(self: *Self) void {
-    c.vkDestroyBuffer(self.device.globalDevice, self.vertexBuffer, null);
-    c.vkFreeMemory(self.device.globalDevice, self.vertexBufferMemory, null);
-
-    if (self.hasIndexBuffer) {
-        c.vkDestroyBuffer(self.device.globalDevice, self.indexBuffer, null);
-        c.vkFreeMemory(self.device.globalDevice, self.indexBufferMemory, null);
-    }
+    self.vertexBuffer.deinit();
+    if (self.indexBuffer) |*ib| ib.deinit();
 }
 
 fn createVertexBuffers(self: *Self, vertices: []const Vertex) !void {
     if (vertices.len < 3) return error.InvalidArgument;
-    const buffer_size: u64 = @sizeOf(Vertex) * vertices.len;
+    const vertex_size: c.VkDeviceSize = @sizeOf(Vertex);
+    const buffer_size: c.VkDeviceSize = vertex_size * vertices.len;
 
-    var stagingBuffer: c.VkBuffer = undefined;
-    var stagingBufferMemory: c.VkDeviceMemory = undefined;
-    try self.device.createBuffer(
-        buffer_size,
+    var stagingBuffer = try Buffer.init(
+        self.device,
+        vertex_size,
+        @intCast(vertices.len),
         c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        &stagingBuffer,
-        &stagingBufferMemory,
+        1,
     );
-    defer {
-        c.vkDestroyBuffer(self.device.globalDevice, stagingBuffer, null);
-        c.vkFreeMemory(self.device.globalDevice, stagingBufferMemory, null);
-    }
+    defer stagingBuffer.deinit();
 
-    var data: [*]u8 = undefined;
-    try checkSuccess(c.vkMapMemory(
-        self.device.globalDevice,
-        stagingBufferMemory,
-        0,
-        buffer_size,
-        0,
-        @ptrCast(&data),
-    ));
-    @memcpy(data[0..buffer_size], std.mem.sliceAsBytes(vertices));
-    c.vkUnmapMemory(self.device.globalDevice, stagingBufferMemory);
+    try stagingBuffer.map(c.VK_WHOLE_SIZE, 0);
+    stagingBuffer.writeToBuffer(@ptrCast(vertices.ptr), c.VK_WHOLE_SIZE, 0);
 
-    try self.device.createBuffer(
-        buffer_size,
+    self.vertexBuffer = try Buffer.init(
+        self.device,
+        vertex_size,
+        @intCast(vertices.len),
         c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | c.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        &self.vertexBuffer,
-        &self.vertexBufferMemory,
+        1,
     );
-    errdefer {
-        c.vkDestroyBuffer(self.device.globalDevice, self.vertexBuffer, null);
-        c.vkFreeMemory(self.device.globalDevice, self.vertexBufferMemory, null);
-    }
+    errdefer self.vertexBuffer.deinit();
 
-    try self.device.copyBuffer(stagingBuffer, self.vertexBuffer, buffer_size);
+    try self.device.copyBuffer(stagingBuffer.buffer, self.vertexBuffer.buffer, buffer_size);
 }
 
 fn createIndexBuffers(self: *Self, indices: []const u32) !void {
@@ -226,47 +207,34 @@ fn createIndexBuffers(self: *Self, indices: []const u32) !void {
     self.hasIndexBuffer = self.indexCount > 0;
     if (!self.hasIndexBuffer) return;
 
-    const buffer_size: u64 = @sizeOf(u32) * indices.len;
+    const index_size: c.VkDeviceSize = @sizeOf(u32);
+    const buffer_size: c.VkDeviceSize = index_size * indices.len;
 
-    var stagingBuffer: c.VkBuffer = undefined;
-    var stagingBufferMemory: c.VkDeviceMemory = undefined;
-    try self.device.createBuffer(
-        buffer_size,
+    var stagingBuffer = try Buffer.init(
+        self.device,
+        index_size,
+        @intCast(indices.len),
         c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        &stagingBuffer,
-        &stagingBufferMemory,
+        1,
     );
-    defer {
-        c.vkDestroyBuffer(self.device.globalDevice, stagingBuffer, null);
-        c.vkFreeMemory(self.device.globalDevice, stagingBufferMemory, null);
-    }
+    defer stagingBuffer.deinit();
 
-    var data: [*]u8 = undefined;
-    try checkSuccess(c.vkMapMemory(
-        self.device.globalDevice,
-        stagingBufferMemory,
-        0,
-        buffer_size,
-        0,
-        @ptrCast(&data),
-    ));
-    @memcpy(data[0..buffer_size], std.mem.sliceAsBytes(indices));
-    c.vkUnmapMemory(self.device.globalDevice, stagingBufferMemory);
+    try stagingBuffer.map(c.VK_WHOLE_SIZE, 0);
+    stagingBuffer.writeToBuffer(@ptrCast(indices.ptr), c.VK_WHOLE_SIZE, 0);
 
-    try self.device.createBuffer(
-        buffer_size,
+    var indexBuffer = try Buffer.init(
+        self.device,
+        index_size,
+        @intCast(indices.len),
         c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT | c.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        &self.indexBuffer,
-        &self.indexBufferMemory,
+        1,
     );
-    errdefer {
-        c.vkDestroyBuffer(self.device.globalDevice, self.indexBuffer, null);
-        c.vkFreeMemory(self.device.globalDevice, self.indexBufferMemory, null);
-    }
+    errdefer indexBuffer.deinit();
 
-    try self.device.copyBuffer(stagingBuffer, self.indexBuffer, buffer_size);
+    try self.device.copyBuffer(stagingBuffer.buffer, indexBuffer.buffer, buffer_size);
+    self.indexBuffer = indexBuffer;
 }
 
 pub fn draw(self: Self, commandBuffer: c.VkCommandBuffer) void {
@@ -278,12 +246,12 @@ pub fn draw(self: Self, commandBuffer: c.VkCommandBuffer) void {
 }
 
 pub fn bind(self: Self, commandBuffer: c.VkCommandBuffer) void {
-    var buffers: [1]c.VkBuffer = [1]c.VkBuffer{self.vertexBuffer};
+    var buffers: [1]c.VkBuffer = [1]c.VkBuffer{self.vertexBuffer.buffer};
     var offsets: [1]u64 = [1]u64{0};
     c.vkCmdBindVertexBuffers(commandBuffer, 0, 1, &buffers, &offsets);
 
-    if (self.hasIndexBuffer) {
-        c.vkCmdBindIndexBuffer(commandBuffer, self.indexBuffer, 0, c.VK_INDEX_TYPE_UINT32);
+    if (self.indexBuffer) |ib| {
+        c.vkCmdBindIndexBuffer(commandBuffer, ib.buffer, 0, c.VK_INDEX_TYPE_UINT32);
     }
 }
 
@@ -392,23 +360,19 @@ test "Vertex.getAttributeDescriptions offsets are all distinct" {
 test "Model has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
 
-    try std.testing.expectEqual(@as(usize, 8), fields.len);
+    try std.testing.expectEqual(@as(usize, 6), fields.len);
     try std.testing.expectEqualStrings("device", fields[0].name);
     try std.testing.expectEqual(*Device, fields[0].type);
     try std.testing.expectEqualStrings("vertexCount", fields[1].name);
     try std.testing.expectEqual(u32, fields[1].type);
     try std.testing.expectEqualStrings("vertexBuffer", fields[2].name);
-    try std.testing.expectEqual(c.VkBuffer, fields[2].type);
-    try std.testing.expectEqualStrings("vertexBufferMemory", fields[3].name);
-    try std.testing.expectEqual(c.VkDeviceMemory, fields[3].type);
-    try std.testing.expectEqualStrings("hasIndexBuffer", fields[4].name);
-    try std.testing.expectEqual(bool, fields[4].type);
-    try std.testing.expectEqualStrings("indexCount", fields[5].name);
-    try std.testing.expectEqual(u32, fields[5].type);
-    try std.testing.expectEqualStrings("indexBuffer", fields[6].name);
-    try std.testing.expectEqual(c.VkBuffer, fields[6].type);
-    try std.testing.expectEqualStrings("indexBufferMemory", fields[7].name);
-    try std.testing.expectEqual(c.VkDeviceMemory, fields[7].type);
+    try std.testing.expectEqual(Buffer, fields[2].type);
+    try std.testing.expectEqualStrings("hasIndexBuffer", fields[3].name);
+    try std.testing.expectEqual(bool, fields[3].type);
+    try std.testing.expectEqualStrings("indexCount", fields[4].name);
+    try std.testing.expectEqual(u32, fields[4].type);
+    try std.testing.expectEqualStrings("indexBuffer", fields[5].name);
+    try std.testing.expectEqual(?Buffer, fields[5].type);
 }
 
 test "createVertexBuffers rejects fewer than 3 vertices" {

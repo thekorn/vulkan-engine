@@ -14,6 +14,11 @@ enable_validation_layers: bool,
 surface: c.VkSurfaceKHR,
 vulkanInstance: Vulkan,
 physicalDevice: c.VkPhysicalDevice,
+/// Cached `vkGetPhysicalDeviceProperties` result for the selected GPU.
+/// Exposed so callers can read limits such as
+/// `properties.limits.minUniformBufferOffsetAlignment` without
+/// re-querying the driver each frame.
+properties: c.VkPhysicalDeviceProperties,
 globalDevice: c.VkDevice,
 graphicsQueue: c.VkQueue,
 presentQueue: c.VkQueue,
@@ -45,6 +50,9 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
     var commandPool: c.VkCommandPool = undefined;
     try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
 
+    var properties: c.VkPhysicalDeviceProperties = undefined;
+    c.vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
     const self = try alloc.create(Self);
     self.* = .{
         .alloc = alloc,
@@ -53,6 +61,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
         .enable_validation_layers = enable_validation_layers,
         .vulkanInstance = vulkan,
         .physicalDevice = physicalDevice,
+        .properties = properties,
         .globalDevice = globalDevice,
         .graphicsQueue = graphicsQueue,
         .presentQueue = presentQueue,
@@ -408,13 +417,14 @@ test "pickMemoryType with properties=0 matches the first filter-allowed type" {
 
 test "Device has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 10), fields.len);
+    try std.testing.expectEqual(@as(usize, 11), fields.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
     try std.testing.expectEqual(bool, @FieldType(Self, "enable_validation_layers"));
     try std.testing.expectEqual(c.VkSurfaceKHR, @FieldType(Self, "surface"));
     try std.testing.expectEqual(Vulkan, @FieldType(Self, "vulkanInstance"));
     try std.testing.expectEqual(c.VkPhysicalDevice, @FieldType(Self, "physicalDevice"));
+    try std.testing.expectEqual(c.VkPhysicalDeviceProperties, @FieldType(Self, "properties"));
     try std.testing.expectEqual(c.VkDevice, @FieldType(Self, "globalDevice"));
     try std.testing.expectEqual(c.VkQueue, @FieldType(Self, "graphicsQueue"));
     try std.testing.expectEqual(c.VkQueue, @FieldType(Self, "presentQueue"));

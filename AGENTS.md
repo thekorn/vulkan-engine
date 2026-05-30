@@ -110,6 +110,7 @@ vulkan-engine/
 │   │                        #   loop, renderer and game objects
 │   ├── Vulkan.zig           # Vulkan instance & initialization
 │   ├── Device.zig           # Physical/logical device management,
+│   │                        #   cached `properties` (incl. limits),
 │   │                        #   buffer / image / command-pool helpers,
 │   │                        #   single-time command + copyBuffer
 │   │                        #   helpers, pure-logic pickMemoryType
@@ -124,13 +125,25 @@ vulkan-engine/
 │   │                        #   endSwapChainRenderPass / endFrame
 │   ├── Pipeline.zig         # Graphics pipeline configuration & creation
 │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
-│   │                          # that draws a list of GameObjects
+│   │                          # that draws a list of GameObjects from
+│   │                          # a FrameInfo bundle
+│   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
+│   │                        #   VkDeviceMemory: map / unmap /
+│   │                        #   writeToBuffer / flush / invalidate
+│   │                        #   plus *Index variants for per-frame
+│   │                        #   UBO slices aligned to a configurable
+│   │                        #   minOffsetAlignment.
+│   ├── FrameInfo.zig        # Per-frame context (frameIndex, frameTime,
+│   │                        #   commandBuffer, camera) passed into the
+│   │                        #   render systems each frame.
 │   ├── Model.zig            # Vertex + (optional) index buffer wrapper
 │   │                        #   built via a `Builder` struct, uploaded
 │   │                        #   through a host-visible staging buffer
-│   │                        #   into a DEVICE_LOCAL buffer; defines
-│   │                        #   `Vertex` (position + color + normal + uv)
-│   │                        #   with binding / attribute descriptions.
+│   │                        #   into a DEVICE_LOCAL buffer (both
+│   │                        #   buffers are owned `Buffer` instances);
+│   │                        #   defines `Vertex` (position + color +
+│   │                        #   normal + uv) with binding / attribute
+│   │                        #   descriptions.
 │   │                        #   `Builder.loadModel` parses Wavefront
 │   │                        #   OBJ data via the C++ tinyobjloader
 │   │                        #   library (called through the C-ABI
@@ -205,14 +218,16 @@ FirstApp.zig (Application root)
     │     ↓
     │   Swapchain.zig (images, image views, depth, render pass,
     │                  framebuffers, sync, acquire/present)
-    ├── SimpleRenderSystem.zig
+    ├── SimpleRenderSystem.zig (consumes FrameInfo per frame)
     │     └── Pipeline.zig (graphics pipeline, shader modules)
+    ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
+    ├── FrameInfo.zig (per-frame context bundle)
     ├── Camera.zig (projection + view matrices)
     ├── KeyboardMovementController.zig (drives a viewer GameObject
     │                                    from keyboard input)
     └── GameObject.zig (optional Model + TransformComponent + color)
               ↓
-          Model.zig (Vertex buffer)
+          Model.zig (owns vertex + optional index Buffer)
               ↓
           c.zig (GLFW / Vulkan FFI) + math.zig
               ↓
@@ -239,28 +254,44 @@ FirstApp.zig (Application root)
     back-references for sub-components
   - `loop: Loop`, `renderer: Renderer`
   - `gameObjects: ArrayList(GameObject)`
+- **Types:**
+  - `GlobalUbo` - `extern struct` with `projectionView: Mat4` and
+    `lightDirection: Vec3`. Written into the global UBO buffer once
+    per frame; not yet bound through descriptor sets.
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer, then calls
     `loadGameObjects()`.
   - `deinit()` - Tears everything down in reverse order.
   - `run()` - Main loop:
-    1. Build a `SimpleRenderSystem`, a `Camera`, a model-less
+    1. Allocate one host-visible `Buffer` per frame in flight (an
+       array of `MAX_FRAMES_IN_FLIGHT` single-instance UBO buffers)
+       and `map()` each persistently. One buffer per frame is the
+       upstream tutorial's bug-fix for `vkFlushMappedMemoryRanges`
+       alignment: a single packed buffer would force its slice
+       offsets to satisfy *both* `minUniformBufferOffsetAlignment`
+       *and* `nonCoherentAtomSize`, which isn't generally true. Each
+       independent allocation is `nonCoherentAtomSize`-aligned, and
+       the per-frame buffer is always written and flushed in whole.
+    2. Build a `SimpleRenderSystem`, a `Camera`, a model-less
        `viewerObject` (via `GameObject.createGameObject`) and a
        `KeyboardMovementController`.
-    2. Poll GLFW events.
-    3. Compute `frameTime` (seconds) from `glfwGetTime()`.
-    4. `cameraController.moveInPlaneXZ(...)` updates the viewer
+    3. Poll GLFW events.
+    4. Compute `frameTime` (seconds) from `glfwGetTime()`.
+    5. `cameraController.moveInPlaneXZ(...)` updates the viewer
        object's transform from keyboard input.
-    5. `camera.setViewYXZ(...)` syncs the camera to the viewer
+    6. `camera.setViewYXZ(...)` syncs the camera to the viewer
        object's translation/rotation, then `setPerspectiveProjection`
        updates the projection.
-    6. `renderer.beginFrame()` → `beginSwapChainRenderPass` →
-       `simpleRenderSystem.renderGameObjects` →
-       `endSwapChainRenderPass` → `endFrame`.
-    7. If the swapchain has to be recreated and reports
+    7. `renderer.beginFrame()` → build a `FrameInfo` for the current
+       frame → write `projectionView` into the current frame's UBO
+       buffer via `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)`
+       → `beginSwapChainRenderPass` →
+       `simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)`
+       → `endSwapChainRenderPass` → `endFrame`.
+    8. If the swapchain has to be recreated and reports
        `error.SwapChainFormatChanged`, the render system is rebuilt
        against the new render pass and the frame is skipped.
-    8. `vkDeviceWaitIdle` before returning so the GPU is finished with
+    9. `vkDeviceWaitIdle` before returning so the GPU is finished with
        everything before resources are destroyed.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj` and
     `smooth_vase.obj` via `Model.createModelFromFile` and wraps each
@@ -324,6 +355,10 @@ FirstApp.zig (Application root)
   - `surface` - Vulkan surface
   - `vulkanInstance` - Vulkan instance
   - `physicalDevice` - Selected GPU
+  - `properties` - Cached `VkPhysicalDeviceProperties` for the selected
+    GPU (so callers can read limits such as
+    `properties.limits.minUniformBufferOffsetAlignment` without
+    re-querying the driver)
   - `globalDevice` - Logical device
   - `graphicsQueue` - Graphics command queue
   - `presentQueue` - Presentation queue
@@ -452,18 +487,68 @@ FirstApp.zig (Application root)
     (with one push-constant range) and the graphics pipeline against
     `renderPass`.
   - `deinit()` - Destroys the pipeline and layout.
-  - `renderGameObjects(commandBuffer, gameObjects)` - Binds the
+  - `renderGameObjects(frameInfo, gameObjects)` - Binds the
     pipeline, then for each `GameObject` uploads its
     `projection * view * model` matrix and its `TransformComponent.normalMatrix()`
     as push constants and issues a draw via the object's `Model`.
+    Pulls the command buffer and camera out of the `*FrameInfo`
+    bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
+
+#### **Buffer.zig** - VkBuffer + Memory Wrapper
+
+- **Purpose:** Bundles a `VkBuffer`, its backing `VkDeviceMemory`, the
+  active mapping (if any), and per-instance / alignment bookkeeping.
+  Mirrors `LveBuffer` from the upstream tutorial (itself based on
+  Sascha Willems' `VulkanBuffer`).
+- **Fields:** `device: *Device`, `mapped: ?*anyopaque`,
+  `buffer: c.VkBuffer`, `memory: c.VkDeviceMemory`, plus
+  `bufferSize`, `instanceCount`, `instanceSize`, `alignmentSize`,
+  `usageFlags`, `memoryPropertyFlags`.
+- **Key Functions:**
+  - `getAlignment(instanceSize, minOffsetAlignment)` - Pure helper
+    that rounds `instanceSize` up to the next multiple of
+    `minOffsetAlignment` (or returns it unchanged when alignment is
+    `0`). Unit-tested independently of a live `VkDevice`.
+  - `init(device, instanceSize, instanceCount, usageFlags,
+    memoryPropertyFlags, minOffsetAlignment)` - Creates and binds a
+    buffer big enough to hold `instanceCount` slices, each padded to
+    `alignmentSize`.
+  - `deinit()` - Unmaps any active mapping, destroys the buffer, and
+    frees the memory.
+  - `map(size, offset)` / `unmap()` - Wraps `vkMapMemory` /
+    `vkUnmapMemory`. Pass `c.VK_WHOLE_SIZE` to map the entire buffer.
+  - `writeToBuffer(data, size, offset)` - `memcpy` into the mapped
+    region. Asserts the buffer is mapped.
+  - `flush(size, offset)` / `invalidate(size, offset)` - Wrappers
+    around `vkFlushMappedMemoryRanges` /
+    `vkInvalidateMappedMemoryRanges`. Required for non-coherent
+    memory.
+  - `descriptorInfo(size, offset)` - Builds a
+    `VkDescriptorBufferInfo` covering the requested range.
+  - `writeToIndex(data, index)` / `flushIndex(index)` /
+    `invalidateIndex(index)` / `descriptorInfoForIndex(index)` -
+    Convenience helpers that operate on the slice at
+    `index * alignmentSize`, used to store one `GlobalUbo` per frame
+    in flight.
+
+#### **FrameInfo.zig** - Per-Frame Render Context
+
+- **Purpose:** Small struct bundling the per-frame state passed into
+  render systems each frame, so signatures stay stable as more
+  per-frame state (descriptor sets, lights, …) is added in later
+  tutorials.
+- **Fields:** `frameIndex: usize`, `frameTime: f32`,
+  `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`.
 
 #### **Model.zig** - Vertex + Index Buffer Wrapper
 
 - **Purpose:** Encapsulates a Vulkan vertex buffer and an optional
   index buffer, and exposes a Zig `Vertex` type matching the shader
-  inputs. Delegates OBJ parsing to tinyobjloader through a small
-  C-ABI wrapper (`src/wrapper/tinyobj/`; see that directory's
+  inputs. The vertex / index buffers are owned `Buffer` instances,
+  mirroring the `std::unique_ptr<LveBuffer>` fields in the upstream
+  C++ tutorial. Delegates OBJ parsing to tinyobjloader through a
+  small C-ABI wrapper (`src/wrapper/tinyobj/`; see that directory's
   `README.md` for why the wrapper exists).
 - **Vertex Layout:**
   - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
@@ -493,13 +578,14 @@ FirstApp.zig (Application root)
     factory that builds a `Builder`, calls `loadModel` and returns a
     fully-constructed `Model`. Mirrors `LveModel::createModelFromFile`
     in the C++ tutorial.
-  - `init(device, builder)` - Creates a DEVICE_LOCAL vertex buffer
+  - `init(device, builder)` - Creates a DEVICE_LOCAL vertex `Buffer`
     (and, if `builder.indices.items.len > 0`, a DEVICE_LOCAL index
-    buffer) and uploads the data through a host-visible /
-    host-coherent staging buffer via `Device.copyBuffer`. Partial
+    `Buffer`) and uploads the data through a host-visible /
+    host-coherent staging `Buffer` via `Device.copyBuffer`. Partial
     allocations are released through `errdefer` on failure.
-  - `deinit()` - Destroys the vertex buffer and, when present, the
-    index buffer; frees their memory.
+  - `deinit()` - Calls `Buffer.deinit` on the vertex buffer and, when
+    present, the index buffer (each releases its own
+    `VkBuffer` + `VkDeviceMemory`).
   - `bind(commandBuffer)` - Bind the vertex buffer and, when present,
     the index buffer (`VK_INDEX_TYPE_UINT32`).
   - `draw(commandBuffer)` - Issues `vkCmdDrawIndexed` when an index
@@ -629,6 +715,16 @@ main.zig
 **Runtime Flow (`FirstApp.run`):**
 
 ```
+uboBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer
+for ub in uboBuffers:
+  ub = Buffer.init(device,
+                   @sizeOf(GlobalUbo),
+                   1,                    // one instance per buffer
+                   UNIFORM_BUFFER_BIT,
+                   HOST_VISIBLE_BIT,
+                   1)                    // no per-instance offset alignment
+  ub.map(VK_WHOLE_SIZE, 0)               // persistently mapped
+
 SimpleRenderSystem.init(renderer.getSwapChainRenderPass())
 camera           = Camera{}
 viewerObject     = GameObject.createGameObject()   // no model
@@ -649,8 +745,19 @@ while Loop.is_running():
 
   cb = renderer.beginFrame()    // acquires next image, begins recording
   if cb != null:
+    frameInfo = FrameInfo{ frameIndex   = renderer.getFrameIndex(),
+                           frameTime    = frameTime,
+                           commandBuffer = cb,
+                           camera        = &camera }
+
+    // update: write this frame's dedicated UBO buffer in whole
+    ubo = GlobalUbo{ projectionView = camera.projection * camera.view }
+    uboBuffers[frameInfo.frameIndex].writeToBuffer(&ubo, VK_WHOLE_SIZE, 0)
+    uboBuffers[frameInfo.frameIndex].flush(VK_WHOLE_SIZE, 0)
+
+    // render
     renderer.beginSwapChainRenderPass(cb)
-    simpleRenderSystem.renderGameObjects(cb, gameObjects, &camera)
+    simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
   // On error.SwapChainFormatChanged → rebuild SimpleRenderSystem
@@ -1021,7 +1128,11 @@ defer extensions.deinit(alloc);
   TODO (see `Device.deinit`).
 - Only a small hardcoded scene (two `.obj`-loaded vases wired up in
   `FirstApp.loadGameObjects`).
-- No descriptor sets / uniform buffers; only push constants are used.
+- The per-frame `GlobalUbo` is created, persistently mapped, written
+  and flushed every frame, but it is not yet bound to the pipeline
+  through descriptor sets — render systems still consume their
+  `projection * view * model` matrix through push constants. The
+  descriptor-set wiring lands in a later tutorial.
 - Lighting is a single hardcoded directional light (`DIRECTION_TO_LIGHT`)
   plus a constant ambient term inside the vertex shader; there is no
   scene-level light list or per-light data structure yet.

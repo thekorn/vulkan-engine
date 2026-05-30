@@ -21,8 +21,10 @@ test {
     _ = @import("Swapchain.zig");
     _ = @import("Loop.zig");
     _ = @import("Model.zig");
+    _ = @import("Buffer.zig");
     _ = @import("Renderer.zig");
     _ = @import("SimpleRenderSystem.zig");
+    _ = @import("FrameInfo.zig");
     _ = @import("Camera.zig");
     _ = @import("GameObject.zig");
     _ = @import("KeyboardMovementController.zig");

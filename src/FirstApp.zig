@@ -1,17 +1,31 @@
 const std = @import("std");
 
 const c = @import("c.zig").c;
+const math = @import("math.zig");
+const Buffer = @import("Buffer.zig");
 const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
+const FrameInfo = @import("FrameInfo.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
 const Loop = @import("Loop.zig");
 const Renderer = @import("Renderer.zig");
 const SimpleRenderSystem = @import("SimpleRenderSystem.zig");
+const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
+
+/// Per-frame uniform data uploaded to the global UBO. Mirrors
+/// `GlobalUbo` in `first_app.cpp`.
+///
+/// Stored as an `extern struct` so the field layout matches what GLSL
+/// will see once a descriptor set lands in a later tutorial.
+pub const GlobalUbo = extern struct {
+    projectionView: math.Mat4 = math.identity_mat4,
+    lightDirection: math.Vec3 = math.normalize3(.{ 1.0, -3.0, -1.0 }),
+};
 
 const Self = @This();
 
@@ -69,6 +83,36 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
+    // One host-visible UBO buffer per frame in flight, each holding a
+    // single `GlobalUbo`. Mirrors the upstream tutorial bug-fix that
+    // replaced the previous single-buffer-with-aligned-slices design:
+    // when slices were packed into one allocation, the offsets used
+    // by `vkFlushMappedMemoryRanges` had to satisfy both
+    // `minUniformBufferOffsetAlignment` *and* `nonCoherentAtomSize`,
+    // which is not generally true (and is flagged by the validation
+    // layers on some drivers). Using one allocation per frame
+    // sidesteps the problem because each allocation is independently
+    // `nonCoherentAtomSize`-aligned and we always flush the whole
+    // buffer.
+    //
+    // Each buffer is left persistently mapped via `map()` so per-frame
+    // updates avoid the cost of repeatedly mapping/unmapping.
+    var uboBuffers: [Swapchain.MAX_FRAMES_IN_FLIGHT]Buffer = undefined;
+    var ubo_initialized: usize = 0;
+    defer for (uboBuffers[0..ubo_initialized]) |*b| b.deinit();
+    for (&uboBuffers) |*ub| {
+        ub.* = try Buffer.init(
+            self.device,
+            @sizeOf(GlobalUbo),
+            1,
+            c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+            1,
+        );
+        ubo_initialized += 1;
+        try ub.map(c.VK_WHOLE_SIZE, 0);
+    }
+
     var simpleRenderSystem = try SimpleRenderSystem.init(
         self.alloc,
         self.device,
@@ -120,8 +164,27 @@ pub fn run(self: *Self) !void {
         };
 
         if (beginResult) |commandBuffer| {
+            const frameIndex = self.renderer.getFrameIndex();
+            var frameInfo: FrameInfo = .{
+                .frameIndex = frameIndex,
+                .frameTime = frameTime,
+                .commandBuffer = commandBuffer,
+                .camera = &camera,
+            };
+
+            // update: write into this frame's dedicated UBO buffer
+            var ubo: GlobalUbo = .{
+                .projectionView = math.mul4(camera.getProjection(), camera.getView()),
+            };
+            uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);
+            // The UBO buffer is HOST_VISIBLE but not HOST_COHERENT, so
+            // an explicit flush is required to make the host write
+            // visible to the device.
+            try uboBuffers[frameIndex].flush(c.VK_WHOLE_SIZE, 0);
+
+            // render
             self.renderer.beginSwapChainRenderPass(commandBuffer);
-            try simpleRenderSystem.renderGameObjects(commandBuffer, self.gameObjects.items, &camera);
+            try simpleRenderSystem.renderGameObjects(&frameInfo, self.gameObjects.items);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
