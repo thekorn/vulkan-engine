@@ -28,6 +28,8 @@ words = [
     "khr",
     "khronos",
     "libcpp",
+    "libcxx",
+    "libcxxabi",
     "libstdc",
     "lve",
     "malloc",
