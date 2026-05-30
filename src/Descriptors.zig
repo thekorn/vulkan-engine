@@ -71,13 +71,12 @@ pub const DescriptorSetLayout = struct {
         }
 
         /// Build the layout, transferring ownership of the bindings map
-        /// into the returned `DescriptorSetLayout`. After this call the
-        /// `Builder` must not be used (don't call `deinit` on it).
+        /// into the returned `DescriptorSetLayout`. The moved-from
+        /// field is reset to `.empty` so a stray `Builder.deinit`
+        /// after `build` is a safe no-op rather than a double-free
+        /// (calling `deinit` is still unnecessary on the happy path).
         pub fn build(self: *Builder) !DescriptorSetLayout {
             const bindings = self.bindings;
-            // Defensively clear the moved-from field so a stray
-            // `Builder.deinit` after a successful `build` is a no-op
-            // rather than a double-free.
             self.bindings = .empty;
             return DescriptorSetLayout.init(self.alloc, self.device, bindings);
         }
@@ -88,11 +87,16 @@ pub const DescriptorSetLayout = struct {
         device: *Device,
         bindings: std.AutoHashMapUnmanaged(u32, c.VkDescriptorSetLayoutBinding),
     ) !DescriptorSetLayout {
+        // `bindings` ownership is moved in; release it if anything
+        // below fails before we hand it to the returned struct.
+        var owned_bindings = bindings;
+        errdefer owned_bindings.deinit(alloc);
+
         var setLayoutBindings: ArrayList(c.VkDescriptorSetLayoutBinding) = .empty;
         defer setLayoutBindings.deinit(alloc);
-        try setLayoutBindings.ensureTotalCapacity(alloc, bindings.count());
+        try setLayoutBindings.ensureTotalCapacity(alloc, owned_bindings.count());
 
-        var it = bindings.valueIterator();
+        var it = owned_bindings.valueIterator();
         while (it.next()) |b| {
             setLayoutBindings.appendAssumeCapacity(b.*);
         }
@@ -116,7 +120,7 @@ pub const DescriptorSetLayout = struct {
             .alloc = alloc,
             .device = device,
             .descriptorSetLayout = descriptorSetLayout,
-            .bindings = bindings,
+            .bindings = owned_bindings,
         };
     }
 
