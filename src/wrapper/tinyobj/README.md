@@ -37,3 +37,55 @@ library through a hand-written `extern "C"` shim, because the Zig
 constraint entirely: it is a pure C99 library, so `@cImport` can read
 its header directly. The "wrapper" here is therefore reduced to a
 one-line stub that triggers the header's implementation block.
+
+## TODO: collapse the `.c` stub into `src/c.zig`
+
+The natural next step is to drop this `.c` file entirely and let
+`@cImport` emit the implementation too, by moving the
+`TINYOBJ_LOADER_C_IMPLEMENTATION` define into a dedicated `@cImport`
+const in `src/c.zig`:
+
+```zig
+pub const tinyobj = @cImport({
+    @cDefine("TINYOBJ_LOADER_C_IMPLEMENTATION", {});
+    @cInclude("tinyobj_loader_c.h");
+});
+```
+
+That removes the `addCSourceFile` wiring from `build.zig`, the
+`src/wrapper/tinyobj/` directory and the manual `.c` translation unit,
+leaving tinyobjloader-c as a pure header-on-include-path dependency.
+
+**Currently blocked by a Zig 0.16 compiler bug.** When translate-c
+processes the implementation it emits patterns like:
+
+```zig
+material.*.ambient[@as(usize, @intCast(i))] = 0.0;
+command.*.f[@as(c_int, 0)] = f[@as(c_int, 0)];
+```
+
+…against `[*c]`-typed pointers, and the compiler then complains:
+
+```
+error: expected type '[3]f32', found 'comptime_float'
+error: expected type '[16]T', found 'T'
+```
+
+i.e. for a `[*c]M` pointer `m`, the compiler treats `m.*.array_field[i]`
+as the whole array instead of an element. Minimal repro outside
+tinyobj:
+
+```zig
+const M = extern struct { ambient: [3]f32 = .{0,0,0} };
+fn initM(m: [*c]M) callconv(.c) void {
+    var i: c_int = 0;
+    m.*.ambient[@as(usize, @intCast(i))] = 0.0;  // <- rejected
+    _ = &i;
+}
+```
+
+The exact same expression compiles on a regular `*M` pointer or a
+local `M`. Until this is fixed upstream in Zig (or worked around by
+post-processing the translate-c output), the parser implementation has
+to live in this `.c` stub so it is compiled by the C frontend instead
+of going through translate-c.
