@@ -154,9 +154,9 @@ pub fn build(b: *std.Build) void {
     // pkg-config wire up its include path and static archive.
     exe.root_module.link_libc = true;
     exe.root_module.link_libcpp = true;
-    exe.root_module.addIncludePath(b.path("src"));
+    exe.root_module.addIncludePath(b.path("src/wrapper/tinyobj"));
     exe.root_module.addCSourceFile(.{
-        .file = b.path("src/tinyobj_wrapper.cpp"),
+        .file = b.path("src/wrapper/tinyobj/tinyobj_wrapper.cpp"),
         .flags = &.{ "-std=c++17", "-fno-exceptions" },
     });
     exe.root_module.linkSystemLibrary("tinyobjloader", .{});

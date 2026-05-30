@@ -24,12 +24,13 @@
   - `glfw3` - Window and input management
   - `vulkan` - Vulkan API
   - `tinyobjloader` - Wavefront OBJ loader (used through a small
-    C-ABI wrapper compiled from `src/tinyobj_wrapper.cpp`)
+    C-ABI wrapper compiled from `src/wrapper/tinyobj/tinyobj_wrapper.cpp`)
   - `gl` - On Linux only
 - **C++ Wrapper Compilation:** `build.zig` compiles
-  `src/tinyobj_wrapper.cpp` (a thin C-ABI wrapper around the C++
-  tinyobjloader API) as part of the executable, enabling
-  `link_libc` + `link_libcpp` on every platform.
+  `src/wrapper/tinyobj/tinyobj_wrapper.cpp` (a thin C-ABI wrapper
+  around the C++ tinyobjloader API; see
+  `src/wrapper/tinyobj/README.md` for the rationale) as part of the
+  executable, enabling `link_libc` + `link_libcpp` on every platform.
 - **Test Infrastructure:** Built-in test support via `zig build test`
 
 ### Development Setup
@@ -158,9 +159,12 @@ vulkan-engine/
 │   ├── math.zig             # Linear-algebra helpers (Vec2/3/4, Mat4,
 │   │                        #   dot/cross/normalize/length/mul4) built
 │   │                        #   on Zig's `@Vector` SIMD types
-│   ├── tinyobj_wrapper.h    # C-ABI surface for the tinyobjloader
-│   ├── tinyobj_wrapper.cpp  #   wrapper (used by Model.zig's
-│   │                        #   Builder.loadModel via c.zig)
+│   ├── wrapper/
+│   │   └── tinyobj/         # C-ABI shim over the C++ tinyobjloader
+│   │       ├── README.md    #   library, used by Model.zig's
+│   │       ├── tinyobj_wrapper.h    #   Builder.loadModel via c.zig.
+│   │       └── tinyobj_wrapper.cpp  #   See the directory README for
+│   │                                #   the C++/C boundary rationale.
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
 │   ├── shader.vert        # Vertex shader (push-constant transform, color)
@@ -452,7 +456,8 @@ FirstApp.zig (Application root)
 - **Purpose:** Encapsulates a Vulkan vertex buffer and an optional
   index buffer, and exposes a Zig `Vertex` type matching the shader
   inputs. Delegates OBJ parsing to tinyobjloader through a small
-  C-ABI wrapper (`src/tinyobj_wrapper.{h,cpp}`).
+  C-ABI wrapper (`src/wrapper/tinyobj/`; see that directory's
+  `README.md` for why the wrapper exists).
 - **Vertex Layout:**
   - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
   - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
@@ -468,14 +473,15 @@ FirstApp.zig (Application root)
   - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
     Used by `Pipeline` to wire up vertex input.
   - `Builder.loadModel(alloc, obj_bytes)` - Calls
-    `tinyobj_load_bytes` (declared in `src/tinyobj_wrapper.h`, imported
-    via `c.zig`). The wrapper feeds the bytes to `tinyobj::LoadObj`
-    through a `std::istringstream`, triangulates polygonal faces, and
+    `tinyobj_load_bytes` (declared in
+    `src/wrapper/tinyobj/tinyobj_wrapper.h`, imported via `c.zig`).
+    The wrapper feeds the bytes to `tinyobj::LoadObj` through a
+    `std::istringstream`, triangulates polygonal faces, and
     deduplicates exactly-matching vertices via `std::unordered_map`
     (mirroring `lve_model.cpp` in the C++ tutorial). The Zig side then
     copies the returned flat arrays into the `Builder`'s
-    `ArrayList`s, converting the C struct layout into Zig's
-    `@Vector`-backed `Vertex`.
+    `ArrayList`s, converting the C struct layout into the
+    `@Vector`-backed `Vertex` used by Zig.
   - `createModelFromFile(device, alloc, obj_bytes)` - Convenience
     factory that builds a `Builder`, calls `loadModel` and returns a
     fully-constructed `Model`. Mirrors `LveModel::createModelFromFile`
@@ -809,7 +815,7 @@ a `GameObject` driven by `SimpleRenderSystem`.
   - `vulkan-headers`, `vulkan-loader(.dev)`, `vulkan-validation-layers`
   - `tinyobjloader` - Wavefront OBJ loader (C++); pkg-config supplies
     the include path and static archive consumed by
-    `src/tinyobj_wrapper.cpp`
+    `src/wrapper/tinyobj/tinyobj_wrapper.cpp`
   - `glfw` - Window system
   - `pkg-config` - Dependency discovery
   - Platform-specific: `libGL(.dev)` on Linux

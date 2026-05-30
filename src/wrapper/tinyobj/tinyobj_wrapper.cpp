@@ -39,9 +39,9 @@ struct VertexHash {
 struct VertexEq {
     bool operator()(const tinyobj_wrapper_vertex &a,
                     const tinyobj_wrapper_vertex &b) const noexcept {
-        // Bytewise equality is safe because we zero-initialise vertices
-        // before populating them and the struct has no padding (4-byte
-        // floats only).
+        // Byte-wise equality is safe because we zero-initialize
+        // vertices before populating them and the struct has no
+        // padding (4-byte floats only).
         return std::memcmp(&a, &b, sizeof(tinyobj_wrapper_vertex)) == 0;
     }
 };
@@ -78,9 +78,10 @@ extern "C" int tinyobj_load_bytes(
     std::string warn;
     std::string err;
 
-    // tinyobjloader's istream overload reads from any `std::istream`,
+    // The tinyobjloader istream overload reads from any `std::istream`,
     // letting us parse straight out of an in-memory buffer (e.g. data
-    // produced by Zig's `@embedFile`) without touching the filesystem.
+    // produced by the Zig `@embedFile` builtin) without touching the
+    // filesystem.
     std::string input(obj_bytes, obj_len);
     std::istringstream in(input);
 

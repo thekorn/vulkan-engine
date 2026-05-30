@@ -82,7 +82,7 @@ pub const Builder = struct {
     /// Parse a Wavefront OBJ file (`bytes`) into this builder, replacing
     /// any previously stored vertices/indices. Delegates to
     /// tinyobjloader via the small C-ABI wrapper in
-    /// `src/tinyobj_wrapper.cpp`; tinyobjloader triangulates polygonal
+    /// `src/wrapper/tinyobj/tinyobj_wrapper.cpp`; tinyobjloader triangulates polygonal
     /// faces and the wrapper performs per-vertex deduplication, exactly
     /// as in the upstream C++ tutorial.
     pub fn loadModel(

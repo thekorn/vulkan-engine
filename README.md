@@ -8,8 +8,10 @@ handles window resizes and swapchain recreation, and the camera is
 driven by a WASD + QE + arrow-key keyboard controller. Model assets are
 embedded at build time from the `models/` directory and parsed by the
 C++ [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
-library through a small C-ABI shim
-([`src/tinyobj_wrapper.cpp`](src/tinyobj_wrapper.cpp)).
+library through a small C-ABI shim under
+[`src/wrapper/tinyobj/`](src/wrapper/tinyobj/) — see that
+directory's [`README.md`](src/wrapper/tinyobj/README.md) for the
+C↔C++ boundary rationale.
 
 ## local development
 
