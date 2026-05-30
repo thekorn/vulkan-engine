@@ -86,6 +86,30 @@ CI (see `.github/workflows/ci.yaml`) runs both `codebook-lsp lint .` and
 tests" and resolve any reported words either by fixing the spelling or, when
 the term is a legitimate technical word, by adding it to `codebook.toml`.
 
+### Linting (zlint)
+
+The project uses [`zlint`](https://github.com/DonIsaac/zlint) (packaged in
+nixpkgs as `zig-zlint`) as a Zig-aware linter. It catches issues like
+unused declarations, unsafe `undefined` usage without a `SAFETY:` comment
+and `std.debug.print` calls in non-debug code.
+
+Before committing, always run `zlint` alongside the tests and spell
+checker:
+
+```bash
+nix develop --command zig build test --summary all
+nix develop --command codebook-lsp lint --unique -s .
+nix develop --command zlint
+```
+
+`zlint` walks the current directory by default, so just run it from the
+repo root. CI runs the same `nix develop -c zlint` invocation as a
+dedicated step in `.github/workflows/ci.yaml`. Warnings currently do not
+fail the build (no `--deny-warnings`), but treat any new lint warning you
+introduce as something to fix before committing — either by addressing
+the diagnostic or, for `unsafe-undefined`, by adding a `// SAFETY: <reason>`
+comment above the line.
+
 ---
 
 ## 2. Project Directory Structure
@@ -830,6 +854,7 @@ ambient term.
 - Dependencies:
   - `zig_0_16` - Compiler
   - `zls_0_16` - Language server
+  - `zig-zlint` - Zig linter (`zlint` binary)
   - `codebook` - Spell checker (`codebook-lsp` binary)
   - `cloc` - Lines-of-code report
   - `jq` - JSON formatter, used by the coverage summary printer in
@@ -856,16 +881,17 @@ ambient term.
   2. Install Nix (Determinate Systems installer + magic Nix cache)
   3. Run `nix flake check`
   4. Spell check: `nix develop -c codebook-lsp lint .`
-  5. Build & tests: `nix develop -c zig build test --summary all`
-  6. Coverage: `nix develop -c zig build coverage --summary all`
-  7. Upload the full HTML report as the `coverage-report` artifact
-  8. On `push` to `main`: upload `coverage.json` (via the stable
+  5. Lint: `nix develop -c zlint`
+  6. Build & tests: `nix develop -c zig build test --summary all`
+  7. Coverage: `nix develop -c zig build coverage --summary all`
+  8. Upload the full HTML report as the `coverage-report` artifact
+  9. On `push` to `main`: upload `coverage.json` (via the stable
      `zig-out/cover/test/` symlink kcov maintains) as the
      `coverage-main` artifact so PRs can diff against it
-  9. On `pull_request`: download the latest `coverage-main` artifact
-     from `main` and post a sticky PR comment with the overall
-     coverage and the per-file delta vs `main` (via
-     `actions/github-script`).
+  10. On `pull_request`: download the latest `coverage-main` artifact
+      from `main` and post a sticky PR comment with the overall
+      coverage and the per-file delta vs `main` (via
+      `actions/github-script`).
 - Concurrency control to cancel outdated runs
 - The PR comment uses `<!-- coverage-comment -->` as a marker so it is
   updated in place on subsequent pushes instead of accumulating.
@@ -898,7 +924,7 @@ ambient term.
 - Test execution: `zig build test`
 - CI integration: GitHub Actions runs tests on every PR/push.
 
-**Running Tests (always run the spell checker alongside!):**
+**Running Tests (always run the spell checker and linter alongside!):**
 
 ```bash
 zig build test                                   # Local testing
@@ -907,6 +933,9 @@ nix develop -c zig build test --summary all      # In Nix environment
 
 # Spell check — REQUIRED part of "running the tests":
 nix develop --command codebook-lsp lint --unique -s .
+
+# Lint — REQUIRED part of "running the tests":
+nix develop --command zlint
 ```
 
 The `--unique` flag deduplicates findings and `-s` makes the output
@@ -919,6 +948,7 @@ the `words` array in `codebook.toml`.
 - Runs on Ubuntu Linux
 - Uses Nix for reproducible environment
 - Runs `codebook-lsp lint .` as a dedicated step
+- Runs `zlint` as a dedicated step
 - Executes full build and test suite via `zig build test --summary all`
 - Generates test summary
 
@@ -929,6 +959,8 @@ the `words` array in `codebook.toml`.
 - Can be run in debug and release modes
 - Spell checking is treated as a required check, equivalent in
   importance to the Zig test suite.
+- Linting via `zlint` is treated as a required check, equivalent in
+  importance to the Zig test suite — always run it before committing.
 
 ---
 
@@ -1059,6 +1091,9 @@ zig build --help       # Show all options
 
 # Spell check (always run with tests):
 nix develop --command codebook-lsp lint --unique -s .
+
+# Lint (always run with tests, before committing):
+nix develop --command zlint
 ```
 
 ### Key File Locations

@@ -34,6 +34,9 @@ jobs:
       - name: spellcheck
         run: nix develop -c codebook-lsp lint .
 
+      - name: lint (zlint)
+        run: nix develop -c zlint
+
       - name: build & test
         run: nix develop -c zig build test --summary all
 
