@@ -6,6 +6,13 @@
 
 #include "tinyobj_wrapper.h"
 
+// Compile the tinyobjloader implementation into this wrapper translation
+// unit. On Linux/Nix the packaged tinyobjloader archive is built with
+// libstdc++ while the Zig C++ frontend uses libc++; linking against the
+// archive directly can therefore fail with C++ standard-library ABI
+// mismatches. Keeping the C++ implementation behind this C-ABI wrapper
+// avoids exposing or linking those C++ symbols across library boundaries.
+#define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 #include <cstdlib>
