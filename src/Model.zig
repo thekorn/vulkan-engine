@@ -64,6 +64,10 @@ pub fn init(device: *Device, builder: Builder) !Self {
         .vertexCount = @intCast(builder.vertices.len),
     };
     try createVertexBuffers(&model, builder.vertices);
+    errdefer {
+        c.vkDestroyBuffer(device.globalDevice, model.vertexBuffer, null);
+        c.vkFreeMemory(device.globalDevice, model.vertexBufferMemory, null);
+    }
     try createIndexBuffers(&model, builder.indices);
 
     return model;
@@ -116,6 +120,10 @@ fn createVertexBuffers(self: *Self, vertices: []const Vertex) !void {
         &self.vertexBuffer,
         &self.vertexBufferMemory,
     );
+    errdefer {
+        c.vkDestroyBuffer(self.device.globalDevice, self.vertexBuffer, null);
+        c.vkFreeMemory(self.device.globalDevice, self.vertexBufferMemory, null);
+    }
 
     try self.device.copyBuffer(stagingBuffer, self.vertexBuffer, buffer_size);
 }
@@ -160,6 +168,10 @@ fn createIndexBuffers(self: *Self, indices: []const u32) !void {
         &self.indexBuffer,
         &self.indexBufferMemory,
     );
+    errdefer {
+        c.vkDestroyBuffer(self.device.globalDevice, self.indexBuffer, null);
+        c.vkFreeMemory(self.device.globalDevice, self.indexBufferMemory, null);
+    }
 
     try self.device.copyBuffer(stagingBuffer, self.indexBuffer, buffer_size);
 }

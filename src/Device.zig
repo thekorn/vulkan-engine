@@ -262,6 +262,7 @@ pub fn beginSingleTimeCommands(self: *Self) !c.VkCommandBuffer {
 
     var commandBuffer: c.VkCommandBuffer = undefined;
     try checkSuccess(c.vkAllocateCommandBuffers(self.globalDevice, &allocInfo, &commandBuffer));
+    errdefer c.vkFreeCommandBuffers(self.globalDevice, self.commandPool, 1, &commandBuffer);
 
     const beginInfo = c.VkCommandBufferBeginInfo{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -272,9 +273,14 @@ pub fn beginSingleTimeCommands(self: *Self) !c.VkCommandBuffer {
 }
 
 pub fn endSingleTimeCommands(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
+    var cb: c.VkCommandBuffer = commandBuffer;
+    // Free the command buffer on any failure before/within submit. After
+    // vkQueueWaitIdle returns successfully the command buffer is no longer
+    // in use, so we free it unconditionally at the end of the happy path.
+    errdefer c.vkFreeCommandBuffers(self.globalDevice, self.commandPool, 1, &cb);
+
     try checkSuccess(c.vkEndCommandBuffer(commandBuffer));
 
-    var cb: c.VkCommandBuffer = commandBuffer;
     const submitInfo = c.VkSubmitInfo{
         .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
