@@ -23,7 +23,13 @@
 - **System Library Linking:**
   - `glfw3` - Window and input management
   - `vulkan` - Vulkan API
+  - `tinyobjloader` - Wavefront OBJ loader (used through a small
+    C-ABI wrapper compiled from `src/tinyobj_wrapper.cpp`)
   - `gl` - On Linux only
+- **C++ Wrapper Compilation:** `build.zig` compiles
+  `src/tinyobj_wrapper.cpp` (a thin C-ABI wrapper around the C++
+  tinyobjloader API) as part of the executable, enabling
+  `link_libc` + `link_libcpp` on every platform.
 - **Test Infrastructure:** Built-in test support via `zig build test`
 
 ### Development Setup
@@ -124,11 +130,14 @@ vulkan-engine/
 │   │                        #   into a DEVICE_LOCAL buffer; defines
 │   │                        #   `Vertex` (position + color + normal + uv)
 │   │                        #   with binding / attribute descriptions.
-│   │                        #   Includes a pure-Zig Wavefront OBJ
-│   │                        #   parser (`Builder.loadModel`) plus a
-│   │                        #   `createModelFromFile` factory that
-│   │                        #   builds a `Model` from in-memory OBJ
-│   │                        #   bytes (typically `@embedFile`'d).
+│   │                        #   `Builder.loadModel` parses Wavefront
+│   │                        #   OBJ data via the C++ tinyobjloader
+│   │                        #   library (called through the C-ABI
+│   │                        #   wrapper in `tinyobj_wrapper.cpp`).
+│   │                        #   `createModelFromFile` is a convenience
+│   │                        #   factory that builds a `Model` from
+│   │                        #   in-memory OBJ bytes (typically
+│   │                        #   `@embedFile`'d).
 │   ├── GameObject.zig       # Renderable entity: id, optional model,
 │   │                        #   color and TransformComponent
 │   │                        #   (translation / scale / rotation -> mat4
@@ -149,6 +158,9 @@ vulkan-engine/
 │   ├── math.zig             # Linear-algebra helpers (Vec2/3/4, Mat4,
 │   │                        #   dot/cross/normalize/length/mul4) built
 │   │                        #   on Zig's `@Vector` SIMD types
+│   ├── tinyobj_wrapper.h    # C-ABI surface for the tinyobjloader
+│   ├── tinyobj_wrapper.cpp  #   wrapper (used by Model.zig's
+│   │                        #   Builder.loadModel via c.zig)
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
 │   ├── shader.vert        # Vertex shader (push-constant transform, color)
@@ -439,8 +451,8 @@ FirstApp.zig (Application root)
 
 - **Purpose:** Encapsulates a Vulkan vertex buffer and an optional
   index buffer, and exposes a Zig `Vertex` type matching the shader
-  inputs. Also hosts a small pure-Zig Wavefront OBJ parser used to
-  build models from embedded `.obj` files.
+  inputs. Delegates OBJ parsing to tinyobjloader through a small
+  C-ABI wrapper (`src/tinyobj_wrapper.{h,cpp}`).
 - **Vertex Layout:**
   - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
   - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
@@ -455,17 +467,19 @@ FirstApp.zig (Application root)
 - **Key Functions:**
   - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
     Used by `Pipeline` to wire up vertex input.
-  - `Builder.loadModel(alloc, obj_bytes)` - Parses a Wavefront OBJ
-    file in memory. Supports `v x y z [r g b]`, `vn`, `vt`, and
-    `f v[/vt[/vn]] ...` (including the `v//vn` form). Triangulates
-    polygonal faces as a fan and deduplicates exactly-matching
-    vertices via a `std.HashMapUnmanaged` keyed by component-wise
-    `Vertex` equality.
+  - `Builder.loadModel(alloc, obj_bytes)` - Calls
+    `tinyobj_load_bytes` (declared in `src/tinyobj_wrapper.h`, imported
+    via `c.zig`). The wrapper feeds the bytes to `tinyobj::LoadObj`
+    through a `std::istringstream`, triangulates polygonal faces, and
+    deduplicates exactly-matching vertices via `std::unordered_map`
+    (mirroring `lve_model.cpp` in the C++ tutorial). The Zig side then
+    copies the returned flat arrays into the `Builder`'s
+    `ArrayList`s, converting the C struct layout into Zig's
+    `@Vector`-backed `Vertex`.
   - `createModelFromFile(device, alloc, obj_bytes)` - Convenience
     factory that builds a `Builder`, calls `loadModel` and returns a
     fully-constructed `Model`. Mirrors `LveModel::createModelFromFile`
-    in the C++ tutorial (which takes a filesystem path and delegates
-    to tinyobjloader).
+    in the C++ tutorial.
   - `init(device, builder)` - Creates a DEVICE_LOCAL vertex buffer
     (and, if `builder.indices.items.len > 0`, a DEVICE_LOCAL index
     buffer) and uploads the data through a host-visible /
@@ -540,12 +554,13 @@ FirstApp.zig (Application root)
 
 - **Purpose:** C interoperability bindings.
 - **Content:**
-  - `c` - `@cImport` of `GLFW/glfw3.h` and `vulkan/vulkan_beta.h` with
-    `GLFW_INCLUDE_VULKAN` defined.
-- **Usage:** Vulkan / GLFW calls go through `c`. Math types are
-  provided by the in-tree `math.zig` module (Zig `@Vector`-based
-  `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math library is
-  required.
+  - `c` - `@cImport` of `GLFW/glfw3.h`, `vulkan/vulkan_beta.h` (with
+    `GLFW_INCLUDE_VULKAN` defined) and the in-tree
+    `tinyobj_wrapper.h`.
+- **Usage:** Vulkan / GLFW / tinyobjloader-wrapper calls go through
+  `c`. Math types are provided by the in-tree `math.zig` module (Zig
+  `@Vector`-based `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math
+  library is required.
 
 #### **math.zig** - Linear Algebra Helpers
 
@@ -792,6 +807,9 @@ a `GameObject` driven by `SimpleRenderSystem`.
     `build.zig`
   - `shaderc` - Shader compilation
   - `vulkan-headers`, `vulkan-loader(.dev)`, `vulkan-validation-layers`
+  - `tinyobjloader` - Wavefront OBJ loader (C++); pkg-config supplies
+    the include path and static archive consumed by
+    `src/tinyobj_wrapper.cpp`
   - `glfw` - Window system
   - `pkg-config` - Dependency discovery
   - Platform-specific: `libGL(.dev)` on Linux
@@ -978,9 +996,9 @@ defer extensions.deinit(alloc);
 - The shader currently consumes only `position` and `color` from the
   `Vertex` — `normal` and `uv` are uploaded to the GPU but not yet
   used for lighting or texturing.
-- The OBJ parser is intentionally minimal: no materials (`mtllib`
-  / `usemtl`), no smoothing groups, no support for the implicit
-  trailing edge that some OBJ exporters use.
+- The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but
+  ignores materials (`mtllib` / `usemtl`) and only forwards the
+  attributes consumed by `Vertex`.
 
 ### 8.3 Extension References
 

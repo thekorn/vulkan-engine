@@ -6,8 +6,10 @@ A small Vulkan rendering engine written in Zig. It renders 3D
 renderer and pluggable render systems. The renderer transparently
 handles window resizes and swapchain recreation, and the camera is
 driven by a WASD + QE + arrow-key keyboard controller. Model assets are
-embedded at build time from the `models/` directory; the OBJ parser is
-pure Zig with no external dependencies.
+embedded at build time from the `models/` directory and parsed by the
+C++ [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
+library through a small C-ABI shim
+([`src/tinyobj_wrapper.cpp`](src/tinyobj_wrapper.cpp)).
 
 ## local development
 
