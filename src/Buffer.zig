@@ -99,7 +99,7 @@ pub fn deinit(self: *Self) void {
 /// Map a memory range of this buffer. If successful, `self.mapped`
 /// points to the specified buffer range. Pass `c.VK_WHOLE_SIZE` for
 /// `size` to map from `offset` to the end of the allocation (matching
-/// Vulkan's own semantics for `VK_WHOLE_SIZE`).
+/// the Vulkan spec's own semantics for `VK_WHOLE_SIZE`).
 ///
 /// NOTE: this deviates intentionally from the upstream C++ tutorial,
 /// which drops `offset` when called with `VK_WHOLE_SIZE`. Passing both

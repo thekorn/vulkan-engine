@@ -263,11 +263,15 @@ FirstApp.zig (Application root)
     `loadGameObjects()`.
   - `deinit()` - Tears everything down in reverse order.
   - `run()` - Main loop:
-    1. Create a host-visible `Buffer` of `MAX_FRAMES_IN_FLIGHT`
-       `GlobalUbo` slices (each aligned to
-       `device.properties.limits.minUniformBufferOffsetAlignment`),
-       then call `map()` once so the per-frame writes can avoid the
-       cost of repeated map/unmap.
+    1. Allocate one host-visible `Buffer` per frame in flight (an
+       array of `MAX_FRAMES_IN_FLIGHT` single-instance UBO buffers)
+       and `map()` each persistently. One buffer per frame is the
+       upstream tutorial's bug-fix for `vkFlushMappedMemoryRanges`
+       alignment: a single packed buffer would force its slice
+       offsets to satisfy *both* `minUniformBufferOffsetAlignment`
+       *and* `nonCoherentAtomSize`, which isn't generally true. Each
+       independent allocation is `nonCoherentAtomSize`-aligned, and
+       the per-frame buffer is always written and flushed in whole.
     2. Build a `SimpleRenderSystem`, a `Camera`, a model-less
        `viewerObject` (via `GameObject.createGameObject`) and a
        `KeyboardMovementController`.
@@ -279,9 +283,9 @@ FirstApp.zig (Application root)
        object's translation/rotation, then `setPerspectiveProjection`
        updates the projection.
     7. `renderer.beginFrame()` → build a `FrameInfo` for the current
-       frame → write `projectionView` into the global UBO slice for
-       `frameIndex` via `writeToIndex` + `flushIndex` →
-       `beginSwapChainRenderPass` →
+       frame → write `projectionView` into the current frame's UBO
+       buffer via `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)`
+       → `beginSwapChainRenderPass` →
        `simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)`
        → `endSwapChainRenderPass` → `endFrame`.
     8. If the swapchain has to be recreated and reports
@@ -711,14 +715,15 @@ main.zig
 **Runtime Flow (`FirstApp.run`):**
 
 ```
-globalUboBuffer = Buffer.init(device,
-                              @sizeOf(GlobalUbo),
-                              MAX_FRAMES_IN_FLIGHT,
-                              UNIFORM_BUFFER_BIT,
-                              HOST_VISIBLE_BIT,
-                              device.properties.limits
-                                .minUniformBufferOffsetAlignment)
-globalUboBuffer.map(VK_WHOLE_SIZE, 0)            // persistently mapped
+uboBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer
+for ub in uboBuffers:
+  ub = Buffer.init(device,
+                   @sizeOf(GlobalUbo),
+                   1,                    // one instance per buffer
+                   UNIFORM_BUFFER_BIT,
+                   HOST_VISIBLE_BIT,
+                   1)                    // no per-instance offset alignment
+  ub.map(VK_WHOLE_SIZE, 0)               // persistently mapped
 
 SimpleRenderSystem.init(renderer.getSwapChainRenderPass())
 camera           = Camera{}
@@ -745,10 +750,10 @@ while Loop.is_running():
                            commandBuffer = cb,
                            camera        = &camera }
 
-    // update: write this frame's slice of the global UBO
+    // update: write this frame's dedicated UBO buffer in whole
     ubo = GlobalUbo{ projectionView = camera.projection * camera.view }
-    globalUboBuffer.writeToIndex(&ubo, frameInfo.frameIndex)
-    globalUboBuffer.flushIndex(frameInfo.frameIndex)
+    uboBuffers[frameInfo.frameIndex].writeToBuffer(&ubo, VK_WHOLE_SIZE, 0)
+    uboBuffers[frameInfo.frameIndex].flush(VK_WHOLE_SIZE, 0)
 
     // render
     renderer.beginSwapChainRenderPass(cb)

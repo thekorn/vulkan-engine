@@ -83,22 +83,35 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
-    // A single host-visible buffer big enough to hold
-    // `MAX_FRAMES_IN_FLIGHT` `GlobalUbo` instances, each padded up to
-    // the device's `minUniformBufferOffsetAlignment` so individual
-    // slices can later be bound through descriptor sets at the proper
-    // offset. The buffer is left persistently mapped via `map()` so
-    // per-frame updates avoid the cost of repeatedly mapping/unmapping.
-    var globalUboBuffer = try Buffer.init(
-        self.device,
-        @sizeOf(GlobalUbo),
-        Swapchain.MAX_FRAMES_IN_FLIGHT,
-        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-        self.device.properties.limits.minUniformBufferOffsetAlignment,
-    );
-    defer globalUboBuffer.deinit();
-    try globalUboBuffer.map(c.VK_WHOLE_SIZE, 0);
+    // One host-visible UBO buffer per frame in flight, each holding a
+    // single `GlobalUbo`. Mirrors the upstream tutorial bug-fix that
+    // replaced the previous single-buffer-with-aligned-slices design:
+    // when slices were packed into one allocation, the offsets used
+    // by `vkFlushMappedMemoryRanges` had to satisfy both
+    // `minUniformBufferOffsetAlignment` *and* `nonCoherentAtomSize`,
+    // which is not generally true (and is flagged by the validation
+    // layers on some drivers). Using one allocation per frame
+    // sidesteps the problem because each allocation is independently
+    // `nonCoherentAtomSize`-aligned and we always flush the whole
+    // buffer.
+    //
+    // Each buffer is left persistently mapped via `map()` so per-frame
+    // updates avoid the cost of repeatedly mapping/unmapping.
+    var uboBuffers: [Swapchain.MAX_FRAMES_IN_FLIGHT]Buffer = undefined;
+    var ubo_initialized: usize = 0;
+    defer for (uboBuffers[0..ubo_initialized]) |*b| b.deinit();
+    for (&uboBuffers) |*ub| {
+        ub.* = try Buffer.init(
+            self.device,
+            @sizeOf(GlobalUbo),
+            1,
+            c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+            1,
+        );
+        ubo_initialized += 1;
+        try ub.map(c.VK_WHOLE_SIZE, 0);
+    }
 
     var simpleRenderSystem = try SimpleRenderSystem.init(
         self.alloc,
@@ -159,15 +172,15 @@ pub fn run(self: *Self) !void {
                 .camera = &camera,
             };
 
-            // update
+            // update: write into this frame's dedicated UBO buffer
             var ubo: GlobalUbo = .{
                 .projectionView = math.mul4(camera.getProjection(), camera.getView()),
             };
-            globalUboBuffer.writeToIndex(@ptrCast(&ubo), frameIndex);
+            uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);
             // The UBO buffer is HOST_VISIBLE but not HOST_COHERENT, so
             // an explicit flush is required to make the host write
             // visible to the device.
-            try globalUboBuffer.flushIndex(frameIndex);
+            try uboBuffers[frameIndex].flush(c.VK_WHOLE_SIZE, 0);
 
             // render
             self.renderer.beginSwapChainRenderPass(commandBuffer);
