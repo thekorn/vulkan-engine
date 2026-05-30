@@ -97,17 +97,22 @@ pub fn deinit(self: *Self) void {
 }
 
 /// Map a memory range of this buffer. If successful, `self.mapped`
-/// points to the specified buffer range. Pass `c.VK_WHOLE_SIZE` to map
-/// the complete buffer range.
+/// points to the specified buffer range. Pass `c.VK_WHOLE_SIZE` for
+/// `size` to map from `offset` to the end of the allocation (matching
+/// Vulkan's own semantics for `VK_WHOLE_SIZE`).
+///
+/// NOTE: this deviates intentionally from the upstream C++ tutorial,
+/// which drops `offset` when called with `VK_WHOLE_SIZE`. Passing both
+/// args through to `vkMapMemory` matches the Vulkan spec exactly and
+/// avoids silently mapping the wrong range for a caller that supplies
+/// a non-zero offset together with `VK_WHOLE_SIZE`.
 pub fn map(self: *Self, size: c.VkDeviceSize, offset: c.VkDeviceSize) !void {
     std.debug.assert(self.buffer != null and self.memory != null);
-    const map_size = if (size == c.VK_WHOLE_SIZE) self.bufferSize else size;
-    const map_offset = if (size == c.VK_WHOLE_SIZE) 0 else offset;
     try checkSuccess(c.vkMapMemory(
         self.device.globalDevice,
         self.memory,
-        map_offset,
-        map_size,
+        offset,
+        size,
         0,
         &self.mapped,
     ));
