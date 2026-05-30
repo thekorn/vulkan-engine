@@ -1,8 +1,11 @@
 # Vulkan Engine
 
-A small Vulkan rendering engine written in Zig. It renders 3D `GameObject`s
-(currently a colored cube) through a layered architecture built around a
-swapchain, renderer, and pluggable render systems.
+A small Vulkan rendering engine written in Zig. It renders 3D
+`GameObject`s (currently a single indexed, colored cube) through a
+layered architecture built around a swapchain, renderer and pluggable
+render systems. The renderer transparently handles window resizes and
+swapchain recreation, and the camera is driven by a WASD + QE +
+arrow-key keyboard controller.
 
 ## local development
 
