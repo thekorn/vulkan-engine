@@ -130,8 +130,10 @@ vulkan-engine/
 │   │                        #   setViewDirection / setViewTarget /
 │   │                        #   setViewYXZ)
 │   ├── Loop.zig             # Main event loop & POSIX signal handling
-│   ├── c.zig                # C interop: GLFW + Vulkan and a separate
-│   │                        #   cglm @cImport (scalar / no SIMD)
+│   ├── c.zig                # C interop: GLFW + Vulkan @cImport
+│   ├── math.zig             # Linear-algebra helpers (Vec2/3/4, Mat4,
+│   │                        #   dot/cross/normalize/length/mul4) built
+│   │                        #   on Zig's `@Vector` SIMD types
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
 │   ├── shader.vert        # Vertex shader (push-constant transform, color)
@@ -175,9 +177,9 @@ FirstApp.zig (Application root)
               ↓
           Model.zig (Vertex buffer)
               ↓
-          c.zig (GLFW / Vulkan / cglm FFI)
+          c.zig (GLFW / Vulkan FFI) + math.zig
               ↓
-          External Libraries (GLFW, Vulkan, cglm)
+          External Libraries (GLFW, Vulkan)
 ```
 
 ### 3.2 Component Descriptions
@@ -364,7 +366,7 @@ FirstApp.zig (Application root)
 - **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` and draws a list
   of `GameObject`s using push constants.
 - **Push Constants:**
-  - `SimplePushConstantData { transform: cglm.mat4, color: cglm.vec3 }`
+  - `SimplePushConstantData { transform: math.Mat4, color: math.Vec3 }`
     (used by both vertex and fragment stages)
 - **Key Functions:**
   - `init(alloc, device, renderPass)` - Creates the pipeline layout
@@ -381,8 +383,8 @@ FirstApp.zig (Application root)
 - **Purpose:** Encapsulates a Vulkan vertex buffer and exposes a Zig
   `Vertex` type matching the shader inputs.
 - **Vertex Layout:**
-  - `position: cglm.vec3` at location 0 (`R32G32B32_SFLOAT`)
-  - `color: cglm.vec3` at location 1 (`R32G32B32_SFLOAT`)
+  - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
+  - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
 - **Key Functions:**
   - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
     Used by `Pipeline` to wire up vertex input.
@@ -397,7 +399,7 @@ FirstApp.zig (Application root)
 - **Purpose:** A simple renderable: id, optionally owned `Model`, color
   and a `TransformComponent`.
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
-  `cglm.vec3`) with a `mat4()` method that builds
+  `math.Vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)
   angles.
 - **Key Functions:**
@@ -456,14 +458,27 @@ FirstApp.zig (Application root)
 - **Content:**
   - `c` - `@cImport` of `GLFW/glfw3.h` and `vulkan/vulkan_beta.h` with
     `GLFW_INCLUDE_VULKAN` defined.
-  - `cglm` - Separate `@cImport` of `cglm/cglm.h`. It maps
-    `__attribute(x)` to `__attribute__(x)` for translate-c and undefs
-    every NEON / SSE / AVX / FMA feature macro so cglm picks its plain
-    scalar code paths (translate-c can't parse the vendor intrinsic
-    headers). The runtime build of the engine itself still uses the
-    full instruction set.
-- **Usage:** Vulkan / GLFW calls go through `c`, math types through
-  `cglm` (e.g. `cglm.vec3`, `cglm.mat4`).
+- **Usage:** Vulkan / GLFW calls go through `c`. Math types are
+  provided by the in-tree `math.zig` module (Zig `@Vector`-based
+  `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math library is
+  required.
+
+#### **math.zig** - Linear Algebra Helpers
+
+- **Purpose:** Small, dependency-free linear-algebra module built on
+  the `@Vector` SIMD types of Zig.
+- **Types:**
+  - `Vec2 = @Vector(2, f32)`
+  - `Vec3 = @Vector(3, f32)`
+  - `Vec4 = @Vector(4, f32)`
+  - `Mat4 = [4]Vec4` (column-major)
+  - `identity_mat4: Mat4`
+- **Functions:**
+  - `dot3(a, b)`, `length3(v)`, `normalize3(v)`, `cross3(a, b)`
+  - `mul4(a, b)` — column-major 4x4 matrix multiplication.
+- All vector arithmetic uses the built-in element-wise vector
+  operators (`+`, `-`, `*`, `/`) of the language rather than explicit
+  per-component loops.
 
 #### **utils.zig** - Utility Functions
 
@@ -665,7 +680,7 @@ a `GameObject` driven by `SimpleRenderSystem`.
 
 - Zig build system configuration
 - Handles shader compilation (`glslc` per file under `shaders/`)
-- Links system libraries (`glfw3`, `vulkan`, `cglm`; `gl` on Linux)
+- Links system libraries (`glfw3`, `vulkan`; `gl` on Linux)
 - Defines build steps (`run`, `test`)
 - Uses a custom test runner (`test_runner.zig`, simple mode)
 - Target and optimization settings
@@ -694,7 +709,6 @@ a `GameObject` driven by `SimpleRenderSystem`.
   - `shaderc` - Shader compilation
   - `vulkan-headers`, `vulkan-loader(.dev)`, `vulkan-validation-layers`
   - `glfw` - Window system
-  - `cglm` - C math library
   - `pkg-config` - Dependency discovery
   - Platform-specific: `libGL(.dev)` on Linux
 - Sets `VK_LAYER_PATH` to the validation layers from `vulkan-validation-layers`.
@@ -941,8 +955,9 @@ nix develop --command codebook-lsp lint --unique -s .
 3. **High-Level Abstractions** (`Window.zig`, `Device.zig`,
    `Swapchain.zig`, `Pipeline.zig`)
 4. **Vulkan Core Layer** (`Vulkan.zig`)
-5. **FFI/Interop Layer** (`c.zig` (GLFW / Vulkan / cglm), `utils.zig`)
-6. **Native Libraries** (GLFW, Vulkan SDK, cglm)
+5. **FFI / Math / Utility Layer** (`c.zig` (GLFW / Vulkan),
+   `math.zig`, `utils.zig`)
+6. **Native Libraries** (GLFW, Vulkan SDK)
 
 **Key Strengths:**
 

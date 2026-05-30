@@ -13,6 +13,7 @@ pub fn main() !void {
 
 test {
     _ = @import("utils.zig");
+    _ = @import("math.zig");
     _ = @import("Vulkan.zig");
     _ = @import("Pipeline.zig");
     _ = @import("Device.zig");
