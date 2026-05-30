@@ -59,6 +59,8 @@ pub inline fn cross3(a: Vec3, b: Vec3) Vec3 {
 
 /// Column-major 4x4 matrix multiplication: `result = a * b`.
 pub fn mul4(a: Mat4, b: Mat4) Mat4 {
+    // SAFETY: each column `result[col]` is written in the inline loop below
+    // before the matrix is returned.
     var result: Mat4 = undefined;
     inline for (0..4) |col| {
         const b0: Vec4 = @splat(b[col][0]);

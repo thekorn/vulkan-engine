@@ -2,7 +2,6 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const math = @import("math.zig");
-const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
 const FrameInfo = @import("FrameInfo.zig");
 const Pipeline = @import("Pipeline.zig");
@@ -30,6 +29,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPas
         .alloc = alloc,
         .device = device,
         .pipeline = null,
+        // SAFETY: written by createPipelineLayout immediately below before any read.
         .pipelineLayout = undefined,
     };
 

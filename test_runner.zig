@@ -1,3 +1,5 @@
+// zlint-disable no-print -- the test runner intentionally writes formatted output (incl. ANSI codes) to stderr
+
 // This is for the Zig 0.16.
 
 // See https://gist.github.com/karlseguin/c6bea5b35e4e8d26af6f81c22cb5d76b/eb15512d6ae49663fa9df6c7a9725b20dab43edd

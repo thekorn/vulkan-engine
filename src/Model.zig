@@ -14,7 +14,7 @@ vertexCount: u32,
 // are released together when the model is destroyed. Mirrors the
 // `std::unique_ptr<LveBuffer>` fields used in the upstream C++
 // tutorial.
-vertexBuffer: Buffer = undefined,
+vertexBuffer: Buffer,
 
 hasIndexBuffer: bool = false,
 indexCount: u32 = 0,
@@ -144,6 +144,8 @@ pub fn init(device: *Device, builder: Builder) !Self {
     var model = Self{
         .device = device,
         .vertexCount = @intCast(builder.vertices.items.len),
+        // SAFETY: written by createVertexBuffers below before any read.
+        .vertexBuffer = undefined,
     };
     try createVertexBuffers(&model, builder.vertices.items);
     errdefer model.vertexBuffer.deinit();
@@ -376,10 +378,13 @@ test "Model has expected fields and types" {
 }
 
 test "createVertexBuffers rejects fewer than 3 vertices" {
+    // SAFETY: createVertexBuffers returns InvalidArgument before touching `device`.
     var device: Device = undefined;
     var model = Self{
         .device = &device,
         .vertexCount = 0,
+        // SAFETY: never read — createVertexBuffers fails fast on the length check.
+        .vertexBuffer = undefined,
     };
 
     const empty: []const Vertex = &.{};
@@ -402,11 +407,15 @@ test "Vertex.getBindingDescriptions stride equals @sizeOf(Vertex)" {
     try std.testing.expectEqual(@sizeOf(Vertex), bindings[0].stride);
 }
 
-test "Model struct can be constructed with default undefined buffer fields" {
+test "Model struct can be constructed with explicit undefined buffer fields" {
+    // SAFETY: this test only reads `device`, `vertexCount`, `hasIndexBuffer`
+    // and `indexCount`; the device pointer is never dereferenced.
     var device: Device = undefined;
     const model = Self{
         .device = &device,
         .vertexCount = 42,
+        // SAFETY: not read by this test.
+        .vertexBuffer = undefined,
     };
     try std.testing.expectEqual(@as(u32, 42), model.vertexCount);
     try std.testing.expectEqual(&device, model.device);

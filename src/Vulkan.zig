@@ -108,6 +108,7 @@ fn debugCallback(
 }
 
 pub fn init(alloc: std.mem.Allocator, enable_validation_layers: bool) !Self {
+    // SAFETY: written by vkCreateInstance below before any read.
     var instance: c.VkInstance = undefined;
 
     if (enable_validation_layers and !try checkValidationLayerSupport(alloc)) {
@@ -283,6 +284,7 @@ pub fn findQueueFamilies(
 }
 
 pub fn checkDeviceExtensionSupport(alloc: std.mem.Allocator, device: c.VkPhysicalDevice) !bool {
+    // SAFETY: written by vkEnumerateDeviceExtensionProperties below before any read.
     var extensionCount: u32 = undefined;
     try checkSuccess(c.vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, null));
 
@@ -337,6 +339,7 @@ pub fn querySwapChainSupport(
 
     try checkSuccess(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities));
 
+    // SAFETY: written by vkGetPhysicalDeviceSurfaceFormatsKHR below before any read.
     var formatCount: u32 = undefined;
     try checkSuccess(c.vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, null));
 
@@ -350,6 +353,7 @@ pub fn querySwapChainSupport(
         ));
     }
 
+    // SAFETY: written by vkGetPhysicalDeviceSurfacePresentModesKHR below before any read.
     var presentModeCount: u32 = undefined;
     try checkSuccess(c.vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, null));
 
@@ -373,18 +377,14 @@ pub const SwapChainSupportDetails = struct {
     alloc: std.mem.Allocator,
 
     fn init(alloc: std.mem.Allocator) SwapChainSupportDetails {
-        const formats: []c.VkSurfaceFormatKHR = undefined;
-        const presentModes: []c.VkPresentModeKHR = undefined;
-
-        const result = SwapChainSupportDetails{
+        return SwapChainSupportDetails{
+            // SAFETY: filled in by vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+            // in querySwapChainSupport before any read.
             .capabilities = undefined,
-            .formats = formats,
-            .presentModes = presentModes,
+            .formats = &.{},
+            .presentModes = &.{},
             .alloc = alloc,
         };
-        //const slice = std.mem.sliceAsBytes(@as(*[1]c.VkSurfaceCapabilitiesKHR, &result.capabilities)[0..1]);
-        //std.mem.set(u8, slice, 0);
-        return result;
     }
 
     pub fn deinit(self: *SwapChainSupportDetails) void {

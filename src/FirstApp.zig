@@ -14,7 +14,6 @@ const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
-const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
 
 /// Per-frame uniform data uploaded to the global UBO. Mirrors

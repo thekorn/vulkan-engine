@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const c = @import("c.zig").c;
 const math = @import("math.zig");
 const Vec3 = math.Vec3;
 const Mat4 = math.Mat4;
@@ -193,8 +192,15 @@ test "GameObject has expected fields" {
 }
 
 test "GameObject.init assigns strictly increasing ids and getId matches id_t" {
+    // SAFETY: GameObject.init never dereferences the model's device pointer
+    // or its buffer handles; it only stores the model by value.
     var device: Device = undefined;
-    const model = Model{ .device = &device, .vertexCount = 0 };
+    const model = Model{
+        .device = &device,
+        .vertexCount = 0,
+        // SAFETY: not read by GameObject.init.
+        .vertexBuffer = undefined,
+    };
 
     const a = try Self.init(model, .{ 1, 0, 0 }, .{});
     const b = try Self.init(model, .{ 0, 1, 0 }, .{});
@@ -350,8 +356,15 @@ test "TransformComponent.normalMatrix preserves normal lengths for uniform scale
 }
 
 test "GameObject.init copies color and transform fields" {
+    // SAFETY: GameObject.init never dereferences the model's device pointer
+    // or its buffer handles; it only stores the model by value.
     var device: Device = undefined;
-    const model = Model{ .device = &device, .vertexCount = 0 };
+    const model = Model{
+        .device = &device,
+        .vertexCount = 0,
+        // SAFETY: not read by GameObject.init.
+        .vertexBuffer = undefined,
+    };
 
     const transform: TransformComponent = .{
         .translation = .{ 0.5, -0.25, 1.0 },
