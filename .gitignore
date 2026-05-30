@@ -1,5 +1,2 @@
 zig-out
 .zig-cache
-
-*.cpp
-*.hpp
