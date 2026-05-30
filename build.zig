@@ -1,3 +1,5 @@
+// zlint-disable no-print -- build scripts legitimately log to stderr via std.debug.print
+
 const std = @import("std");
 const builtin = @import("builtin");
 

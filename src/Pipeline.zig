@@ -2,7 +2,6 @@ const std = @import("std");
 const c = @import("c.zig").c;
 const Device = @import("Device.zig");
 const Model = @import("Model.zig");
-const ArrayList = std.ArrayList;
 
 const checkSuccess = @import("utils.zig").checkSuccess;
 
@@ -100,6 +99,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
         .basePipelineIndex = -1,
     };
 
+    // SAFETY: written by vkCreateGraphicsPipelines below before any read.
     var graphicsPipeline: c.VkPipeline = undefined;
 
     try checkSuccess(c.vkCreateGraphicsPipelines(device.globalDevice, null, 1, &pipelineInfo, null, &graphicsPipeline));
@@ -224,6 +224,7 @@ fn createPipelineLayout(device: *Device) !c.VkPipelineLayout {
         .flags = 0,
     };
 
+    // SAFETY: written by vkCreatePipelineLayout below before any read.
     var pipelineLayout: c.VkPipelineLayout = undefined;
     try checkSuccess(c.vkCreatePipelineLayout(device.globalDevice, &pipelineLayoutInfo, null, &pipelineLayout));
     return pipelineLayout;
@@ -282,6 +283,7 @@ fn createRenderPass(device: *Device) !c.VkRenderPass {
         .flags = 0,
     };
 
+    // SAFETY: written by vkCreateRenderPass below before any read.
     var renderPass: c.VkRenderPass = undefined;
     try checkSuccess(c.vkCreateRenderPass(device.globalDevice, &renderPassInfo, null, &renderPass));
     return renderPass;

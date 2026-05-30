@@ -35,7 +35,7 @@ jobs:
         run: nix develop -c codebook-lsp lint .
 
       - name: lint (zlint)
-        run: nix develop -c zlint
+        run: nix develop -c zlint src/*
 
       - name: build & test
         run: nix develop -c zig build test --summary all

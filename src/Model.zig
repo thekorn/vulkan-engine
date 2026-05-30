@@ -9,13 +9,13 @@ const ArrayList = std.ArrayList;
 const Self = @This();
 device: *Device,
 vertexCount: u32,
-vertexBuffer: c.VkBuffer = undefined,
-vertexBufferMemory: c.VkDeviceMemory = undefined,
+vertexBuffer: c.VkBuffer,
+vertexBufferMemory: c.VkDeviceMemory,
 
 hasIndexBuffer: bool = false,
 indexCount: u32 = 0,
-indexBuffer: c.VkBuffer = undefined,
-indexBufferMemory: c.VkDeviceMemory = undefined,
+indexBuffer: c.VkBuffer,
+indexBufferMemory: c.VkDeviceMemory,
 
 pub const Vertex = extern struct {
     position: math.Vec3 = .{ 0, 0, 0 },
@@ -141,6 +141,16 @@ pub fn init(device: *Device, builder: Builder) !Self {
     var model = Self{
         .device = device,
         .vertexCount = @intCast(builder.vertices.items.len),
+        // SAFETY: written by createVertexBuffers below before any read.
+        .vertexBuffer = undefined,
+        // SAFETY: written by createVertexBuffers below before any read.
+        .vertexBufferMemory = undefined,
+        // SAFETY: only read when `hasIndexBuffer` is true, which createIndexBuffers
+        // only sets after writing this field.
+        .indexBuffer = undefined,
+        // SAFETY: only read when `hasIndexBuffer` is true, which createIndexBuffers
+        // only sets after writing this field.
+        .indexBufferMemory = undefined,
     };
     try createVertexBuffers(&model, builder.vertices.items);
     errdefer {
@@ -180,7 +190,9 @@ fn createVertexBuffers(self: *Self, vertices: []const Vertex) !void {
     if (vertices.len < 3) return error.InvalidArgument;
     const buffer_size: u64 = @sizeOf(Vertex) * vertices.len;
 
+    // SAFETY: written by self.device.createBuffer below before any read.
     var stagingBuffer: c.VkBuffer = undefined;
+    // SAFETY: written by self.device.createBuffer below before any read.
     var stagingBufferMemory: c.VkDeviceMemory = undefined;
     try self.device.createBuffer(
         buffer_size,
@@ -194,6 +206,7 @@ fn createVertexBuffers(self: *Self, vertices: []const Vertex) !void {
         c.vkFreeMemory(self.device.globalDevice, stagingBufferMemory, null);
     }
 
+    // SAFETY: written by vkMapMemory below before any read.
     var data: [*]u8 = undefined;
     try checkSuccess(c.vkMapMemory(
         self.device.globalDevice,
@@ -228,7 +241,9 @@ fn createIndexBuffers(self: *Self, indices: []const u32) !void {
 
     const buffer_size: u64 = @sizeOf(u32) * indices.len;
 
+    // SAFETY: written by self.device.createBuffer below before any read.
     var stagingBuffer: c.VkBuffer = undefined;
+    // SAFETY: written by self.device.createBuffer below before any read.
     var stagingBufferMemory: c.VkDeviceMemory = undefined;
     try self.device.createBuffer(
         buffer_size,
@@ -242,6 +257,7 @@ fn createIndexBuffers(self: *Self, indices: []const u32) !void {
         c.vkFreeMemory(self.device.globalDevice, stagingBufferMemory, null);
     }
 
+    // SAFETY: written by vkMapMemory below before any read.
     var data: [*]u8 = undefined;
     try checkSuccess(c.vkMapMemory(
         self.device.globalDevice,
@@ -412,10 +428,19 @@ test "Model has expected fields and types" {
 }
 
 test "createVertexBuffers rejects fewer than 3 vertices" {
+    // SAFETY: createVertexBuffers returns InvalidArgument before touching `device`.
     var device: Device = undefined;
     var model = Self{
         .device = &device,
         .vertexCount = 0,
+        // SAFETY: never read — createVertexBuffers fails fast on the length check.
+        .vertexBuffer = undefined,
+        // SAFETY: never read — createVertexBuffers fails fast on the length check.
+        .vertexBufferMemory = undefined,
+        // SAFETY: never read — createVertexBuffers fails fast on the length check.
+        .indexBuffer = undefined,
+        // SAFETY: never read — createVertexBuffers fails fast on the length check.
+        .indexBufferMemory = undefined,
     };
 
     const empty: []const Vertex = &.{};
@@ -438,11 +463,21 @@ test "Vertex.getBindingDescriptions stride equals @sizeOf(Vertex)" {
     try std.testing.expectEqual(@sizeOf(Vertex), bindings[0].stride);
 }
 
-test "Model struct can be constructed with default undefined buffer fields" {
+test "Model struct can be constructed with explicit undefined buffer fields" {
+    // SAFETY: this test only reads `device`, `vertexCount`, `hasIndexBuffer`
+    // and `indexCount`; the device pointer is never dereferenced.
     var device: Device = undefined;
     const model = Self{
         .device = &device,
         .vertexCount = 42,
+        // SAFETY: not read by this test.
+        .vertexBuffer = undefined,
+        // SAFETY: not read by this test.
+        .vertexBufferMemory = undefined,
+        // SAFETY: not read by this test.
+        .indexBuffer = undefined,
+        // SAFETY: not read by this test.
+        .indexBufferMemory = undefined,
     };
     try std.testing.expectEqual(@as(u32, 42), model.vertexCount);
     try std.testing.expectEqual(&device, model.device);

@@ -99,7 +99,7 @@ checker:
 ```bash
 nix develop --command zig build test --summary all
 nix develop --command codebook-lsp lint --unique -s .
-nix develop --command zlint
+nix develop --command zlint src/*
 ```
 
 `zlint` walks the current directory by default, so just run it from the
@@ -935,7 +935,7 @@ nix develop -c zig build test --summary all      # In Nix environment
 nix develop --command codebook-lsp lint --unique -s .
 
 # Lint — REQUIRED part of "running the tests":
-nix develop --command zlint
+nix develop --command zlint src/*
 ```
 
 The `--unique` flag deduplicates findings and `-s` makes the output
@@ -1093,7 +1093,7 @@ zig build --help       # Show all options
 nix develop --command codebook-lsp lint --unique -s .
 
 # Lint (always run with tests, before committing):
-nix develop --command zlint
+nix develop --command zlint src/*
 ```
 
 ### Key File Locations

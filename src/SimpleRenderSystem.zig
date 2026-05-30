@@ -29,6 +29,7 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPas
         .alloc = alloc,
         .device = device,
         .pipeline = null,
+        // SAFETY: written by createPipelineLayout immediately below before any read.
         .pipelineLayout = undefined,
     };
 

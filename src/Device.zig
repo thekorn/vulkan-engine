@@ -23,11 +23,15 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
     const enable_validation_layers = builtin.mode == .Debug;
 
     const vulkan = try Vulkan.init(alloc, enable_validation_layers);
+    // SAFETY: filled in by glfwCreateWindowSurface in window.create_surface below.
     var surface: c.VkSurfaceKHR = undefined;
     try window.create_surface(vulkan.instance, &surface);
 
+    // SAFETY: filled in by vkGetDeviceQueue inside createLogicalDevice below.
     var graphicsQueue: c.VkQueue = undefined;
+    // SAFETY: filled in by vkGetDeviceQueue inside createLogicalDevice below.
     var presentQueue: c.VkQueue = undefined;
+    // SAFETY: filled in by vkCreateDevice inside createLogicalDevice below.
     var globalDevice: c.VkDevice = undefined;
 
     const physicalDevice = try pickPhysicalDevice(alloc, vulkan, surface);
@@ -42,6 +46,7 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
         enable_validation_layers,
     );
 
+    // SAFETY: filled in by vkCreateCommandPool inside createCommandPool below.
     var commandPool: c.VkCommandPool = undefined;
     try createCommandPool(alloc, physicalDevice, surface, globalDevice, &commandPool);
 
@@ -93,6 +98,7 @@ fn pickPhysicalDevice(alloc: std.mem.Allocator, vulkan: Vulkan, surface: c.VkSur
         }
     } else return error.FailedToFindSuitableGPU;
 
+    // SAFETY: written by vkGetPhysicalDeviceProperties below before any read.
     var properties: c.VkPhysicalDeviceProperties = undefined;
 
     c.vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -154,6 +160,7 @@ pub fn createShaderModule(
         .pNext = null,
         .flags = 0,
     };
+    // SAFETY: written by vkCreateShaderModule below before any read.
     var shader_module: c.VkShaderModule = undefined;
     try checkSuccess(c.vkCreateShaderModule(self.globalDevice, &createInfo, null, &shader_module));
     return shader_module;
@@ -165,6 +172,7 @@ pub fn getSwapChainSupport(self: *Self) !Vulkan.SwapChainSupportDetails {
 
 pub fn findSupportedFormat(self: *Self, candidates: []const c.VkFormat, tiling: c.VkImageTiling, features: c.VkFormatFeatureFlags) !c.VkFormat {
     for (candidates) |format| {
+        // SAFETY: written by vkGetPhysicalDeviceFormatProperties below before any read.
         var props: c.VkFormatProperties = undefined;
         c.vkGetPhysicalDeviceFormatProperties(self.physicalDevice, format, &props);
 
@@ -180,6 +188,7 @@ pub fn findSupportedFormat(self: *Self, candidates: []const c.VkFormat, tiling: 
 pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, properties: c.VkMemoryPropertyFlags, image: *c.VkImage, imageMemory: *c.VkDeviceMemory) !void {
     try checkSuccess(c.vkCreateImage(self.globalDevice, imageInfo, null, image));
 
+    // SAFETY: written by vkGetImageMemoryRequirements below before any read.
     var memRequirements: c.VkMemoryRequirements = undefined;
     c.vkGetImageMemoryRequirements(self.globalDevice, image.*, &memRequirements);
 
@@ -194,6 +203,7 @@ pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, propert
 }
 
 pub fn findMemoryType(self: *Self, typeFilter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
+    // SAFETY: written by vkGetPhysicalDeviceMemoryProperties below before any read.
     var memProperties: c.VkPhysicalDeviceMemoryProperties = undefined;
     c.vkGetPhysicalDeviceMemoryProperties(self.physicalDevice, &memProperties);
     return pickMemoryType(&memProperties, typeFilter, properties);
@@ -239,6 +249,7 @@ pub fn createBuffer(
 
     try checkSuccess(c.vkCreateBuffer(self.globalDevice, &bufferInfo, null, buffer));
 
+    // SAFETY: written by vkGetBufferMemoryRequirements below before any read.
     var memRequirements: c.VkMemoryRequirements = undefined;
     c.vkGetBufferMemoryRequirements(self.globalDevice, buffer.*, &memRequirements);
 
@@ -260,6 +271,7 @@ pub fn beginSingleTimeCommands(self: *Self) !c.VkCommandBuffer {
         .commandBufferCount = 1,
     };
 
+    // SAFETY: written by vkAllocateCommandBuffers below before any read.
     var commandBuffer: c.VkCommandBuffer = undefined;
     try checkSuccess(c.vkAllocateCommandBuffers(self.globalDevice, &allocInfo, &commandBuffer));
     errdefer c.vkFreeCommandBuffers(self.globalDevice, self.commandPool, 1, &commandBuffer);

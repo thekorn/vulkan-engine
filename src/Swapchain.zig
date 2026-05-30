@@ -1,7 +1,6 @@
 const std = @import("std");
 const c = @import("c.zig").c;
 const Device = @import("Device.zig");
-const Window = @import("Window.zig");
 const Vulkan = @import("Vulkan.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
@@ -229,6 +228,7 @@ const CreateSwapChainResult = struct {
 };
 
 fn createSwapChain(alloc: std.mem.Allocator, device: *Device, windowExtent: c.VkExtent2D, prevSwapChain: ?*Self) !CreateSwapChainResult {
+    // SAFETY: written by vkCreateSwapchainKHR further down before any read.
     var swapChain: c.VkSwapchainKHR = undefined;
     var swapChainSupport = try device.getSwapChainSupport();
 
@@ -438,6 +438,7 @@ fn createRenderPass(device: *Device, swapChainImageFormat: c.VkFormat) !c.VkRend
         .pDependencies = &dependency,
     };
 
+    // SAFETY: written by vkCreateRenderPass below before any read.
     var renderPass: c.VkRenderPass = undefined;
 
     try checkSuccess(c.vkCreateRenderPass(device.globalDevice, &renderPassInfo, null, &renderPass));
@@ -618,6 +619,8 @@ fn makeSelfWithExtent(extent: c.VkExtent2D) Self {
         .depthImages = &.{},
         .depthImageMemories = &.{},
         .depthImageViews = &.{},
+        // SAFETY: tests using this helper never dereference `device`; they only
+        // exercise the extent-derived helpers (width/height/extentAspectRatio).
         .device = undefined,
         .windowExtent = .{ .width = 0, .height = 0 },
         .swapChain = null,

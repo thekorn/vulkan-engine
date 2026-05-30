@@ -10,7 +10,6 @@ const SimpleRenderSystem = @import("SimpleRenderSystem.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
-const checkSuccess = @import("utils.zig").checkSuccess;
 const ArrayList = std.ArrayList;
 
 const Self = @This();
