@@ -230,6 +230,161 @@ test "getAlignment is a no-op when instanceSize is already a multiple of alignme
     try std.testing.expectEqual(@as(c.VkDeviceSize, 192), getAlignment(192, 64));
 }
 
+/// Build a `Buffer` whose `mapped` pointer aliases a caller-provided
+/// byte slice, so the pure-logic copy paths (`writeToBuffer`,
+/// `writeToIndex`) can be exercised without a live Vulkan device.
+///
+/// The returned buffer leaves `device`, `buffer` and `memory` as
+/// dummy/null values; never call `init`-allocated paths like `map`,
+/// `flush`, `invalidate`, or `deinit` on it.
+fn fakeMappedBuffer(
+    storage: []u8,
+    instanceSize: c.VkDeviceSize,
+    instanceCount: u32,
+    alignmentSize: c.VkDeviceSize,
+) Self {
+    return .{
+        // Safety: tests below never dereference `device`, but the field
+        // is non-optional. Cast a sentinel pointer instead of leaving
+        // it `undefined` so accidental dereferences segfault loudly.
+        .device = @ptrFromInt(0x1000),
+        .mapped = @ptrCast(storage.ptr),
+        .buffer = null,
+        .memory = null,
+        .bufferSize = storage.len,
+        .instanceCount = instanceCount,
+        .instanceSize = instanceSize,
+        .alignmentSize = alignmentSize,
+        .usageFlags = 0,
+        .memoryPropertyFlags = 0,
+    };
+}
+
+test "writeToBuffer with VK_WHOLE_SIZE copies bufferSize bytes from data" {
+    var dst: [16]u8 = @splat(0xAA);
+    const src: [16]u8 = .{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    var buf = fakeMappedBuffer(&dst, 16, 1, 16);
+    buf.writeToBuffer(@ptrCast(&src), c.VK_WHOLE_SIZE, 0);
+    try std.testing.expectEqualSlices(u8, &src, &dst);
+}
+
+test "writeToBuffer with VK_WHOLE_SIZE ignores offset" {
+    // VK_WHOLE_SIZE branch always writes the full bufferSize starting
+    // at offset 0, regardless of the offset argument — matches the C++
+    // tutorial's behavior.
+    var dst: [8]u8 = @splat(0xCC);
+    const src: [8]u8 = .{ 9, 9, 9, 9, 9, 9, 9, 9 };
+    var buf = fakeMappedBuffer(&dst, 8, 1, 8);
+    buf.writeToBuffer(@ptrCast(&src), c.VK_WHOLE_SIZE, 4);
+    try std.testing.expectEqualSlices(u8, &src, &dst);
+}
+
+test "writeToBuffer with explicit size+offset writes only that slice" {
+    var dst: [16]u8 = @splat(0);
+    const src: [4]u8 = .{ 0xDE, 0xAD, 0xBE, 0xEF };
+    var buf = fakeMappedBuffer(&dst, 16, 1, 16);
+    buf.writeToBuffer(@ptrCast(&src), 4, 8);
+
+    // Bytes before the offset must remain untouched.
+    for (dst[0..8]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+    try std.testing.expectEqualSlices(u8, &src, dst[8..12]);
+    // Bytes after the write must remain untouched.
+    for (dst[12..16]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+}
+
+test "writeToIndex writes instanceSize bytes at index*alignmentSize" {
+    // Two 4-byte instances, each padded up to 8-byte alignment, in a
+    // 16-byte buffer. Index 1 should land at offset 8 and write 4
+    // bytes (NOT the full alignmentSize).
+    var dst: [16]u8 = @splat(0);
+    const src: [4]u8 = .{ 1, 2, 3, 4 };
+    var buf = fakeMappedBuffer(&dst, 4, 2, 8);
+    buf.writeToIndex(@ptrCast(&src), 1);
+
+    // Slice [0..8] (index 0) untouched.
+    for (dst[0..8]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+    // First 4 bytes of slice [8..16] = src.
+    try std.testing.expectEqualSlices(u8, &src, dst[8..12]);
+    // Trailing alignment padding [12..16] untouched.
+    for (dst[12..16]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+}
+
+test "writeToIndex at index 0 writes at offset 0" {
+    var dst: [16]u8 = @splat(0xFF);
+    const src: [4]u8 = .{ 7, 8, 9, 10 };
+    var buf = fakeMappedBuffer(&dst, 4, 2, 8);
+    buf.writeToIndex(@ptrCast(&src), 0);
+    try std.testing.expectEqualSlices(u8, &src, dst[0..4]);
+    // Padding [4..8] and the next slice [8..16] must be untouched.
+    for (dst[4..16]) |b| try std.testing.expectEqual(@as(u8, 0xFF), b);
+}
+
+test "descriptorInfo populates buffer/offset/range" {
+    var dst: [16]u8 = @splat(0);
+    const buf = fakeMappedBuffer(&dst, 16, 1, 16);
+    const info = buf.descriptorInfo(8, 4);
+    try std.testing.expectEqual(buf.buffer, info.buffer);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 4), info.offset);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 8), info.range);
+}
+
+test "descriptorInfoForIndex computes offset as index*alignmentSize" {
+    var dst: [32]u8 = @splat(0);
+    const buf = fakeMappedBuffer(&dst, 4, 4, 8);
+
+    const info0 = buf.descriptorInfoForIndex(0);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 0), info0.offset);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 8), info0.range);
+
+    const info2 = buf.descriptorInfoForIndex(2);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 16), info2.offset);
+    try std.testing.expectEqual(@as(c.VkDeviceSize, 8), info2.range);
+}
+
+test "unmap is a no-op when nothing is mapped" {
+    // Construct a Buffer that was never mapped (no `device` access
+    // because the `mapped == null` branch short-circuits the call to
+    // `vkUnmapMemory`).
+    var buf: Self = .{
+        .device = @ptrFromInt(0x1000),
+        .mapped = null,
+        .buffer = null,
+        .memory = null,
+        .bufferSize = 0,
+        .instanceCount = 0,
+        .instanceSize = 0,
+        .alignmentSize = 0,
+        .usageFlags = 0,
+        .memoryPropertyFlags = 0,
+    };
+    buf.unmap();
+    try std.testing.expectEqual(@as(?*anyopaque, null), buf.mapped);
+}
+
+test "deinit on an empty (uninitialized) Buffer is a safe no-op" {
+    // `deinit` must tolerate a Buffer whose underlying Vulkan handles
+    // were never created (e.g. when a higher-level `errdefer` runs
+    // before `init` filled in the buffer/memory). All three branches
+    // (`mapped`, `buffer`, `memory`) short-circuit on null without
+    // touching `device`.
+    var buf: Self = .{
+        .device = @ptrFromInt(0x1000),
+        .mapped = null,
+        .buffer = null,
+        .memory = null,
+        .bufferSize = 0,
+        .instanceCount = 0,
+        .instanceSize = 0,
+        .alignmentSize = 0,
+        .usageFlags = 0,
+        .memoryPropertyFlags = 0,
+    };
+    buf.deinit();
+    try std.testing.expectEqual(@as(c.VkBuffer, null), buf.buffer);
+    try std.testing.expectEqual(@as(c.VkDeviceMemory, null), buf.memory);
+    try std.testing.expectEqual(@as(?*anyopaque, null), buf.mapped);
+}
+
 test "Buffer has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
     try std.testing.expectEqual(@as(usize, 10), fields.len);
