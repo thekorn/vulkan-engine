@@ -56,6 +56,54 @@ pub const TransformComponent = struct {
             .{ self.translation[0], self.translation[1], self.translation[2], 1.0 },
         };
     }
+
+    /// Returns the normal matrix corresponding to `mat4()`'s rotation
+    /// and scale (translation is irrelevant for normals). Computed
+    /// analytically as `R * diag(1/scale)`, i.e. the transpose of the
+    /// inverse of the upper 3x3, which only works when the model
+    /// matrix has uniform-or-axis-aligned scaling. Mirrors
+    /// `TransformComponent::normalMatrix` in the upstream C++ tutorial.
+    ///
+    /// The result is returned as a `Mat4` (rather than a `Mat3`) to
+    /// match the push-constant layout the shader expects — the shader
+    /// then does `mat3(push.normalMatrix) * normal`. The 4th row/col
+    /// is identity-extended just like `glm::mat4(glm::mat3)`.
+    pub fn normalMatrix(self: *TransformComponent) Mat4 {
+        const c3 = std.math.cos(self.rotation[2]);
+        const s3 = std.math.sin(self.rotation[2]);
+        const c2 = std.math.cos(self.rotation[0]);
+        const s2 = std.math.sin(self.rotation[0]);
+        const c1 = std.math.cos(self.rotation[1]);
+        const s1 = std.math.sin(self.rotation[1]);
+
+        const inv: Vec3 = .{
+            1.0 / self.scale[0],
+            1.0 / self.scale[1],
+            1.0 / self.scale[2],
+        };
+
+        return Mat4{
+            .{
+                inv[0] * (c1 * c3 + s1 * s2 * s3),
+                inv[0] * (c2 * s3),
+                inv[0] * (c1 * s2 * s3 - c3 * s1),
+                0.0,
+            },
+            .{
+                inv[1] * (c3 * s1 * s2 - c1 * s3),
+                inv[1] * (c2 * c3),
+                inv[1] * (c1 * c3 * s2 + s1 * s3),
+                0.0,
+            },
+            .{
+                inv[2] * (c2 * s1),
+                inv[2] * (-s2),
+                inv[2] * (c1 * c2),
+                0.0,
+            },
+            .{ 0.0, 0.0, 0.0, 1.0 },
+        };
+    }
 };
 
 pub fn init(model: Model, color: Vec3, transform: TransformComponent) !Self {
@@ -237,6 +285,68 @@ test "GameObject.createGameObject still assigns strictly increasing ids" {
     const a = Self.createGameObject();
     const b = Self.createGameObject();
     try std.testing.expect(b.id_t > a.id_t);
+}
+
+test "TransformComponent.normalMatrix is identity for rotation=0 and scale=1" {
+    var t = TransformComponent{};
+    const n = t.normalMatrix();
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            const expected: f32 = if (col == row) 1.0 else 0.0;
+            try std.testing.expectApproxEqAbs(expected, n[col][row], 1e-6);
+        }
+    }
+}
+
+test "TransformComponent.normalMatrix scales upper 3x3 by 1/scale when rotation=0" {
+    var t = TransformComponent{ .scale = .{ 2.0, 4.0, 8.0 } };
+    const n = t.normalMatrix();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), n[0][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), n[1][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.125), n[2][2], 1e-6);
+    // Off-diagonal upper 3x3 entries are zero.
+    inline for (0..3) |col| {
+        inline for (0..3) |row| {
+            if (col == row) continue;
+            try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[col][row], 1e-6);
+        }
+    }
+    // 4th row/col is identity-extended.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), n[3][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[3][2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[0][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[1][3], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[2][3], 1e-6);
+}
+
+test "TransformComponent.normalMatrix upper 3x3 matches mat4 upper 3x3 for uniform scale=1" {
+    var t = TransformComponent{ .rotation = .{ 0.3, -0.8, 1.2 } };
+    const m = t.mat4();
+    const n = t.normalMatrix();
+    // With scale=1 the normal matrix equals the rotation block of mat4.
+    inline for (0..3) |col| {
+        inline for (0..3) |row| {
+            try std.testing.expectApproxEqAbs(m[col][row], n[col][row], 1e-6);
+        }
+    }
+}
+
+test "TransformComponent.normalMatrix preserves normal lengths for uniform scale" {
+    // With uniform scale, R * diag(1/s) applied to a unit-length vector
+    // produces a vector of length 1/s (per-axis equal). After GLSL
+    // `normalize(...)` this still yields a unit vector — verify the
+    // pre-normalize length matches 1/s exactly.
+    var t = TransformComponent{
+        .rotation = .{ 0.2, 0.4, -0.6 },
+        .scale = .{ 2.0, 2.0, 2.0 },
+    };
+    const n = t.normalMatrix();
+    // Apply n's upper-3x3 to (1, 0, 0).
+    const v0: math.Vec3 = .{ n[0][0], n[0][1], n[0][2] };
+    const len = math.length3(v0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), len, 1e-6);
 }
 
 test "GameObject.init copies color and transform fields" {

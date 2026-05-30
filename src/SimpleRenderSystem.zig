@@ -17,7 +17,11 @@ pipelineLayout: c.VkPipelineLayout,
 
 pub const SimplePushConstantData = extern struct {
     transform: math.Mat4 = math.identity_mat4,
-    color: math.Vec3 align(16) = .{ 0, 0, 0 },
+    // `normalMatrix` is stored as a `Mat4` (rather than a `Mat3`) so
+    // that the std140 push-constant layout matches the GLSL side
+    // without needing per-column padding. The shader extracts it as
+    // `mat3(push.normalMatrix)`.
+    normalMatrix: math.Mat4 = math.identity_mat4,
 };
 
 pub fn init(alloc: std.mem.Allocator, device: *Device, renderPass: c.VkRenderPass) !Self {
@@ -95,8 +99,8 @@ pub fn renderGameObjects(
         const transform = math.mul4(projectionView, obj.transform.mat4());
 
         const push: SimplePushConstantData = .{
-            .color = obj.color,
             .transform = transform,
+            .normalMatrix = obj.transform.normalMatrix(),
         };
 
         c.vkCmdPushConstants(
@@ -124,8 +128,8 @@ test "SimplePushConstantData has the expected field layout" {
     try std.testing.expectEqual(@as(usize, 2), fields.len);
     try std.testing.expectEqualStrings("transform", fields[0].name);
     try std.testing.expectEqual(math.Mat4, fields[0].type);
-    try std.testing.expectEqualStrings("color", fields[1].name);
-    try std.testing.expectEqual(math.Vec3, fields[1].type);
+    try std.testing.expectEqualStrings("normalMatrix", fields[1].name);
+    try std.testing.expectEqual(math.Mat4, fields[1].type);
 }
 
 test "SimplePushConstantData defaults transform to the identity matrix" {
@@ -138,8 +142,8 @@ test "SimplePushConstantData defaults transform to the identity matrix" {
     }
 }
 
-test "SimplePushConstantData color is 16-byte aligned (for std140 push constants)" {
-    try std.testing.expect(@offsetOf(SimplePushConstantData, "color") % 16 == 0);
+test "SimplePushConstantData normalMatrix is 16-byte aligned (for std140 push constants)" {
+    try std.testing.expect(@offsetOf(SimplePushConstantData, "normalMatrix") % 16 == 0);
 }
 
 test "SimplePushConstantData transform is at offset 0 (matches push-constant range)" {
@@ -153,9 +157,12 @@ test "SimplePushConstantData size fits in the Vulkan-mandated minimum (128 bytes
     try std.testing.expect(@sizeOf(SimplePushConstantData) <= 128);
 }
 
-test "SimplePushConstantData default color is zero-initialized" {
+test "SimplePushConstantData defaults normalMatrix to the identity matrix" {
     const p: SimplePushConstantData = .{};
-    try std.testing.expectEqual(@as(f32, 0.0), p.color[0]);
-    try std.testing.expectEqual(@as(f32, 0.0), p.color[1]);
-    try std.testing.expectEqual(@as(f32, 0.0), p.color[2]);
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            const expected: f32 = if (col == row) 1.0 else 0.0;
+            try std.testing.expectEqual(expected, p.normalMatrix[col][row]);
+        }
+    }
 }
