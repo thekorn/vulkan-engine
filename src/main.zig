@@ -16,6 +16,7 @@ test {
     _ = @import("math.zig");
     _ = @import("Vulkan.zig");
     _ = @import("Pipeline.zig");
+    _ = @import("Device.zig");
     _ = @import("Window.zig");
     _ = @import("Swapchain.zig");
     _ = @import("Loop.zig");

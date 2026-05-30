@@ -99,8 +99,11 @@ vulkan-engine/
 │   │                        #   loop, renderer and game objects
 │   ├── Vulkan.zig           # Vulkan instance & initialization
 │   ├── Device.zig           # Physical/logical device management,
-│   │                        #   buffer / image / command-pool helpers
-│   ├── Window.zig           # GLFW window management & surface creation
+│   │                        #   buffer / image / command-pool helpers,
+│   │                        #   single-time command + copyBuffer
+│   │                        #   helpers, pure-logic pickMemoryType
+│   ├── Window.zig           # GLFW window management, surface creation
+│   │                        #   and framebuffer-resize callback
 │   ├── Swapchain.zig        # Swapchain, depth resources, render pass,
 │   │                        #   framebuffers, synchronization, acquire /
 │   │                        #   submit-present (MAX_FRAMES_IN_FLIGHT = 2)
@@ -111,9 +114,12 @@ vulkan-engine/
 │   ├── Pipeline.zig         # Graphics pipeline configuration & creation
 │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
 │   │                          # that draws a list of GameObjects
-│   ├── Model.zig            # Vertex buffer wrapper; defines `Vertex`
-│   │                        #   (position + color) with binding /
-│   │                        #   attribute descriptions
+│   ├── Model.zig            # Vertex + (optional) index buffer wrapper
+│   │                        #   built via a `Builder` struct, uploaded
+│   │                        #   through a host-visible staging buffer
+│   │                        #   into a DEVICE_LOCAL buffer; defines
+│   │                        #   `Vertex` (position + color) with
+│   │                        #   binding / attribute descriptions
 │   ├── GameObject.zig       # Renderable entity: id, optional model,
 │   │                        #   color and TransformComponent
 │   │                        #   (translation / scale / rotation -> mat4
@@ -225,22 +231,35 @@ FirstApp.zig (Application root)
        against the new render pass and the frame is skipped.
     8. `vkDeviceWaitIdle` before returning so the GPU is finished with
        everything before resources are destroyed.
-  - `createCubeModel()` / `loadGameObjects()` - Temporary helpers that
-    build a single colored cube `Model` and wrap it in a `GameObject`.
+  - `createCubeModel()` / `loadGameObjects()` - Temporary helpers
+    that build a single colored cube `Model` (24 unique vertices + 36
+    indices, drawn with `vkCmdDrawIndexed`) and wrap it in a
+    `GameObject`.
 
 #### **Window.zig** - GLFW Window Management
 
-- **Purpose:** Handle window creation and surface management
-- **Type:** Struct with `instance`, `width`, `height` fields
+- **Purpose:** Handle window creation, surface management and
+  framebuffer-resize notifications.
+- **Type:** Heap-allocated struct (`init` returns `*Self`) with
+  `alloc`, `instance`, `width`, `height` and a
+  `framebufferResized: bool` flag.
 - **Key Functions:**
-  - `init(width, height)` - Create GLFW window
-  - `deinit()` - Clean up window resources
-  - `should_close()` - Check if window close requested
-  - `create_surface(instance, surface)` - Create Vulkan surface for rendering
+  - `init(alloc, width, height)` - Create GLFW window, store `self`
+    in the window's user-pointer and register the framebuffer-resize
+    callback.
+  - `deinit()` - Destroy the window, terminate GLFW and free `self`.
+  - `should_close()` - Check if a window close was requested.
+  - `create_surface(instance, surface)` - Create the Vulkan surface
+    for rendering.
+  - `getExtent()` - Current size as a `VkExtent2D`.
+  - `wasWindowResized()` / `resetWindowResized()` - Read/clear the
+    framebuffer-resize flag (polled by `Renderer.endFrame`).
 - **Configuration:**
-  - No API client (using Vulkan)
-  - Non-resizable window
-  - Uses GLFW C library bindings
+  - No API client (using Vulkan).
+  - Resizable window (GLFW_RESIZABLE = GLFW_TRUE); resizes are
+    surfaced to the renderer via `framebufferResizeCallback`, which
+    updates `width` / `height` and sets `framebufferResized = true`.
+  - Uses GLFW C library bindings.
 
 #### **Vulkan.zig** - Vulkan Instance & Core Setup
 
@@ -279,12 +298,32 @@ FirstApp.zig (Application root)
   - `presentQueue` - Presentation queue
   - `commandPool` - Command buffer pool
 - **Key Functions:**
-  - `init(alloc, window)` - Initialize device and queues
-  - `deinit()` - Clean up device resources
-  - `pickPhysicalDevice()` - Select suitable GPU
-  - `isDeviceSuitable()` - Check device capabilities
-  - `createCommandPool()` - Create command buffer pool
-  - `createShaderModule()` - Compile shader bytecode into module
+  - `init(alloc, window)` - Initialize device and queues. Returns a
+    heap-allocated `*Self`; `deinit` frees the allocation.
+  - `deinit()` - Clean up device resources.
+  - `pickPhysicalDevice()` - Select suitable GPU.
+  - `isDeviceSuitable()` - Check device capabilities.
+  - `createCommandPool()` - Create the command buffer pool.
+  - `createShaderModule()` - Compile shader bytecode into a module.
+  - `createBuffer(size, usage, properties, buffer, bufferMemory)` -
+    Allocate + bind a `VkBuffer` (used by `Model` for both staging
+    and DEVICE_LOCAL buffers).
+  - `createImageWithInfo(imageInfo, properties, image, imageMemory)` -
+    Allocate + bind a `VkImage` (used by the swapchain for the depth
+    attachment).
+  - `findSupportedFormat(candidates, tiling, features)` /
+    `findMemoryType(typeFilter, properties)` - Format and memory-type
+    queries against the physical device.
+  - `pickMemoryType(memProperties, typeFilter, properties)` -
+    Pure-logic helper extracted from `findMemoryType` so the
+    bit-fiddling can be unit-tested without a live
+    `VkPhysicalDevice`.
+  - `beginSingleTimeCommands()` / `endSingleTimeCommands(cb)` -
+    Allocate, begin, submit and free a one-shot command buffer on
+    the graphics queue, waiting for it to complete.
+  - `copyBuffer(src, dst, size)` - Issue a `vkCmdCopyBuffer` inside a
+    single-time command buffer (used by `Model` to upload from a
+    host-visible staging buffer into a DEVICE_LOCAL buffer).
 - **Device Selection Criteria:**
   - Queue family support (graphics and present)
   - Required extension support
@@ -330,9 +369,16 @@ FirstApp.zig (Application root)
   - `getSwapChainRenderPass()` - Returns the render pass that render
     systems should be built against.
   - `beginFrame()` / `endFrame()` - Acquire/present a swapchain image
-    and submit the recorded command buffer. May return
-    `error.SwapChainFormatChanged` after a swapchain recreation if the
-    image/depth format changed, so callers can rebuild their pipelines.
+    and submit the recorded command buffer. Swapchain recreation is
+    triggered automatically on `VK_ERROR_OUT_OF_DATE_KHR`,
+    `VK_SUBOPTIMAL_KHR`, or when `Window.wasWindowResized()` reports
+    that the framebuffer-resize callback fired. May return
+    `error.SwapChainFormatChanged` after a swapchain recreation if
+    the image/depth format changed, so callers can rebuild their
+    pipelines.
+  - `getAspectRatio()` - Convenience accessor for the current
+    swapchain extent's aspect ratio (used to update the camera's
+    perspective projection per frame).
   - `beginSwapChainRenderPass(cb)` / `endSwapChainRenderPass(cb)` -
     Begin/end the render pass with the current framebuffer, viewport
     and scissor.
@@ -378,21 +424,32 @@ FirstApp.zig (Application root)
     push constants and issues a draw via the object's `Model`.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
-#### **Model.zig** - Vertex Buffer Wrapper
+#### **Model.zig** - Vertex + Index Buffer Wrapper
 
-- **Purpose:** Encapsulates a Vulkan vertex buffer and exposes a Zig
-  `Vertex` type matching the shader inputs.
+- **Purpose:** Encapsulates a Vulkan vertex buffer and an optional
+  index buffer, and exposes a Zig `Vertex` type matching the shader
+  inputs.
 - **Vertex Layout:**
   - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
   - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
+- **`Builder` struct:** mirrors the upstream C++ tutorial's
+  `LveModel::Builder` and bundles the vertex / index slices used to
+  construct a `Model`. `indices` may be empty, in which case the
+  model falls back to non-indexed drawing via `vkCmdDraw`.
 - **Key Functions:**
   - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
     Used by `Pipeline` to wire up vertex input.
-  - `init(device, vertices)` - Allocates a host-visible / host-coherent
-    vertex buffer and uploads the vertex data.
-  - `deinit()` - Destroys the buffer and frees its memory.
-  - `bind(commandBuffer)` / `draw(commandBuffer)` - Bind the vertex
-    buffer and issue a non-indexed draw.
+  - `init(device, builder)` - Creates a DEVICE_LOCAL vertex buffer
+    (and, if `builder.indices.len > 0`, a DEVICE_LOCAL index buffer)
+    and uploads the data through a host-visible / host-coherent
+    staging buffer via `Device.copyBuffer`. Partial allocations are
+    released through `errdefer` on failure.
+  - `deinit()` - Destroys the vertex buffer and, when present, the
+    index buffer; frees their memory.
+  - `bind(commandBuffer)` - Bind the vertex buffer and, when present,
+    the index buffer (`VK_INDEX_TYPE_UINT32`).
+  - `draw(commandBuffer)` - Issues `vkCmdDrawIndexed` when an index
+    buffer is present and `vkCmdDraw` otherwise.
 
 #### **GameObject.zig** - Renderable Entity
 
@@ -890,10 +947,7 @@ defer extensions.deinit(alloc);
   TODO (see `Device.deinit`).
 - Only a single hardcoded scene (one colored cube wired up in
   `FirstApp.loadGameObjects`).
-- No camera / view-projection matrix yet; transforms are applied directly
-  via push constants.
 - No descriptor sets / uniform buffers; only push constants are used.
-- No indexed drawing (`Model.draw` is `vkCmdDraw`, not `vkCmdDrawIndexed`).
 - No asset loading (models / textures); geometry is built in code.
 
 ### 8.3 Extension References
