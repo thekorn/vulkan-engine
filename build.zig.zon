@@ -3,7 +3,12 @@
     .version = "0.0.0",
     .fingerprint = 0xd8cbed5931f8e0a3,
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .tinyobjloader_c = .{
+            .url = "https://github.com/syoyo/tinyobjloader-c/archive/0f8ea84a0da616790b476912e1ccc641f36b463e.tar.gz",
+            .hash = "N-V-__8AAKWmBQDq9z-2g3I1U-0lcQNLp3GjkIX3CScXeOiN",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

@@ -1,11 +1,17 @@
 # Vulkan Engine
 
 A small Vulkan rendering engine written in Zig. It renders 3D
-`GameObject`s (currently a single indexed, colored cube) through a
-layered architecture built around a swapchain, renderer and pluggable
-render systems. The renderer transparently handles window resizes and
-swapchain recreation, and the camera is driven by a WASD + QE +
-arrow-key keyboard controller.
+`GameObject`s (currently a single ceramic vase loaded from a Wavefront
+`.obj` file) through a layered architecture built around a swapchain,
+renderer and pluggable render systems. The renderer transparently
+handles window resizes and swapchain recreation, and the camera is
+driven by a WASD + QE + arrow-key keyboard controller. Model assets are
+embedded at build time from the `models/` directory and parsed by the
+C++ [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
+library through a small C-ABI shim under
+[`src/wrapper/tinyobj/`](src/wrapper/tinyobj/) — see that
+directory's [`README.md`](src/wrapper/tinyobj/README.md) for the
+C↔C++ boundary rationale.
 
 ## local development
 
@@ -39,7 +45,7 @@ of the `build test` workflow.
 ### lines of code
 
 ```
-nix develop --command cloc src shaders
+nix develop --command cloc src shaders models
 ```
 
 ## resources

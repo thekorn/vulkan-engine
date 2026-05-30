@@ -16,10 +16,22 @@
   - Shaders are discovered by walking `shaders/` via `std.Io.Dir` (Zig 0.16 std.Io API)
   - Compiled outputs are added as anonymous module imports and embedded via `@embedFile` in `main.zig`
   - Located in `compileAllShaders()` function
+- **Model Asset Embedding:** Wavefront `.obj` files under `models/`
+  are added as anonymous module imports keyed by their basename (e.g.
+  `smooth_vase.obj`), so call sites can use `@embedFile`. Located in
+  the `embedAllModels()` function.
 - **System Library Linking:**
   - `glfw3` - Window and input management
   - `vulkan` - Vulkan API
   - `gl` - On Linux only
+- **OBJ Loader Dependency:** [tinyobjloader-c](https://github.com/syoyo/tinyobjloader-c)
+  is a single-header C99 library, vendored via `build.zig.zon` (no
+  system package required). `build.zig` adds the dependency's root
+  to the include path and compiles a one-line stub
+  (`src/wrapper/tinyobj/tinyobj_loader_c_impl.c`) that defines
+  `TINYOBJ_LOADER_C_IMPLEMENTATION` before including the header so
+  the parser implementation is emitted in exactly one translation
+  unit. Only `link_libc` is needed; no C++ runtime.
 - **Test Infrastructure:** Built-in test support via `zig build test`
 
 ### Development Setup
@@ -118,8 +130,20 @@ vulkan-engine/
 │   │                        #   built via a `Builder` struct, uploaded
 │   │                        #   through a host-visible staging buffer
 │   │                        #   into a DEVICE_LOCAL buffer; defines
-│   │                        #   `Vertex` (position + color) with
-│   │                        #   binding / attribute descriptions
+│   │                        #   `Vertex` (position + color + normal + uv)
+│   │                        #   with binding / attribute descriptions.
+│   │                        #   `Builder.loadModel` parses Wavefront
+│   │                        #   OBJ data via the pure-C
+│   │                        #   tinyobjloader-c library (vendored via
+│   │                        #   `build.zig.zon`, with its single-TU
+│   │                        #   implementation compiled from
+│   │                        #   `tinyobj_loader_c_impl.c`), then
+│   │                        #   deduplicates exactly-matching vertices
+│   │                        #   in Zig with a hash map.
+│   │                        #   `createModelFromFile` is a convenience
+│   │                        #   factory that builds a `Model` from
+│   │                        #   in-memory OBJ bytes (typically
+│   │                        #   `@embedFile`'d).
 │   ├── GameObject.zig       # Renderable entity: id, optional model,
 │   │                        #   color and TransformComponent
 │   │                        #   (translation / scale / rotation -> mat4
@@ -140,10 +164,20 @@ vulkan-engine/
 │   ├── math.zig             # Linear-algebra helpers (Vec2/3/4, Mat4,
 │   │                        #   dot/cross/normalize/length/mul4) built
 │   │                        #   on Zig's `@Vector` SIMD types
+│   ├── wrapper/
+│   │   └── tinyobj/         # Single-TU compile of the vendored
+│   │       ├── README.md    #   tinyobjloader-c header. The .c file
+│   │       └── tinyobj_loader_c_impl.c
+│   │                        #   defines TINYOBJ_LOADER_C_IMPLEMENTATION
+│   │                        #   and includes the header so the parser
+│   │                        #   implementation is emitted exactly once.
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
 │   ├── shader.vert        # Vertex shader (push-constant transform, color)
 │   └── shader.frag        # Fragment shader (writes vertex color)
+├── models/                # Wavefront .obj model assets (embedded at
+│   │                      #   build time via embedAllModels())
+│   └── smooth_vase.obj    # Default scene model
 ├── test_runner.zig        # Custom Zig test runner
 └── zig-out/               # Build output directory (generated)
 ```
@@ -231,10 +265,9 @@ FirstApp.zig (Application root)
        against the new render pass and the frame is skipped.
     8. `vkDeviceWaitIdle` before returning so the GPU is finished with
        everything before resources are destroyed.
-  - `createCubeModel()` / `loadGameObjects()` - Temporary helpers
-    that build a single colored cube `Model` (24 unique vertices + 36
-    indices, drawn with `vkCmdDrawIndexed`) and wrap it in a
-    `GameObject`.
+  - `loadGameObjects()` - Loads the embedded `smooth_vase.obj` via
+    `Model.createModelFromFile` and wraps it in a single `GameObject`
+    (translation `{0, 0, 2.5}`, uniform scale `3.0`).
 
 #### **Window.zig** - GLFW Window Management
 
@@ -428,22 +461,48 @@ FirstApp.zig (Application root)
 
 - **Purpose:** Encapsulates a Vulkan vertex buffer and an optional
   index buffer, and exposes a Zig `Vertex` type matching the shader
-  inputs.
+  inputs. Delegates OBJ parsing to the pure-C
+  [tinyobjloader-c](https://github.com/syoyo/tinyobjloader-c) library
+  (vendored via `build.zig.zon`; see `src/wrapper/tinyobj/` for the
+  one-line `.c` file that compiles its implementation).
 - **Vertex Layout:**
   - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
   - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
+  - `normal: math.Vec3` at location 2 (`R32G32B32_SFLOAT`)
+  - `uv: math.Vec2` at location 3 (`R32G32_SFLOAT`)
 - **`Builder` struct:** mirrors the upstream C++ tutorial's
-  `LveModel::Builder` and bundles the vertex / index slices used to
-  construct a `Model`. `indices` may be empty, in which case the
-  model falls back to non-indexed drawing via `vkCmdDraw`.
+  `LveModel::Builder`. Owns its `vertices: ArrayList(Vertex)` and
+  `indices: ArrayList(u32)` storage; call `deinit(alloc)` once a
+  `Model` has been constructed from it. `indices` may be empty, in
+  which case the model falls back to non-indexed drawing via
+  `vkCmdDraw`.
 - **Key Functions:**
   - `Vertex.getBindingDescriptions()` / `getAttributeDescriptions()` -
     Used by `Pipeline` to wire up vertex input.
+  - `Builder.loadModel(alloc, obj_bytes)` - Calls
+    `tinyobj_parse_obj` (from `tinyobj_loader_c.h`, imported via
+    `c.zig`) with `TINYOBJ_FLAG_TRIANGULATE`. tinyobjloader-c reads
+    the OBJ through a user-supplied `file_reader_callback`; we
+    provide one that hands back the in-memory `obj_bytes` directly
+    and signals "not found" for any `.mtl` requests (this engine
+    ignores materials). The Zig side walks every triangle corner,
+    builds a `Vertex` from the flat
+    `attrib.vertices / normals / texcoords` arrays, and deduplicates
+    exactly-matching vertices via a `std.HashMapUnmanaged` keyed by
+    the raw `Vertex` bytes — mirroring the
+    `std::unordered_map<Vertex, uint32_t>` loop in `lve_model.cpp`
+    from the upstream C++ tutorial. Per-vertex colors from the
+    non-standard `v x y z r g b` extension are ignored (the C
+    parser doesn't expose them); every vertex defaults to white.
+  - `createModelFromFile(device, alloc, obj_bytes)` - Convenience
+    factory that builds a `Builder`, calls `loadModel` and returns a
+    fully-constructed `Model`. Mirrors `LveModel::createModelFromFile`
+    in the C++ tutorial.
   - `init(device, builder)` - Creates a DEVICE_LOCAL vertex buffer
-    (and, if `builder.indices.len > 0`, a DEVICE_LOCAL index buffer)
-    and uploads the data through a host-visible / host-coherent
-    staging buffer via `Device.copyBuffer`. Partial allocations are
-    released through `errdefer` on failure.
+    (and, if `builder.indices.items.len > 0`, a DEVICE_LOCAL index
+    buffer) and uploads the data through a host-visible /
+    host-coherent staging buffer via `Device.copyBuffer`. Partial
+    allocations are released through `errdefer` on failure.
   - `deinit()` - Destroys the vertex buffer and, when present, the
     index buffer; frees their memory.
   - `bind(commandBuffer)` - Bind the vertex buffer and, when present,
@@ -513,12 +572,13 @@ FirstApp.zig (Application root)
 
 - **Purpose:** C interoperability bindings.
 - **Content:**
-  - `c` - `@cImport` of `GLFW/glfw3.h` and `vulkan/vulkan_beta.h` with
-    `GLFW_INCLUDE_VULKAN` defined.
-- **Usage:** Vulkan / GLFW calls go through `c`. Math types are
-  provided by the in-tree `math.zig` module (Zig `@Vector`-based
-  `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math library is
-  required.
+  - `c` - `@cImport` of `GLFW/glfw3.h`, `vulkan/vulkan_beta.h` (with
+    `GLFW_INCLUDE_VULKAN` defined) and `tinyobj_loader_c.h` (from the
+    tinyobjloader-c dependency fetched via `build.zig.zon`).
+- **Usage:** Vulkan / GLFW / tinyobjloader-c calls go through
+  `c`. Math types are provided by the in-tree `math.zig` module (Zig
+  `@Vector`-based `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math
+  library is required.
 
 #### **math.zig** - Linear Algebra Helpers
 
@@ -748,7 +808,11 @@ a `GameObject` driven by `SimpleRenderSystem`.
 - Project name: `vulkan_engine`
 - Version: 0.0.0
 - Minimum Zig version: 0.16.0
-- Dependencies: None (using system libraries)
+- Dependencies:
+  - `tinyobjloader_c` — pinned to a specific upstream commit of
+    [tinyobjloader-c](https://github.com/syoyo/tinyobjloader-c)
+    (header-only, MIT-licensed). Other native libraries (GLFW,
+    Vulkan) are still picked up from the system / Nix shell.
 
 ### 5.2 Development Environment
 
@@ -945,10 +1009,17 @@ defer extensions.deinit(alloc);
 
 - Validation layer cleanup incomplete — debug messenger destruction is
   TODO (see `Device.deinit`).
-- Only a single hardcoded scene (one colored cube wired up in
+- Only a single hardcoded scene (one `.obj`-loaded model wired up in
   `FirstApp.loadGameObjects`).
 - No descriptor sets / uniform buffers; only push constants are used.
-- No asset loading (models / textures); geometry is built in code.
+- The shader currently consumes only `position` and `color` from the
+  `Vertex` — `normal` and `uv` are uploaded to the GPU but not yet
+  used for lighting or texturing.
+- The OBJ loader uses tinyobjloader-c directly (no hand-written
+  wrapper), but ignores materials (`mtllib` / `usemtl` /
+  `tinyobj_material_t`), only forwards the attributes consumed by
+  `Vertex`, and discards the non-standard `v x y z r g b` per-vertex
+  color extension (defaults every vertex's color to white).
 
 ### 8.3 Extension References
 
@@ -1023,7 +1094,8 @@ nix develop --command codebook-lsp lint --unique -s .
 - Enforced spell checking on docs + code via `codebook`
 
 **Current Stage:** End-to-end rendering pipeline working — `FirstApp`
-drives a `Renderer` + `SimpleRenderSystem` to draw a colored cube
-`GameObject` every frame, with swapchain recreation handled by the
-renderer. Next up: camera / view matrices, descriptor sets, indexed
-draws and asset loading.
+drives a `Renderer` + `SimpleRenderSystem` to draw a `GameObject` loaded
+from an embedded Wavefront `.obj` file (`smooth_vase.obj`) every frame,
+with swapchain recreation handled by the renderer. Next up: per-vertex
+normals consumed by the shader for diffuse lighting, descriptor sets /
+uniform buffers, and (eventually) texturing.
