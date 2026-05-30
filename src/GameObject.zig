@@ -200,12 +200,6 @@ test "GameObject.init assigns strictly increasing ids and getId matches id_t" {
         .vertexCount = 0,
         // SAFETY: not read by GameObject.init.
         .vertexBuffer = undefined,
-        // SAFETY: not read by GameObject.init.
-        .vertexBufferMemory = undefined,
-        // SAFETY: not read by GameObject.init.
-        .indexBuffer = undefined,
-        // SAFETY: not read by GameObject.init.
-        .indexBufferMemory = undefined,
     };
 
     const a = try Self.init(model, .{ 1, 0, 0 }, .{});
@@ -370,12 +364,6 @@ test "GameObject.init copies color and transform fields" {
         .vertexCount = 0,
         // SAFETY: not read by GameObject.init.
         .vertexBuffer = undefined,
-        // SAFETY: not read by GameObject.init.
-        .vertexBufferMemory = undefined,
-        // SAFETY: not read by GameObject.init.
-        .indexBuffer = undefined,
-        // SAFETY: not read by GameObject.init.
-        .indexBufferMemory = undefined,
     };
 
     const transform: TransformComponent = .{

@@ -2,8 +2,8 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const math = @import("math.zig");
-const Camera = @import("Camera.zig");
 const Device = @import("Device.zig");
+const FrameInfo = @import("FrameInfo.zig");
 const Pipeline = @import("Pipeline.zig");
 const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
@@ -86,12 +86,11 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
 
 pub fn renderGameObjects(
     self: *Self,
-    commandBuffer: c.VkCommandBuffer,
+    frameInfo: *FrameInfo,
     gameObjects: []GameObject,
-    camera: *const Camera,
 ) !void {
-    self.pipeline.?.bind(commandBuffer);
-    const projectionView = math.mul4(camera.getProjection(), camera.getView());
+    self.pipeline.?.bind(frameInfo.commandBuffer);
+    const projectionView = math.mul4(frameInfo.camera.getProjection(), frameInfo.camera.getView());
     for (gameObjects) |*obj| {
         // Skip model-less objects (e.g. the camera viewer object that
         // only carries a transform component).
@@ -105,15 +104,15 @@ pub fn renderGameObjects(
         };
 
         c.vkCmdPushConstants(
-            commandBuffer,
+            frameInfo.commandBuffer,
             self.pipelineLayout,
             c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
             @sizeOf(SimplePushConstantData),
             &push,
         );
-        obj.model.?.bind(commandBuffer);
-        obj.model.?.draw(commandBuffer);
+        obj.model.?.bind(frameInfo.commandBuffer);
+        obj.model.?.draw(frameInfo.commandBuffer);
     }
 }
 
