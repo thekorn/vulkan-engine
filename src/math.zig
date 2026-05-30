@@ -1,13 +1,13 @@
-//! Tiny linear-algebra helpers built on top of the built-in
-//! `@Vector` SIMD types.
-//!
-//! Conventions:
-//!   * `Mat4` is column-major (`[4]Vec4`) – column `c`, row `r` is
-//!     `m[c][r]`. This matches the GLSL convention used by the
-//!     shaders and the layout previously produced by the C math
-//!     library used in this project.
-//!   * Matrix multiplication `mul4(a, b)` performs `a * b` in the
-//!     usual column-major sense.
+// Tiny linear-algebra helpers built on top of the built-in
+// `@Vector` SIMD types.
+//
+// Conventions:
+//   * `Mat4` is column-major (`[4]Vec4`) – column `c`, row `r` is
+//     `m[c][r]`. This matches the GLSL convention used by the
+//     shaders and the layout previously produced by the C math
+//     library used in this project.
+//   * Matrix multiplication `mul4(a, b)` performs `a * b` in the
+//     usual column-major sense.
 
 const std = @import("std");
 
