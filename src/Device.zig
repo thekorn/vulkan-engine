@@ -196,6 +196,21 @@ pub fn createImageWithInfo(self: *Self, imageInfo: *c.VkImageCreateInfo, propert
 pub fn findMemoryType(self: *Self, typeFilter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
     var memProperties: c.VkPhysicalDeviceMemoryProperties = undefined;
     c.vkGetPhysicalDeviceMemoryProperties(self.physicalDevice, &memProperties);
+    return pickMemoryType(&memProperties, typeFilter, properties);
+}
+
+/// Pure-logic helper: pick the first memory type that:
+///   1. is enabled in `typeFilter` (a bitmask from
+///      `VkMemoryRequirements.memoryTypeBits`), and
+///   2. has all of `properties` set in its `propertyFlags`.
+///
+/// Extracted from `findMemoryType` so it can be exercised in tests
+/// without a live `VkPhysicalDevice`.
+pub fn pickMemoryType(
+    memProperties: *const c.VkPhysicalDeviceMemoryProperties,
+    typeFilter: u32,
+    properties: c.VkMemoryPropertyFlags,
+) !u32 {
     for (0..memProperties.memoryTypeCount) |i| {
         const bit: u32 = @as(u32, 1) << @intCast(i);
         if ((typeFilter & bit) != 0 and
@@ -283,4 +298,119 @@ pub fn copyBuffer(self: *Self, srcBuffer: c.VkBuffer, dstBuffer: c.VkBuffer, siz
     c.vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
     try self.endSingleTimeCommands(commandBuffer);
+}
+
+// ---------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------
+
+/// Build a `VkPhysicalDeviceMemoryProperties` populated with `types`
+/// for use in `pickMemoryType` tests. Heaps are left zeroed since the
+/// search only reads `memoryTypes[i].propertyFlags`.
+fn makeMemProps(
+    types: []const c.VkMemoryType,
+) c.VkPhysicalDeviceMemoryProperties {
+    var props: c.VkPhysicalDeviceMemoryProperties = std.mem.zeroes(c.VkPhysicalDeviceMemoryProperties);
+    props.memoryTypeCount = @intCast(types.len);
+    for (types, 0..) |t, i| props.memoryTypes[i] = t;
+    return props;
+}
+
+test "pickMemoryType returns the first matching index" {
+    const types = [_]c.VkMemoryType{
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, .heapIndex = 0 },
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, .heapIndex = 0 },
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, .heapIndex = 0 },
+    };
+    const props = makeMemProps(types[0..]);
+
+    // typeFilter selects all three types; we ask for HOST_VISIBLE|HOST_COHERENT.
+    const idx = try pickMemoryType(
+        &props,
+        0b111,
+        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    );
+    try std.testing.expectEqual(@as(u32, 1), idx);
+}
+
+test "pickMemoryType honors typeFilter and skips filtered-out types" {
+    const types = [_]c.VkMemoryType{
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, .heapIndex = 0 },
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, .heapIndex = 0 },
+    };
+    const props = makeMemProps(types[0..]);
+
+    // Only type index 1 is allowed by the filter (bit 1 set, bit 0 clear).
+    const idx = try pickMemoryType(
+        &props,
+        0b10,
+        c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    );
+    try std.testing.expectEqual(@as(u32, 1), idx);
+}
+
+test "pickMemoryType requires ALL requested property bits to be set" {
+    const types = [_]c.VkMemoryType{
+        // Has HOST_VISIBLE only — missing HOST_COHERENT, so should not match.
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, .heapIndex = 0 },
+        // Has both bits → first valid match.
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, .heapIndex = 0 },
+    };
+    const props = makeMemProps(types[0..]);
+
+    const idx = try pickMemoryType(
+        &props,
+        0b11,
+        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    );
+    try std.testing.expectEqual(@as(u32, 1), idx);
+}
+
+test "pickMemoryType returns NoSuitableMemoryTypeFound when nothing matches" {
+    const types = [_]c.VkMemoryType{
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, .heapIndex = 0 },
+    };
+    const props = makeMemProps(types[0..]);
+
+    // Ask for HOST_VISIBLE which is not present in any type.
+    try std.testing.expectError(
+        error.NoSuitableMemoryTypeFound,
+        pickMemoryType(&props, 0b1, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
+    );
+}
+
+test "pickMemoryType returns NoSuitableMemoryTypeFound for an empty type list" {
+    const props = makeMemProps(&.{});
+    try std.testing.expectError(
+        error.NoSuitableMemoryTypeFound,
+        pickMemoryType(&props, 0xFFFF, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    );
+}
+
+test "pickMemoryType with properties=0 matches the first filter-allowed type" {
+    const types = [_]c.VkMemoryType{
+        .{ .propertyFlags = 0, .heapIndex = 0 },
+        .{ .propertyFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, .heapIndex = 0 },
+    };
+    const props = makeMemProps(types[0..]);
+
+    // properties=0 means "no required bits", so the first filter-allowed
+    // type wins regardless of its flags.
+    const idx = try pickMemoryType(&props, 0b11, 0);
+    try std.testing.expectEqual(@as(u32, 0), idx);
+}
+
+test "Device has expected fields and types" {
+    const fields = @typeInfo(Self).@"struct".fields;
+    try std.testing.expectEqual(@as(usize, 10), fields.len);
+    try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
+    try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
+    try std.testing.expectEqual(bool, @FieldType(Self, "enable_validation_layers"));
+    try std.testing.expectEqual(c.VkSurfaceKHR, @FieldType(Self, "surface"));
+    try std.testing.expectEqual(Vulkan, @FieldType(Self, "vulkanInstance"));
+    try std.testing.expectEqual(c.VkPhysicalDevice, @FieldType(Self, "physicalDevice"));
+    try std.testing.expectEqual(c.VkDevice, @FieldType(Self, "globalDevice"));
+    try std.testing.expectEqual(c.VkQueue, @FieldType(Self, "graphicsQueue"));
+    try std.testing.expectEqual(c.VkQueue, @FieldType(Self, "presentQueue"));
+    try std.testing.expectEqual(c.VkCommandPool, @FieldType(Self, "commandPool"));
 }

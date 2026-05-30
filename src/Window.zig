@@ -173,3 +173,30 @@ test "Window.resetWindowResized clears the flag" {
     try std.testing.expect(!window.wasWindowResized());
     try std.testing.expect(!window.framebufferResized);
 }
+
+test "framebufferResizeCallback updates width/height and sets the resize flag" {
+    const window = try initOrSkip(std.testing.allocator, 320, 240);
+    defer window.deinit();
+
+    try std.testing.expect(!window.framebufferResized);
+    try std.testing.expectEqual(@as(i32, 320), window.width);
+    try std.testing.expectEqual(@as(i32, 240), window.height);
+
+    // GLFW would normally invoke this on a real resize event. The
+    // callback resolves the `Window` via `glfwSetWindowUserPointer`,
+    // which `Window.init` set to `self`, so calling it directly
+    // exercises the production resize path.
+    framebufferResizeCallback(window.instance, 1024, 768);
+
+    try std.testing.expect(window.framebufferResized);
+    try std.testing.expectEqual(@as(i32, 1024), window.width);
+    try std.testing.expectEqual(@as(i32, 768), window.height);
+}
+
+test "framebufferResizeCallback is a no-op when no user pointer is set" {
+    // No GLFW window at all → `glfwGetWindowUserPointer(null)` returns
+    // null, the `if (...) |ptr|` block is skipped and the callback
+    // returns without touching anything. This guards the null branch
+    // against accidental dereferences.
+    framebufferResizeCallback(null, 42, 84);
+}
