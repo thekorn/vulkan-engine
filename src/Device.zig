@@ -236,3 +236,51 @@ pub fn createBuffer(
     try checkSuccess(c.vkAllocateMemory(self.globalDevice, &allocInfo, null, bufferMemory));
     try checkSuccess(c.vkBindBufferMemory(self.globalDevice, buffer.*, bufferMemory.*, 0));
 }
+
+pub fn beginSingleTimeCommands(self: *Self) !c.VkCommandBuffer {
+    const allocInfo = c.VkCommandBufferAllocateInfo{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = self.commandPool,
+        .commandBufferCount = 1,
+    };
+
+    var commandBuffer: c.VkCommandBuffer = undefined;
+    try checkSuccess(c.vkAllocateCommandBuffers(self.globalDevice, &allocInfo, &commandBuffer));
+
+    const beginInfo = c.VkCommandBufferBeginInfo{
+        .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    try checkSuccess(c.vkBeginCommandBuffer(commandBuffer, &beginInfo));
+    return commandBuffer;
+}
+
+pub fn endSingleTimeCommands(self: *Self, commandBuffer: c.VkCommandBuffer) !void {
+    try checkSuccess(c.vkEndCommandBuffer(commandBuffer));
+
+    var cb: c.VkCommandBuffer = commandBuffer;
+    const submitInfo = c.VkSubmitInfo{
+        .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb,
+    };
+
+    try checkSuccess(c.vkQueueSubmit(self.graphicsQueue, 1, &submitInfo, null));
+    try checkSuccess(c.vkQueueWaitIdle(self.graphicsQueue));
+
+    c.vkFreeCommandBuffers(self.globalDevice, self.commandPool, 1, &cb);
+}
+
+pub fn copyBuffer(self: *Self, srcBuffer: c.VkBuffer, dstBuffer: c.VkBuffer, size: c.VkDeviceSize) !void {
+    const commandBuffer = try self.beginSingleTimeCommands();
+
+    const copyRegion = c.VkBufferCopy{
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = size,
+    };
+    c.vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    try self.endSingleTimeCommands(commandBuffer);
+}
