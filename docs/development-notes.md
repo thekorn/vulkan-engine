@@ -21,13 +21,14 @@ keep in context for orientation.
 
 - Validation layer cleanup incomplete — debug messenger destruction is
   TODO (see `Device.deinit`).
-- Only a small hardcoded scene (two `.obj`-loaded vases wired up in
-  `FirstApp.loadGameObjects`).
-- Lighting is a single directional light + constant ambient term. The
-  light direction now comes from the per-frame `GlobalUbo`, but it is
-  still set once at startup (`GlobalUbo` default) rather than driven
-  by a scene-level light list, and the ambient factor still lives
-  inside the vertex shader.
+- Only a small hardcoded scene (two `.obj`-loaded vases sitting on a
+  flat quad "floor" wired up in `FirstApp.loadGameObjects`).
+- Lighting is a single point light + constant ambient term. The
+  point-light position, color/intensity and ambient color/intensity
+  now come from the per-frame `GlobalUbo`, but the values are still
+  set once at startup (`GlobalUbo` defaults) rather than driven by a
+  scene-level light list. Lighting is still evaluated per-vertex in
+  `shader.vert` (no fragment-side shading yet).
 - The shader still ignores `uv` (uploaded to the GPU but unused), so
   there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but

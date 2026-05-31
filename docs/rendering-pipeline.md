@@ -45,11 +45,13 @@ graphics pipeline model:
   `@embedFile` in `SimpleRenderSystem.zig`.
 - Files:
   - `shader.vert` - Vertex shader. Reads the global UBO at
-    `set = 0, binding = 0` (`mat4 projectionViewMatrix` + `vec3
-    directionToLight`), then uses push constants (`mat4 modelMatrix`
-    + `mat4 normalMatrix`) to compute
-    `gl_Position = ubo.projectionViewMatrix * push.modelMatrix * vec4(position, 1)`
-    and the modulated ambient + directional diffuse vertex color.
+    `set = 0, binding = 0` (`mat4 projectionViewMatrix`,
+    `vec4 ambientLightColor` (`w` is intensity), `vec3 lightPosition`,
+    `vec4 lightColor` (`w` is intensity)), then uses push constants
+    (`mat4 modelMatrix` + `mat4 normalMatrix`) to compute the
+    world-space position, transform it into clip space, evaluate a
+    `1 / distance²` point-light attenuation against `lightPosition`
+    and write `(diffuse + ambient) * color` to `fragColor`.
   - `shader.frag` - Fragment shader (writes interpolated vertex color)
 
 ### 4. Graphics Pipeline & Render System
@@ -89,7 +91,9 @@ layout(location = 0) out vec3 fragColor;
 
 layout(set = 0, binding = 0) uniform GlobalUbo {
     mat4 projectionViewMatrix;
-    vec3 directionToLight;
+    vec4 ambientLightColor; // w is intensity
+    vec3 lightPosition;
+    vec4 lightColor; // w is light intensity
 } ubo;
 
 layout(push_constant) uniform Push {
@@ -97,15 +101,20 @@ layout(push_constant) uniform Push {
     mat4 normalMatrix;
 } push;
 
-const float AMBIENT = 0.02;
-
 void main() {
-    gl_Position = ubo.projectionViewMatrix * push.modelMatrix * vec4(position, 1.0);
+    vec4 positionWorld = push.modelMatrix * vec4(position, 1.0);
+    gl_Position = ubo.projectionViewMatrix * positionWorld;
 
     vec3 normalWorldSpace = normalize(mat3(push.normalMatrix) * normal);
-    float lightIntensity = AMBIENT + max(dot(normalWorldSpace, ubo.directionToLight), 0);
 
-    fragColor = lightIntensity * color;
+    vec3 directionToLight = ubo.lightPosition - positionWorld.xyz;
+    float attenuation = 1.0 / dot(directionToLight, directionToLight); // distance squared
+
+    vec3 lightColor = ubo.lightColor.xyz * ubo.lightColor.w * attenuation;
+    vec3 ambientLight = ubo.ambientLightColor.xyz * ubo.ambientLightColor.w;
+    vec3 diffuseLight = lightColor * max(dot(normalWorldSpace, normalize(directionToLight)), 0);
+
+    fragColor = (diffuseLight + ambientLight) * color;
 }
 ```
 
@@ -130,12 +139,14 @@ void main() {
 ### Current State
 
 Renders the two vase models (`flat_vase.obj` and `smooth_vase.obj`)
-side-by-side as `GameObject`s driven by `SimpleRenderSystem`, lit by a
-single directional light plus a small ambient term. The directional
-light direction now comes from the per-frame `GlobalUbo` (bound via
-descriptor set 0, binding 0) rather than a shader-side constant, and
-`projection * view` is applied in the shader instead of being baked
-into the push-constant transform.
+side-by-side on top of a `quad.obj` floor as `GameObject`s driven by
+`SimpleRenderSystem`, lit by a single point light plus a small
+ambient term. The point-light position, color and intensity (together
+with the ambient color/intensity) come from the per-frame `GlobalUbo`
+(bound via descriptor set 0, binding 0); the vertex shader computes a
+`1 / distance²` attenuation per vertex. `projection * view` is
+applied in the shader instead of being baked into the push-constant
+transform.
 
 ## Key Configuration Parameters
 

@@ -24,7 +24,16 @@ const ArrayList = std.ArrayList;
 /// will see once a descriptor set lands in a later tutorial.
 pub const GlobalUbo = extern struct {
     projectionView: math.Mat4 = math.identity_mat4,
-    lightDirection: math.Vec3 = math.normalize3(.{ 1.0, -3.0, -1.0 }),
+    /// `xyz` = ambient color, `w` = intensity.
+    ambientLightColor: math.Vec4 = .{ 1.0, 1.0, 1.0, 0.02 },
+    /// World-space position of the single point light.
+    lightPosition: math.Vec3 = @splat(-1.0),
+    /// `xyz` = light color, `w` = intensity. Explicit `align(16)`
+    /// mirrors the `alignas(16)` on the C++ side and guarantees the
+    /// std140 offset of 96 the shader expects (the previous `Vec3`
+    /// field is padded to 16 bytes by Zig already, but the explicit
+    /// alignment keeps the intent obvious).
+    lightColor: math.Vec4 align(16) = @splat(1.0),
 };
 
 const Self = @This();
@@ -176,6 +185,9 @@ pub fn run(self: *Self) !void {
     var camera: Camera = .{};
 
     var viewerObject = GameObject.createGameObject();
+    // Pull the camera back so the freshly-added scene (vases + floor at
+    // the origin) is in view before the user starts moving.
+    viewerObject.transform.translation[2] = -2.5;
     const cameraController: KeyboardMovementController = .{};
 
     // Use the monotonic clock from GLFW — seconds (as f64) since
@@ -196,7 +208,7 @@ pub fn run(self: *Self) !void {
 
         const aspect = self.renderer.getAspectRatio();
         // camera.setOrthographicProjection(-aspect, aspect, -1, 1, -1, 1);
-        camera.setPerspectiveProjection(std.math.degreesToRadians(50.0), aspect, 0.1, 10.0);
+        camera.setPerspectiveProjection(std.math.degreesToRadians(50.0), aspect, 0.1, 100.0);
 
         const beginResult = self.renderer.beginFrame() catch |err| switch (err) {
             // If the swapchain had to be recreated and the formats
@@ -276,7 +288,7 @@ fn loadGameObjects(self: *Self) !void {
             model,
             .{ 0, 0, 0 },
             .{
-                .translation = .{ -0.5, 0.5, 2.5 },
+                .translation = .{ -0.5, 0.5, 0.0 },
                 .scale = .{ 3.0, 1.5, 3.0 },
             },
         );
@@ -292,11 +304,31 @@ fn loadGameObjects(self: *Self) !void {
             model,
             .{ 0, 0, 0 },
             .{
-                .translation = .{ 0.5, 0.5, 2.5 },
+                .translation = .{ 0.5, 0.5, 0.0 },
                 .scale = .{ 3.0, 1.5, 3.0 },
             },
         );
         try self.gameObjects.append(self.alloc, smoothVase);
+    }
+
+    {
+        // Flat quad acting as the floor underneath the two vases. The
+        // underlying model normal is `(0, -1, 0)`, which combined with
+        // the point-light position at `(-1, -1, -1)` produces the soft
+        // diffuse highlight on the upward-facing side.
+        const obj_bytes = @embedFile("quad.obj");
+        var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
+        errdefer model.deinit();
+
+        const floor = try GameObject.init(
+            model,
+            .{ 0, 0, 0 },
+            .{
+                .translation = .{ 0.0, 0.5, 0.0 },
+                .scale = .{ 3.0, 1.0, 3.0 },
+            },
+        );
+        try self.gameObjects.append(self.alloc, floor);
     }
 }
 
