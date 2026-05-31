@@ -17,30 +17,11 @@ const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
 
-/// Per-frame uniform data uploaded to the global UBO. Mirrors
-/// `GlobalUbo` in `first_app.cpp`.
-///
-/// Stored as an `extern struct` so the field layout matches what GLSL
-/// will see once a descriptor set lands in a later tutorial.
-pub const GlobalUbo = extern struct {
-    /// Projection and view are now stored separately so the point-light
-    /// vertex shader can extract the camera basis from `view` to build
-    /// a camera-facing billboard.
-    projection: math.Mat4 = math.identity_mat4,
-    view: math.Mat4 = math.identity_mat4,
-    /// `xyz` = ambient color, `w` = intensity.
-    ambientLightColor: math.Vec4 = .{ 1.0, 1.0, 1.0, 0.02 },
-    /// World-space position of the single point light.
-    lightPosition: math.Vec3 = @splat(-1.0),
-    /// `xyz` = light color, `w` = intensity. Explicit `align(16)`
-    /// mirrors the `alignas(16)` on the C++ side and guarantees the
-    /// std140 offset (after the two `mat4`s and the `vec4` ambient
-    /// term, plus the padded `vec3` light position) the shader
-    /// expects. The previous `Vec3` field is padded to 16 bytes by
-    /// Zig already, but the explicit alignment keeps the intent
-    /// obvious.
-    lightColor: math.Vec4 align(16) = @splat(1.0),
-};
+/// Per-frame uniform data uploaded to the global UBO. Re-exported
+/// from `FrameInfo` (mirrors the upstream tutorial 25 move of
+/// `GlobalUbo` out of `first_app.cpp` and into `lve_frame_info.hpp`
+/// so render systems can mutate it from their `update()` calls).
+pub const GlobalUbo = FrameInfo.GlobalUbo;
 
 const Self = @This();
 
@@ -269,10 +250,13 @@ pub fn run(self: *Self) !void {
             // Projection and view are now stored separately so the
             // point-light vertex shader can extract the camera basis
             // from `view` to build a camera-facing billboard.
+            // `pointLightSystem.update` then fills in `pointLights[]`
+            // + `numLights` from the scene's point-light game objects.
             var ubo: GlobalUbo = .{
                 .projection = camera.getProjection(),
                 .view = camera.getView(),
             };
+            pointLightSystem.update(&frameInfo, &ubo);
             uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);
             // The UBO buffer is HOST_VISIBLE but not HOST_COHERENT, so
             // an explicit flush is required to make the host write
@@ -352,8 +336,8 @@ fn loadGameObjects(self: *Self) !void {
     {
         // Flat quad acting as the floor underneath the two vases. The
         // underlying model normal is `(0, -1, 0)`, which combined with
-        // the point-light position at `(-1, -1, -1)` produces the soft
-        // diffuse highlight on the upward-facing side.
+        // each point light's position produces the soft diffuse
+        // highlight on the upward-facing side.
         const obj_bytes = @embedFile("quad.obj");
         var model = try Model.createModelFromFile(self.device, self.alloc, obj_bytes);
         errdefer model.deinit();
@@ -367,6 +351,46 @@ fn loadGameObjects(self: *Self) !void {
             },
         );
         try self.gameObjects.put(self.alloc, floor.getId(), floor);
+    }
+
+    // Six colored point lights arranged in a circle around the
+    // origin. Mirrors the upstream tutorial 25 scene: each light's
+    // initial position is `(-1, -1, -1)` rotated around the world's
+    // Y axis by `i * 2π / N`. `PointLightSystem.update` then spins
+    // them around the same axis once per frame.
+    const lightColors = [_]math.Vec3{
+        .{ 1.0, 0.1, 0.1 },
+        .{ 0.1, 0.1, 1.0 },
+        .{ 0.1, 1.0, 0.1 },
+        .{ 1.0, 1.0, 0.1 },
+        .{ 0.1, 1.0, 1.0 },
+        .{ 1.0, 1.0, 1.0 },
+    };
+    for (lightColors, 0..) |color, i| {
+        var pointLight = GameObject.makePointLight(0.2, 0.1, .{ 1, 1, 1 });
+        pointLight.color = color;
+
+        // Rotation around axis (0, -1, 0): the upstream tutorial uses
+        // `glm::rotate(mat4(1), i * 2π / N, {0, -1, 0}) * vec4(-1, -1, -1, 1)`.
+        // For that axis the rotation matrix is
+        //   [[ cos, 0, -sin],
+        //    [   0, 1,    0],
+        //    [ sin, 0,  cos]],
+        // applied to `(-1, -1, -1)`.
+        const angle: f32 = @as(f32, @floatFromInt(i)) *
+            (2.0 * std.math.pi) / @as(f32, @floatFromInt(lightColors.len));
+        const cosA = std.math.cos(angle);
+        const sinA = std.math.sin(angle);
+        const x = -1.0;
+        const y: f32 = -1.0;
+        const z = -1.0;
+        pointLight.transform.translation = .{
+            cosA * x - sinA * z,
+            y,
+            sinA * x + cosA * z,
+        };
+
+        try self.gameObjects.put(self.alloc, pointLight.getId(), pointLight);
     }
 }
 
