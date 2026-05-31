@@ -1,2 +1,8 @@
 zig-out
 .zig-cache
+# Zig 0.16+ fetches third-party packages into a local `zig-pkg/`
+# directory next to `build.zig` (in addition to the global cache).
+zig-pkg
+# Dear ImGui writes per-user UI state (window positions, sizes, …)
+# to `imgui.ini` next to the binary at runtime.
+imgui.ini

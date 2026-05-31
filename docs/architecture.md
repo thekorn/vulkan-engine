@@ -52,6 +52,10 @@ FirstApp.zig (Application root)
     │                                 no vertex buffers, per-light
     │                                 push constants)
     │     └── Pipeline.zig
+    ├── DebugUi.zig (Dear ImGui debug overlay via cimgui:
+    │                owns the ImGuiContext, GLFW + Vulkan
+    │                backends and a dedicated descriptor pool;
+    │                beginFrame + render per frame)
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
     ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
     ├── FrameInfo.zig (per-frame context bundle)
@@ -133,6 +137,12 @@ while Loop.is_running():
   frameTime = newTime - currentTime
   currentTime = newTime
 
+  // Build this frame's Dear ImGui draw data *before* recording any
+  // Vulkan commands. `debugUi.render(cb)` below replays it inside
+  // the swapchain render pass.
+  debugUi.beginFrame()
+  igBegin("Debug"); igText("frame time: ...ms"); igEnd()
+
   cameraController.moveInPlaneXZ(window, frameTime, &viewerObject)
   camera.setViewYXZ(viewerObject.transform.translation,
                     viewerObject.transform.rotation)
@@ -163,6 +173,7 @@ while Loop.is_running():
     renderer.beginSwapChainRenderPass(cb)
     simpleRenderSystem.renderGameObjects(&frameInfo)  // iterates frameInfo.gameObjects
     pointLightSystem.render(&frameInfo)               // one 6-vertex billboard per light
+    debugUi.render(cb)                                // Dear ImGui overlay, last so it composites on top
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
   // On error.SwapChainFormatChanged → rebuild both SimpleRenderSystem
@@ -332,6 +343,17 @@ vulkan-engine/
 │   │                            #   vertices generated from gl_VertexIndex,
 │   │                            #   per-draw push constants carry
 │   │                            #   {position, color, radius}.
+│   ├── DebugUi.zig          # Dear ImGui integration (via the
+│   │                        #   `cimgui` C-ABI wrapper + ImGui's
+│   │                        #   GLFW & Vulkan backends): owns the
+│   │                        #   ImGuiContext, a dedicated descriptor
+│   │                        #   pool sized for the font / sampler /
+│   │                        #   sampled-image allocations the
+│   │                        #   backend issues, plus a
+│   │                        #   beginFrame / render pair the main
+│   │                        #   loop calls each frame. UI building
+│   │                        #   (igBegin/igText/igEnd) happens in
+│   │                        #   FirstApp.run between the two.
 │   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
 │   │                        #   VkDeviceMemory: map / unmap /
 │   │                        #   writeToBuffer / flush / invalidate

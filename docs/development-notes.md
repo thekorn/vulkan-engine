@@ -46,6 +46,19 @@ keep in context for orientation.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but
   ignores materials (`mtllib` / `usemtl`) and only forwards the
   attributes consumed by `Vertex`.
+- Dear ImGui is wired in via the `cimgui` C-ABI wrapper (pulled in
+  through `build.zig.zon` together with the upstream
+  `ocornut/imgui` source tree; see
+  [build-and-tooling.md](./build-and-tooling.md) for the build-side
+  details). [`src/DebugUi.zig`](../src/DebugUi.zig) owns the
+  `ImGuiContext` and the GLFW + Vulkan backends and exposes a
+  `beginFrame` / `render` pair the main loop calls each frame.
+  `FirstApp.run` currently builds a single "Debug" window showing
+  frame time, FPS, current frame-in-flight index, object / point-light
+  counts and the camera world-space position. There is no
+  `imgui.ini` persistence yet (window positions reset on every run)
+  and the overlay is unconditionally enabled — there is no
+  release-mode / runtime toggle to disable it.
 
 ## Extension References
 

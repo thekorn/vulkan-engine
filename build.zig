@@ -189,6 +189,75 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.linkSystemLibrary("tinyobjloader", .{});
 
+    // Dear ImGui via cimgui. cimgui is a C-ABI wrapper around the C++
+    // Dear ImGui library; it expects the upstream imgui repo as an
+    // `imgui/` subdirectory next to its own sources (this is the git
+    // submodule it normally pulls in). We fetch both via
+    // `build.zig.zon` as independent tarballs, then assemble them into
+    // one synthetic source tree with `addWriteFiles().addCopyDirectory`
+    // so the cimgui `#include "./imgui/imgui.h"` resolves naturally.
+    //
+    // cimgui also ships `cimgui_impl.cpp` / `cimgui_impl.h` which
+    // expose the Dear ImGui GLFW and Vulkan backends as C-ABI symbols
+    // when `CIMGUI_USE_GLFW` and `CIMGUI_USE_VULKAN` are defined. So
+    // we don't need a custom C++ shim like `src/wrapper/tinyobj/` —
+    // the cimgui distribution itself is the shim.
+    const cimgui_dep = b.dependency("cimgui", .{});
+    const imgui_dep = b.dependency("imgui", .{});
+    const imgui_tree = b.addWriteFiles();
+    _ = imgui_tree.addCopyDirectory(cimgui_dep.path(""), "", .{});
+    _ = imgui_tree.addCopyDirectory(imgui_dep.path(""), "imgui", .{});
+    const imgui_root = imgui_tree.getDirectory();
+
+    exe.root_module.addIncludePath(imgui_root);
+    exe.root_module.addIncludePath(imgui_root.path(b, "imgui"));
+    exe.root_module.addIncludePath(imgui_root.path(b, "imgui/backends"));
+    exe.root_module.addCSourceFiles(.{
+        .root = imgui_root,
+        .files = &.{
+            // cimgui itself: the auto-generated C-ABI wrapper around
+            // every Dear ImGui function plus the backend bindings.
+            "cimgui.cpp",
+            "cimgui_impl.cpp",
+            // Core Dear ImGui sources. `imgui_demo.cpp` is included so
+            // the demo window is available for ad-hoc exploration.
+            "imgui/imgui.cpp",
+            "imgui/imgui_draw.cpp",
+            "imgui/imgui_demo.cpp",
+            "imgui/imgui_tables.cpp",
+            "imgui/imgui_widgets.cpp",
+            // Platform / renderer backends. Their C declarations come
+            // out of `cimgui_impl.h` (which we read from Zig).
+            "imgui/backends/imgui_impl_glfw.cpp",
+            "imgui/backends/imgui_impl_vulkan.cpp",
+        },
+        .flags = &.{
+            "-std=c++17",
+            "-fno-exceptions",
+            "-fno-rtti",
+            "-DCIMGUI_USE_GLFW",
+            "-DCIMGUI_USE_VULKAN",
+            // Force the Dear ImGui backend functions
+            // (`imgui_impl_glfw.cpp`, `imgui_impl_vulkan.cpp`) to be
+            // declared and defined with C linkage so they match the
+            // `extern "C"` declarations that cimgui_impl.h emits for
+            // them. Otherwise the C++ compiler reports "different
+            // language linkage" errors when cimgui_impl.cpp pulls in
+            // both headers. Mirrors what the upstream cimgui CMake
+            // build does.
+            "-DIMGUI_IMPL_API=extern \"C\"",
+            // `IMGUI_IMPL_API=extern "C"` also forces the *backend*
+            // headers to use C linkage, which cannot tolerate the C++
+            // function overload `ImGui_ImplVulkan_AddTexture(VkSampler,
+            // VkImageView, VkImageLayout)` that Dear ImGui keeps around
+            // as an obsolete shim. Disabling the obsolete-functions
+            // block hides that second declaration entirely. The
+            // current `ImGui_ImplVulkan_AddTexture(VkImageView,
+            // VkImageLayout)` is still available.
+            "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS",
+        },
+    });
+
     if (target.result.os.tag == .linux) {
         exe.root_module.linkSystemLibrary("gl", .{});
     }

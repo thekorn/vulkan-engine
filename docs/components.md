@@ -387,6 +387,54 @@ big-picture data flow see [architecture.md](./architecture.md).
 - Embeds `point_light.vert.spv` / `point_light.frag.spv` via
   `@embedFile`.
 
+## `DebugUi.zig` — Dear ImGui Debug Overlay (via cimgui)
+
+- **Purpose:** Thin Zig wrapper around the Dear ImGui Vulkan + GLFW
+  backends consumed through the auto-generated C-ABI wrapper from
+  `cimgui` (see `build.zig` for how `cimgui` and the upstream
+  `ocornut/imgui` source are pulled in via `build.zig.zon` and
+  stitched together with `addWriteFiles`). Owns the global
+  `ImGuiContext`, the GLFW + Vulkan backends and a dedicated
+  descriptor pool sized for the
+  `VK_DESCRIPTOR_TYPE_SAMPLER` /
+  `VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE` /
+  `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` allocations the Vulkan
+  backend issues (the engine's `FirstApp.globalPool` only holds
+  `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` slots, so a dedicated pool
+  here keeps the two concerns cleanly separated).
+- **Fields:** `device: *Device`,
+  `descriptorPool: c.VkDescriptorPool`,
+  `context: ?*c.ImGuiContext`.
+- **Key Functions:**
+  - `init(alloc, device, window, renderPass, imageCount)` - Creates
+    the descriptor pool, the ImGui context (`igCreateContext`) and
+    initializes the GLFW (`ImGui_ImplGlfw_InitForVulkan`) and Vulkan
+    (`ImGui_ImplVulkan_Init`) backends against the swap-chain render
+    pass. `install_callbacks = true` chains the ImGui input
+    callbacks on top of any previously-installed GLFW callbacks;
+    `Window` only sets the framebuffer-resize callback (which ImGui
+    leaves untouched), so the existing resize-handling path keeps
+    working.
+  - `deinit()` - Calls `vkDeviceWaitIdle`, then shuts the two
+    backends down, destroys the context and the descriptor pool.
+  - `beginFrame()` - Calls the three `NewFrame` functions
+    (`ImGui_ImplVulkan_NewFrame`, `ImGui_ImplGlfw_NewFrame`,
+    `igNewFrame`). Must be called once per main-loop tick *before*
+    any `igBegin` / `igText` / `igEnd` calls.
+  - `render(commandBuffer)` - Calls `igRender` to finalize the
+    current frame's draw data and then `ImGui_ImplVulkan_RenderDrawData`
+    to record the resulting commands into `commandBuffer`. Must be
+    called inside an active render pass that targets the swap-chain
+    image (i.e. between `Renderer.beginSwapChainRenderPass` and
+    `Renderer.endSwapChainRenderPass`). `FirstApp.run` does this
+    last in the render pass so the overlay composites on top of the
+    scene (including the alpha-blended point-light billboards).
+  - `text(buf, fmt, args)` - Convenience wrapper around
+    `igTextUnformatted` that lets callers use Zig-style formatting.
+    The formatted string is written into the caller-supplied stack
+    buffer; on overflow the line is truncated silently. `FirstApp.run`
+    reuses a single 256-byte buffer across the whole frame.
+
 ## `Buffer.zig` — VkBuffer + Memory Wrapper
 
 - **Purpose:** Bundles a `VkBuffer`, its backing `VkDeviceMemory`, the
@@ -664,12 +712,16 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Purpose:** C interoperability bindings.
 - **Content:**
   - `c` - `@cImport` of `GLFW/glfw3.h`, `vulkan/vulkan_beta.h` (with
-    `GLFW_INCLUDE_VULKAN` defined) and the in-tree
-    `tinyobj_wrapper.h`.
-- **Usage:** Vulkan / GLFW / tinyobjloader-wrapper calls go through
-  `c`. Math types are provided by the in-tree `math.zig` module (Zig
-  `@Vector`-based `Vec2`/`Vec3`/`Vec4` and `Mat4`); no external math
-  library is required.
+    `GLFW_INCLUDE_VULKAN` defined), the in-tree `tinyobj_wrapper.h`,
+    and the cimgui `cimgui.h` + `cimgui_impl.h` headers (with
+    `CIMGUI_DEFINE_ENUMS_AND_STRUCTS` /
+    `CIMGUI_USE_GLFW` / `CIMGUI_USE_VULKAN` defined to emit the C
+    struct + enum bodies and gate the GLFW + Vulkan backend
+    declarations).
+- **Usage:** Vulkan / GLFW / tinyobjloader-wrapper / Dear ImGui
+  calls go through `c`. Math types are provided by the in-tree
+  `math.zig` module (Zig `@Vector`-based `Vec2`/`Vec3`/`Vec4` and
+  `Mat4`); no external math library is required.
 
 ## `math.zig` — Linear Algebra Helpers
 

@@ -24,7 +24,16 @@ quick commands live in the top-level `AGENTS.md`.
 - **Minimum Version:** 0.16.0
 - **Files:**
   - `build.zig` - Main build configuration
-  - `build.zig.zon` - Zig dependency manifest (currently has no external dependencies)
+  - `build.zig.zon` - Zig dependency manifest. Pulls in:
+    - `cimgui` (`https://github.com/cimgui/cimgui`) — auto-generated
+      C-ABI wrapper around Dear ImGui, plus C-ABI bindings for the
+      GLFW + Vulkan backends (`cimgui_impl.cpp` / `cimgui_impl.h`).
+    - `imgui` (`https://github.com/ocornut/imgui`) — the Dear ImGui
+      source tree itself. cimgui normally pulls this in as a git
+      submodule; we fetch it as a separate tarball and then
+      assemble both into a synthetic source tree via
+      `b.addWriteFiles().addCopyDirectory(...)` so the
+      `#include "./imgui/imgui.h"` lines inside cimgui resolve.
 
 ### Build Features
 
@@ -42,11 +51,25 @@ quick commands live in the top-level `AGENTS.md`.
   - `tinyobjloader` - Wavefront OBJ loader (used through a small
     C-ABI wrapper compiled from `src/wrapper/tinyobj/tinyobj_wrapper.cpp`)
   - `gl` - On Linux only
-- **C++ Wrapper Compilation:** `build.zig` compiles
-  `src/wrapper/tinyobj/tinyobj_wrapper.cpp` (a thin C-ABI wrapper
-  around the C++ tinyobjloader API; see
-  `src/wrapper/tinyobj/README.md` for the rationale) as part of the
-  executable, enabling `link_libc` + `link_libcpp` on every platform.
+- **C++ Wrapper Compilation:** `build.zig` compiles two C++ surfaces
+  into the executable, with `link_libc` + `link_libcpp` enabled on
+  every platform:
+  - `src/wrapper/tinyobj/tinyobj_wrapper.cpp` — a thin C-ABI wrapper
+    around the C++ tinyobjloader API (see
+    `src/wrapper/tinyobj/README.md` for the rationale).
+  - cimgui + Dear ImGui (`cimgui.cpp`, `cimgui_impl.cpp`,
+    `imgui/imgui.cpp`, `imgui/imgui_draw.cpp`,
+    `imgui/imgui_demo.cpp`, `imgui/imgui_tables.cpp`,
+    `imgui/imgui_widgets.cpp`, `imgui/backends/imgui_impl_glfw.cpp`,
+    `imgui/backends/imgui_impl_vulkan.cpp`) — fetched as remote
+    `build.zig.zon` dependencies and assembled into a single
+    synthetic source tree via `b.addWriteFiles()` before compilation.
+    Compiled with `-DCIMGUI_USE_GLFW`, `-DCIMGUI_USE_VULKAN`,
+    `-DIMGUI_IMPL_API=extern "C"` (so the backend C++ functions get
+    C linkage that matches the `extern "C"` declarations in
+    `cimgui_impl.h`) and `-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS` (to
+    suppress a single legacy `ImGui_ImplVulkan_AddTexture` overload
+    that C linkage cannot represent).
 - **Test Infrastructure:** Built-in test support via `zig build test`
 
 ### Build Commands
@@ -215,8 +238,11 @@ nix develop --command zlint src/*
 
 **.gitignore**
 
-- Ignores: `zig-out/`, `.zig-cache/`, `*.cpp`, `*.hpp`
-- Allows: source code, build files, configuration
+- Ignores: `zig-out/`, `.zig-cache/`, `zig-pkg/` (Zig 0.16+ local
+  package fetch cache, populated by `build.zig.zon` deps such as
+  cimgui / Dear ImGui)
+- Allows: source code (including the in-tree `*.cpp` / `*.h`
+  wrapper under `src/wrapper/tinyobj/`), build files, configuration
 
 ## Build Config Files (summary)
 

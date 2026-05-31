@@ -4,6 +4,7 @@ const c = @import("c.zig").c;
 const math = @import("math.zig");
 const Buffer = @import("Buffer.zig");
 const Camera = @import("Camera.zig");
+const DebugUi = @import("DebugUi.zig");
 const Descriptors = @import("Descriptors.zig");
 const Device = @import("Device.zig");
 const FrameInfo = @import("FrameInfo.zig");
@@ -181,6 +182,20 @@ pub fn run(self: *Self) !void {
     );
     defer pointLightSystem.deinit();
 
+    // Dear ImGui debug overlay. Built against the same swapchain
+    // render pass as the rest of the scene, so its draw calls slot
+    // into the existing render-pass scope after the point-light
+    // billboards (matching the order the upstream Little Vulkan
+    // Engine tutorial uses for its ImGui sample).
+    var debugUi = try DebugUi.init(
+        self.alloc,
+        self.device,
+        self.window,
+        self.renderer.getSwapChainRenderPass(),
+        @intCast(self.renderer.swapChain.?.swapChainImages.len),
+    );
+    defer debugUi.deinit();
+
     var camera: Camera = .{};
 
     var viewerObject = GameObject.createGameObject();
@@ -195,12 +210,36 @@ pub fn run(self: *Self) !void {
     // 0.16.
     var currentTime: f64 = c.glfwGetTime();
 
+    // Scratch buffer for `DebugUi.text` lines; one allocation reused
+    // across every frame to avoid per-frame heap traffic.
+    var debugText: [256]u8 = undefined;
+
     while (self.loop.is_running()) {
         c.glfwPollEvents();
 
         const newTime: f64 = c.glfwGetTime();
         const frameTime: f32 = @floatCast(newTime - currentTime);
         currentTime = newTime;
+
+        // Build this frame's ImGui draw data *before* recording any
+        // Vulkan commands. The matching `debugUi.render(cb)` call
+        // below replays the draw data into the swapchain render pass.
+        debugUi.beginFrame();
+        {
+            _ = c.igBegin("Debug", null, 0);
+            debugUi.text(&debugText, "frame time: {d:.2} ms", .{frameTime * 1000.0});
+            debugUi.text(&debugText, "fps: {d:.1}", .{1.0 / frameTime});
+            debugUi.text(&debugText, "frame index: {d}", .{self.renderer.currentFrameIndex});
+            debugUi.text(&debugText, "objects: {d}", .{self.gameObjects.count()});
+            debugUi.text(&debugText, "point lights: {d}", .{countPointLights(&self.gameObjects)});
+            const camPos = viewerObject.transform.translation;
+            debugUi.text(
+                &debugText,
+                "camera: ({d:.2}, {d:.2}, {d:.2})",
+                .{ camPos[0], camPos[1], camPos[2] },
+            );
+            c.igEnd();
+        }
 
         cameraController.moveInPlaneXZ(self.window.instance, frameTime, &viewerObject);
         camera.setViewYXZ(viewerObject.transform.translation, viewerObject.transform.rotation);
@@ -268,6 +307,11 @@ pub fn run(self: *Self) !void {
             self.renderer.beginSwapChainRenderPass(commandBuffer);
             try simpleRenderSystem.renderGameObjects(&frameInfo);
             pointLightSystem.render(&frameInfo);
+            // ImGui must be the *last* thing recorded inside the swap-
+            // chain render pass so its draw commands composite on top
+            // of the rendered scene (including the alpha-blended
+            // point-light billboards).
+            debugUi.render(commandBuffer);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
@@ -393,6 +437,19 @@ fn loadGameObjects(self: *Self) !void {
 
         try self.gameObjects.put(self.alloc, pointLight.getId(), pointLight);
     }
+}
+
+/// Count how many entries in `objects` carry a `PointLightComponent`.
+/// Used by the debug overlay to surface the active light count
+/// without having to peek at `GlobalUbo.numLights` (which is filled
+/// in by `PointLightSystem.update` *after* the overlay is built).
+fn countPointLights(objects: *const GameObject.Map) usize {
+    var n: usize = 0;
+    var it = objects.valueIterator();
+    while (it.next()) |obj| if (obj.pointLight != null) {
+        n += 1;
+    };
+    return n;
 }
 
 test "FirstApp default window dimensions are 800x600" {

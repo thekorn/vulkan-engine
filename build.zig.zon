@@ -3,7 +3,16 @@
     .version = "0.0.0",
     .fingerprint = 0xd8cbed5931f8e0a3,
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .cimgui = .{
+            .url = "git+https://github.com/cimgui/cimgui.git#d298666861ebf00dcfeb2407409931c04e47e33c",
+            .hash = "N-V-__8AAIqgOgBZESlEB5Dt2VuGDOUqaSNfQN1mWsVUjo6o",
+        },
+        .imgui = .{
+            .url = "https://github.com/ocornut/imgui/archive/8936b58fe26e8c3da834b8f60b06511d537b4c63.tar.gz",
+            .hash = "N-V-__8AAKBCdwB2ORnA19yAaaCihr6odBLQztrMOoCs8Q7s",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

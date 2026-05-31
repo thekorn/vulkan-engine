@@ -30,5 +30,6 @@ test {
     _ = @import("Camera.zig");
     _ = @import("GameObject.zig");
     _ = @import("KeyboardMovementController.zig");
+    _ = @import("DebugUi.zig");
     _ = @import("FirstApp.zig");
 }
