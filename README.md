@@ -45,7 +45,7 @@ of the `build test` workflow.
 ### lines of code
 
 ```
-nix develop --command cloc src shaders models
+nix develop --command cloc src shaders models docs
 ```
 
 ## resources
