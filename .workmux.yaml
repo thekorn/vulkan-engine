@@ -148,7 +148,7 @@ agent: amp
 #   - cargo test
 #   - cargo clippy -- -D warnings
 pre_merge:
-  - "<global>"
+  - <global>
   - nix develop --command zig build test
 
 # Commands to run before worktree removal (during merge or remove).
