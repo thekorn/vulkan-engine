@@ -16,7 +16,7 @@ pipelineLayout: c.VkPipelineLayout,
 
 pub const SimplePushConstantData = extern struct {
     /// Per-object model-to-world matrix. The shader multiplies this by
-    /// `ubo.projectionViewMatrix` to get the final clip-space transform.
+    /// `ubo.projection * ubo.view` to get the final clip-space transform.
     modelMatrix: math.Mat4 = math.identity_mat4,
     // `normalMatrix` is stored as a `Mat4` (rather than a `Mat3`) so
     // that the std140 push-constant layout matches the GLSL side

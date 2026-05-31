@@ -44,31 +44,51 @@ graphics pipeline model:
 - Runtime: SPIR-V is added as anonymous module imports and embedded via
   `@embedFile` in `SimpleRenderSystem.zig`.
 - Files:
-  - `shader.vert` - Vertex shader. Reads only
-    `ubo.projectionViewMatrix` from the global UBO at
-    `set = 0, binding = 0`, then uses push constants
-    (`mat4 modelMatrix` + `mat4 normalMatrix`) to compute the
-    world-space position (passed through as `fragPosWorld`), the
-    world-space normal (`fragNormalWorld = normalize(mat3(normalMatrix) * normal)`)
-    and the clip-space `gl_Position`. The raw vertex `color` is
-    forwarded unchanged as `fragColor` — lighting is no longer
-    evaluated here.
-  - `shader.frag` - Fragment shader. Reads the full global UBO
-    (`mat4 projectionViewMatrix`, `vec4 ambientLightColor` (`w` is
-    intensity), `vec3 lightPosition`, `vec4 lightColor` (`w` is
-    intensity)) at `set = 0, binding = 0`. Using the interpolated
-    `fragPosWorld` and `fragNormalWorld`, it computes a per-pixel
-    point-light contribution with a `1 / distance²` attenuation,
-    adds the ambient term and writes `(diffuse + ambient) * fragColor`
-    to `outColor`.
+  - `shader.vert` - Vertex shader for `SimpleRenderSystem`. Reads
+    `ubo.projection` and `ubo.view` (now stored separately) from
+    the global UBO at `set = 0, binding = 0`, then uses push
+    constants (`mat4 modelMatrix` + `mat4 normalMatrix`) to compute
+    the world-space position (passed through as `fragPosWorld`),
+    the world-space normal
+    (`fragNormalWorld = normalize(mat3(normalMatrix) * normal)`)
+    and the clip-space `gl_Position = projection * view * positionWorld`.
+    The raw vertex `color` is forwarded unchanged as `fragColor` —
+    lighting is no longer evaluated here.
+  - `shader.frag` - Fragment shader for `SimpleRenderSystem`. Reads
+    the full global UBO (`mat4 projection`, `mat4 view`,
+    `vec4 ambientLightColor` (`w` is intensity), `vec3 lightPosition`,
+    `vec4 lightColor` (`w` is intensity)) at `set = 0, binding = 0`.
+    Using the interpolated `fragPosWorld` and `fragNormalWorld`, it
+    computes a per-pixel point-light contribution with a
+    `1 / distance²` attenuation, adds the ambient term and writes
+    `(diffuse + ambient) * fragColor` to `outColor`.
+  - `point_light.vert` - Vertex shader for `PointLightSystem`. Takes
+    no vertex input; emits the six corners of a screen-aligned quad
+    from `OFFSETS[gl_VertexIndex]`. Extracts the camera right /
+    up vectors from the columns of `ubo.view`, scales them by
+    `LIGHT_RADIUS` and offsets `ubo.lightPosition` to place a
+    camera-facing billboard at the light's world position, then
+    transforms it by `ubo.projection * ubo.view`. Forwards the
+    quad-local `fragOffset` to the fragment shader.
+  - `point_light.frag` - Fragment shader for `PointLightSystem`.
+    Discards pixels with `length(fragOffset) >= 1.0` (so the quad is
+    rasterized as a disc) and writes `vec4(ubo.lightColor.xyz, 1.0)`
+    everywhere else.
 
-### 4. Graphics Pipeline & Render System
+### 4. Graphics Pipeline & Render Systems
 
-- Location: `Pipeline.zig` + `SimpleRenderSystem.zig`
+- Location: `Pipeline.zig` + `SimpleRenderSystem.zig` + `PointLightSystem.zig`
 - `Pipeline` owns the shader modules and the `VkPipeline`.
-- `SimpleRenderSystem` owns the `VkPipelineLayout` (with one push
-  constant range covering `SimplePushConstantData`) and the `Pipeline`,
-  and is built against a render pass obtained from `Renderer`.
+- `PipelineConfigInfo` now carries the vertex
+  binding / attribute description slices so render systems can
+  override them. Defaults point at `Model.Vertex`'s single binding.
+- `SimpleRenderSystem` owns a `VkPipelineLayout` (with one push
+  constant range covering `SimplePushConstantData`) and a `Pipeline`,
+  built against a render pass obtained from `Renderer`.
+- `PointLightSystem` owns a separate `VkPipelineLayout` (no push
+  constants, just the global descriptor set at set 0) and a
+  `Pipeline` built with empty binding / attribute descriptions so
+  Vulkan accepts a draw with no vertex buffers bound.
 
 ### 5. Frame Rendering
 
@@ -80,6 +100,9 @@ graphics pipeline model:
   pipeline, binds the per-frame global descriptor set, then iterates
   `frameInfo.gameObjects.valueIterator()`, uploading push constants
   and issuing draws per `GameObject` via its `Model`.
+- `PointLightSystem.render(&frameInfo)` then binds its own pipeline
+  and the same global descriptor set and issues a single 6-vertex
+  draw (no vertex/index buffers).
 - `endSwapChainRenderPass` + `endFrame` submit the command buffer and
   present. Swapchain recreation is handled transparently; if the
   format changes, `Renderer` returns `error.SwapChainFormatChanged` so
@@ -102,7 +125,8 @@ layout(location = 1) out vec3 fragPosWorld;
 layout(location = 2) out vec3 fragNormalWorld;
 
 layout(set = 0, binding = 0) uniform GlobalUbo {
-    mat4 projectionViewMatrix;
+    mat4 projection;
+    mat4 view;
     vec4 ambientLightColor; // w is intensity
     vec3 lightPosition;
     vec4 lightColor; // w is light intensity
@@ -115,7 +139,7 @@ layout(push_constant) uniform Push {
 
 void main() {
     vec4 positionWorld = push.modelMatrix * vec4(position, 1.0);
-    gl_Position = ubo.projectionViewMatrix * positionWorld;
+    gl_Position = ubo.projection * ubo.view * positionWorld;
     fragNormalWorld = normalize(mat3(push.normalMatrix) * normal);
     fragPosWorld = positionWorld.xyz;
     fragColor = color;
@@ -134,7 +158,8 @@ layout (location = 2) in vec3 fragNormalWorld;
 layout (location = 0) out vec4 outColor;
 
 layout(set = 0, binding = 0) uniform GlobalUbo {
-    mat4 projectionViewMatrix;
+    mat4 projection;
+    mat4 view;
     vec4 ambientLightColor; // w is intensity
     vec3 lightPosition;
     vec4 lightColor; // w is light intensity
@@ -156,22 +181,95 @@ void main() {
 }
 ```
 
+### Point-Light Vertex Shader (`point_light.vert`)
+
+```glsl
+#version 450
+
+const vec2 OFFSETS[6] = vec2[](
+  vec2(-1.0, -1.0),
+  vec2(-1.0,  1.0),
+  vec2( 1.0, -1.0),
+  vec2( 1.0, -1.0),
+  vec2(-1.0,  1.0),
+  vec2( 1.0,  1.0)
+);
+
+layout (location = 0) out vec2 fragOffset;
+
+layout(set = 0, binding = 0) uniform GlobalUbo {
+    mat4 projection;
+    mat4 view;
+    vec4 ambientLightColor;
+    vec3 lightPosition;
+    vec4 lightColor;
+} ubo;
+
+const float LIGHT_RADIUS = 0.05;
+
+void main() {
+    fragOffset = OFFSETS[gl_VertexIndex];
+    vec3 cameraRightWorld = vec3(ubo.view[0][0], ubo.view[1][0], ubo.view[2][0]);
+    vec3 cameraUpWorld    = vec3(ubo.view[0][1], ubo.view[1][1], ubo.view[2][1]);
+
+    vec3 positionWorld = ubo.lightPosition.xyz
+        + LIGHT_RADIUS * fragOffset.x * cameraRightWorld
+        + LIGHT_RADIUS * fragOffset.y * cameraUpWorld;
+
+    gl_Position = ubo.projection * ubo.view * vec4(positionWorld, 1.0);
+}
+```
+
+### Point-Light Fragment Shader (`point_light.frag`)
+
+```glsl
+#version 450
+
+layout (location = 0) in vec2 fragOffset;
+layout (location = 0) out vec4 outColor;
+
+layout(set = 0, binding = 0) uniform GlobalUbo {
+    mat4 projection;
+    mat4 view;
+    vec4 ambientLightColor;
+    vec3 lightPosition;
+    vec4 lightColor;
+} ubo;
+
+void main() {
+    float dis = sqrt(dot(fragOffset, fragOffset));
+    if (dis >= 1.0) {
+        discard;
+    }
+    outColor = vec4(ubo.lightColor.xyz, 1.0);
+}
+```
+
 ### Current State
 
 Renders the two vase models (`flat_vase.obj` and `smooth_vase.obj`)
 side-by-side on top of a `quad.obj` floor as `GameObject`s — now
 stored in a `GameObject.Map` keyed by id and iterated by
 `SimpleRenderSystem` via `frameInfo.gameObjects.valueIterator()` —
-lit by a single point light plus a small ambient term. The
-point-light position, color and intensity (together with the ambient
-color/intensity) come from the per-frame `GlobalUbo` (bound via
-descriptor set 0, binding 0 with `VK_SHADER_STAGE_ALL_GRAPHICS` so
-both shader stages can read it). The vertex shader only computes
-clip-space position + world-space normal/position; the **fragment
-shader** now evaluates the `1 / distance²` point-light attenuation
-per pixel, producing smoother highlights than the previous
-per-vertex lighting. `projection * view` is applied in the shader
-instead of being baked into the push-constant transform.
+lit by a single point light plus a small ambient term. The point
+light itself is then drawn on top by `PointLightSystem` as a small
+camera-facing disc at its world-space position, using a 6-vertex
+billboard generated procedurally in the vertex shader (no vertex
+buffers, no push constants).
+
+`projection` and `view` are now stored separately in the per-frame
+`GlobalUbo` (bound via descriptor set 0, binding 0 with
+`VK_SHADER_STAGE_ALL_GRAPHICS`) so the point-light vertex shader
+can extract the camera basis from `view`. Together with the
+point-light position, color/intensity and ambient color/intensity
+they cover every value the shaders read from the global UBO.
+
+The vase vertex shader only computes clip-space position +
+world-space normal/position; the **fragment shader** evaluates the
+`1 / distance²` point-light attenuation per pixel, producing
+smoother highlights than the previous per-vertex lighting.
+`projection * view` is applied in the shader instead of being baked
+into the push-constant transform.
 
 ## Key Configuration Parameters
 

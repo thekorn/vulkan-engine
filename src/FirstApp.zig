@@ -9,6 +9,7 @@ const Device = @import("Device.zig");
 const FrameInfo = @import("FrameInfo.zig");
 const KeyboardMovementController = @import("KeyboardMovementController.zig");
 const Loop = @import("Loop.zig");
+const PointLightSystem = @import("PointLightSystem.zig");
 const Renderer = @import("Renderer.zig");
 const SimpleRenderSystem = @import("SimpleRenderSystem.zig");
 const Swapchain = @import("Swapchain.zig");
@@ -22,16 +23,22 @@ const GameObject = @import("GameObject.zig");
 /// Stored as an `extern struct` so the field layout matches what GLSL
 /// will see once a descriptor set lands in a later tutorial.
 pub const GlobalUbo = extern struct {
-    projectionView: math.Mat4 = math.identity_mat4,
+    /// Projection and view are now stored separately so the point-light
+    /// vertex shader can extract the camera basis from `view` to build
+    /// a camera-facing billboard.
+    projection: math.Mat4 = math.identity_mat4,
+    view: math.Mat4 = math.identity_mat4,
     /// `xyz` = ambient color, `w` = intensity.
     ambientLightColor: math.Vec4 = .{ 1.0, 1.0, 1.0, 0.02 },
     /// World-space position of the single point light.
     lightPosition: math.Vec3 = @splat(-1.0),
     /// `xyz` = light color, `w` = intensity. Explicit `align(16)`
     /// mirrors the `alignas(16)` on the C++ side and guarantees the
-    /// std140 offset of 96 the shader expects (the previous `Vec3`
-    /// field is padded to 16 bytes by Zig already, but the explicit
-    /// alignment keeps the intent obvious).
+    /// std140 offset (after the two `mat4`s and the `vec4` ambient
+    /// term, plus the padded `vec3` light position) the shader
+    /// expects. The previous `Vec3` field is padded to 16 bytes by
+    /// Zig already, but the explicit alignment keeps the intent
+    /// obvious.
     lightColor: math.Vec4 align(16) = @splat(1.0),
 };
 
@@ -185,6 +192,14 @@ pub fn run(self: *Self) !void {
     );
     defer simpleRenderSystem.deinit();
 
+    var pointLightSystem = try PointLightSystem.init(
+        self.alloc,
+        self.device,
+        self.renderer.getSwapChainRenderPass(),
+        globalSetLayout.getDescriptorSetLayout(),
+    );
+    defer pointLightSystem.deinit();
+
     var camera: Camera = .{};
 
     var viewerObject = GameObject.createGameObject();
@@ -215,13 +230,20 @@ pub fn run(self: *Self) !void {
 
         const beginResult = self.renderer.beginFrame() catch |err| switch (err) {
             // If the swapchain had to be recreated and the formats
-            // changed under us, our pipeline / render-system was built
-            // against the old render pass and is now invalid. Tear it
-            // down and rebuild it against the new render pass, then
-            // skip this frame.
+            // changed under us, our pipelines / render-systems were
+            // built against the old render pass and are now invalid.
+            // Tear them down and rebuild them against the new render
+            // pass, then skip this frame.
             error.SwapChainFormatChanged => {
                 simpleRenderSystem.deinit();
                 simpleRenderSystem = try SimpleRenderSystem.init(
+                    self.alloc,
+                    self.device,
+                    self.renderer.getSwapChainRenderPass(),
+                    globalSetLayout.getDescriptorSetLayout(),
+                );
+                pointLightSystem.deinit();
+                pointLightSystem = try PointLightSystem.init(
                     self.alloc,
                     self.device,
                     self.renderer.getSwapChainRenderPass(),
@@ -243,9 +265,13 @@ pub fn run(self: *Self) !void {
                 .gameObjects = &self.gameObjects,
             };
 
-            // update: write into this frame's dedicated UBO buffer
+            // update: write into this frame's dedicated UBO buffer.
+            // Projection and view are now stored separately so the
+            // point-light vertex shader can extract the camera basis
+            // from `view` to build a camera-facing billboard.
             var ubo: GlobalUbo = .{
-                .projectionView = math.mul4(camera.getProjection(), camera.getView()),
+                .projection = camera.getProjection(),
+                .view = camera.getView(),
             };
             uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);
             // The UBO buffer is HOST_VISIBLE but not HOST_COHERENT, so
@@ -256,11 +282,19 @@ pub fn run(self: *Self) !void {
             // render
             self.renderer.beginSwapChainRenderPass(commandBuffer);
             try simpleRenderSystem.renderGameObjects(&frameInfo);
+            pointLightSystem.render(&frameInfo);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
                     simpleRenderSystem.deinit();
                     simpleRenderSystem = try SimpleRenderSystem.init(
+                        self.alloc,
+                        self.device,
+                        self.renderer.getSwapChainRenderPass(),
+                        globalSetLayout.getDescriptorSetLayout(),
+                    );
+                    pointLightSystem.deinit();
+                    pointLightSystem = try PointLightSystem.init(
                         self.alloc,
                         self.device,
                         self.renderer.getSwapChainRenderPass(),

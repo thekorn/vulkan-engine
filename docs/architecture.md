@@ -45,6 +45,9 @@ FirstApp.zig (Application root)
     │                  framebuffers, sync, acquire/present)
     ├── SimpleRenderSystem.zig (consumes FrameInfo per frame)
     │     └── Pipeline.zig (graphics pipeline, shader modules)
+    ├── PointLightSystem.zig (camera-facing billboard for the point
+    │                         light; no vertex buffers)
+    │     └── Pipeline.zig
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
     ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
     ├── FrameInfo.zig (per-frame context bundle)
@@ -139,18 +142,22 @@ while Loop.is_running():
                            camera              = &camera,
                            globalDescriptorSet = globalDescriptorSets[frameInfo.frameIndex] }
 
-    // update: write this frame's dedicated UBO buffer in whole
-    ubo = GlobalUbo{ projectionView = camera.projection * camera.view }
+    // update: write this frame's dedicated UBO buffer in whole.
+    // Projection and view are now stored separately so the point-light
+    // vertex shader can extract the camera basis from `view` to build
+    // a camera-facing billboard.
+    ubo = GlobalUbo{ projection = camera.projection, view = camera.view }
     uboBuffers[frameInfo.frameIndex].writeToBuffer(&ubo, VK_WHOLE_SIZE, 0)
     uboBuffers[frameInfo.frameIndex].flush(VK_WHOLE_SIZE, 0)
 
     // render
     renderer.beginSwapChainRenderPass(cb)
     simpleRenderSystem.renderGameObjects(&frameInfo)  // iterates frameInfo.gameObjects
+    pointLightSystem.render(&frameInfo)               // 6-vertex billboard
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
-  // On error.SwapChainFormatChanged → rebuild SimpleRenderSystem
-  //   against the new render pass and continue.
+  // On error.SwapChainFormatChanged → rebuild both SimpleRenderSystem
+  //   and PointLightSystem against the new render pass and continue.
 
 vkDeviceWaitIdle(device)        // before deinit
 ```
@@ -214,20 +221,38 @@ defer extensions.deinit(alloc);
 ## Current Stage
 
 End-to-end rendering pipeline working — `FirstApp` drives a
-`Renderer` + `SimpleRenderSystem` to draw two embedded Wavefront
-`.obj` vases on top of a quad "floor" every frame with point-light +
-ambient lighting. Scene objects now live in a `GameObject.Map`
+`Renderer` plus two render systems each frame:
+
+1. `SimpleRenderSystem` draws two embedded Wavefront `.obj` vases on
+   top of a quad "floor" with point-light + ambient lighting.
+2. `PointLightSystem` then draws a 6-vertex camera-facing billboard
+   at the light's world-space position (a small disc rendered from
+   `gl_VertexIndex` lookups, no vertex buffers bound) so the light is
+   visible in the scene.
+
+Scene objects live in a `GameObject.Map`
 (`AutoHashMapUnmanaged(u64, GameObject)`) owned by `FirstApp`, which
-the render system iterates via a `*GameObject.Map` carried through
-`FrameInfo`. The projection-view matrix, point-light position, light
+the simple render system iterates via a `*GameObject.Map` carried
+through `FrameInfo`. The **projection** matrix, the **view** matrix
+(now stored separately so the point-light vertex shader can extract
+the camera basis from `view`), point-light position, light
 color/intensity and ambient color/intensity are all delivered
 through a per-frame global UBO bound at descriptor set 0, binding 0
-(now visible to `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment
-shader took over the lighting). Only the per-object model + normal
-matrices still travel as push constants. Lighting is now evaluated
-per-pixel in the fragment shader (smoother highlights than the
-previous per-vertex pass). Next up: a scene-level light list and
-(eventually) texturing.
+(visible to `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment
+shader took over the lighting). Only the simple render system's
+per-object model + normal matrices still travel as push constants;
+the point-light system uses no push constants — every per-frame
+value its shader needs comes from the global UBO. Lighting is
+evaluated per-pixel in the fragment shader (smoother highlights than
+the previous per-vertex pass).
+
+The `Pipeline.PipelineConfigInfo` now carries the vertex
+binding/attribute description slices (defaulting to `Model.Vertex`'s
+single binding) so render systems can override them — the
+point-light system supplies empty slices because it generates its
+vertices procedurally from `gl_VertexIndex`.
+
+Next up: a scene-level light list and (eventually) texturing.
 
 ## Project Directory Structure
 
@@ -269,6 +294,11 @@ vulkan-engine/
 │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
 │   │                          # that draws a list of GameObjects from
 │   │                          # a FrameInfo bundle
+│   ├── PointLightSystem.zig # Draws the point light as a camera-facing
+│   │                        # billboard (6 vertices generated from
+│   │                        # gl_VertexIndex, no vertex/push-constant
+│   │                        # data — light pos/color come from the
+│   │                        # global UBO)
 │   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
 │   │                        #   VkDeviceMemory: map / unmap /
 │   │                        #   writeToBuffer / flush / invalidate
@@ -325,10 +355,22 @@ vulkan-engine/
 │   │                                #   the C++/C boundary rationale.
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
-│   ├── shader.vert        # Vertex shader (push-constant transform +
-│   │                      #   normalMatrix; computes ambient + directional
-│   │                      #   diffuse lighting and writes vertex color)
-│   └── shader.frag        # Fragment shader (writes vertex color)
+│   ├── shader.vert        # Vertex shader for SimpleRenderSystem
+│   │                      #   (push-constant model + normal matrix;
+│   │                      #   passes world-space position/normal +
+│   │                      #   vertex color through to the fragment
+│   │                      #   shader)
+│   ├── shader.frag        # Fragment shader for SimpleRenderSystem
+│   │                      #   (per-pixel point-light + ambient
+│   │                      #   shading using the global UBO)
+│   ├── point_light.vert   # Vertex shader for PointLightSystem
+│   │                      #   (no vertex input; emits a 6-vertex
+│   │                      #   camera-facing quad from
+│   │                      #   gl_VertexIndex / OFFSETS lookup +
+│   │                      #   ubo.lightPosition)
+│   └── point_light.frag   # Fragment shader for PointLightSystem
+│                          #   (discards pixels outside the unit
+│                          #   disc, writes ubo.lightColor)
 ├── models/                # Wavefront .obj model assets (embedded at
 │   │                      #   build time via embedAllModels())
 │   ├── flat_vase.obj      # Default scene model (flat-shaded normals)

@@ -27,9 +27,13 @@ keep in context for orientation.
   point-light position, color/intensity and ambient color/intensity
   now come from the per-frame `GlobalUbo`, but the values are still
   set once at startup (`GlobalUbo` defaults) rather than driven by a
-  scene-level light list. Lighting is now evaluated per-pixel in
-  `shader.frag` (the vertex shader only emits world-space position
-  and normal); the next big lighting step is multiple lights.
+  scene-level light list. The point light is now also visualized on
+  screen by `PointLightSystem` as a small camera-facing disc at the
+  light's world position (drawn via a 6-vertex billboard generated
+  procedurally from `gl_VertexIndex`, no vertex buffers bound).
+  Lighting is evaluated per-pixel in `shader.frag` (the vertex
+  shader only emits world-space position and normal); the next big
+  lighting step is multiple lights.
 - The shader still ignores `uv` (uploaded to the GPU but unused), so
   there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but

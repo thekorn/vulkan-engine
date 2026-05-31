@@ -34,12 +34,14 @@ big-picture data flow see [architecture.md](./architecture.md).
     the upstream `LveGameObject::Map`).
 - **Types:**
   - `GlobalUbo` - `extern struct` mirroring the std140 layout the
-    vertex shader expects at `set = 0, binding = 0`:
-    `projectionView: Mat4`, `ambientLightColor: Vec4` (`xyz`=color,
-    `w`=intensity), `lightPosition: Vec3` (point-light world-space
-    position) and `lightColor: Vec4 align(16)` (`xyz`=color,
-    `w`=intensity). Explicit `align(16)` mirrors the `alignas(16)`
-    on the C++ side to guarantee the std140 offset of 96.
+    shaders expect at `set = 0, binding = 0`:
+    `projection: Mat4`, `view: Mat4` (split so the point-light
+    vertex shader can extract the camera basis from `view`),
+    `ambientLightColor: Vec4` (`xyz`=color, `w`=intensity),
+    `lightPosition: Vec3` (point-light world-space position) and
+    `lightColor: Vec4 align(16)` (`xyz`=color, `w`=intensity).
+    Explicit `align(16)` mirrors the `alignas(16)` on the C++ side
+    to guarantee the std140 offset the shader expects.
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer, then calls
     `loadGameObjects()`.
@@ -61,9 +63,10 @@ big-picture data flow see [architecture.md](./architecture.md).
        `globalDescriptorSets[i]` per frame in flight out of
        `self.globalPool`, each pointing at the matching `uboBuffers[i]`
        via `Descriptors.DescriptorWriter`.
-    3. Build a `SimpleRenderSystem` (passing `globalSetLayout`), a
-       `Camera`, a model-less `viewerObject` (via
-       `GameObject.createGameObject`) and a `KeyboardMovementController`.
+    3. Build a `SimpleRenderSystem` and a `PointLightSystem` (both
+       passing `globalSetLayout`), a `Camera`, a model-less
+       `viewerObject` (via `GameObject.createGameObject`) and a
+       `KeyboardMovementController`.
     4. Poll GLFW events.
     5. Compute `frameTime` (seconds) from `glfwGetTime()`.
     6. `cameraController.moveInPlaneXZ(...)` updates the viewer
@@ -73,18 +76,20 @@ big-picture data flow see [architecture.md](./architecture.md).
        updates the projection.
     8. `renderer.beginFrame()` → build a `FrameInfo` for the current
        frame (including `globalDescriptorSets[frameIndex]` and a
-       pointer to `self.gameObjects`) → write `projectionView` into
-       the current frame's UBO buffer via
+       pointer to `self.gameObjects`) → write `projection` + `view`
+       into the current frame's UBO buffer via
        `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)` →
        `beginSwapChainRenderPass` →
        `simpleRenderSystem.renderGameObjects(&frameInfo)` (which
        binds the global descriptor set once and then iterates
        `frameInfo.gameObjects.valueIterator()`, issuing a draw per
        `GameObject` with just the model + normal matrices as push
-       constants) → `endSwapChainRenderPass` → `endFrame`.
+       constants) → `pointLightSystem.render(&frameInfo)` (binds the
+       global descriptor set and issues a single 6-vertex draw with
+       no vertex buffers) → `endSwapChainRenderPass` → `endFrame`.
     9. If the swapchain has to be recreated and reports
-       `error.SwapChainFormatChanged`, the render system is rebuilt
-       against the new render pass and the frame is skipped.
+       `error.SwapChainFormatChanged`, both render systems are
+       rebuilt against the new render pass and the frame is skipped.
     10. `vkDeviceWaitIdle` before returning so the GPU is finished with
         everything before resources are destroyed.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj`,
@@ -256,7 +261,13 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Key Structures:**
   - `PipelineConfigInfo` - Complete pipeline configuration state
     (viewport / scissor info, rasterization, multisample, color blend,
-    depth/stencil, dynamic state, `renderPass`, `pipelineLayout`).
+    depth/stencil, dynamic state, `renderPass`, `pipelineLayout`)
+    plus `bindingDescriptions: []const VkVertexInputBindingDescription`
+    and `attributeDescriptions: []const VkVertexInputAttributeDescription`.
+    The defaults (set by `defaultPipelineConfigInfo`) point at
+    module-level storage backed by `Model.Vertex.get{Binding,Attribute}Descriptions()`;
+    render systems that draw without vertex buffers (e.g.
+    `PointLightSystem`) override both with `&.{}`.
 - **Key Functions:**
   - `init(alloc, device, fragSpv, vertSpv, configInfo)` - Creates the
     shader modules from embedded SPIR-V and the graphics pipeline.
@@ -299,6 +310,31 @@ big-picture data flow see [architecture.md](./architecture.md).
     command buffer, the per-frame descriptor set and the scene's
     `GameObject.Map` out of the `*FrameInfo` bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
+
+## `PointLightSystem.zig` — Point-Light Billboard Renderer
+
+- **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` that draws the
+  point light as a small camera-facing disc, so the light source is
+  visible in the scene. Mirrors `PointLightSystem` from the upstream
+  Little Vulkan Engine tutorial.
+- **No vertex buffers, no push constants:** the vertex shader
+  generates the 6 corners of a screen-aligned quad from
+  `gl_VertexIndex` indexing a constant `OFFSETS[6]` table, and reads
+  the world-space light position, the camera basis (extracted from
+  `ubo.view`) and the light color out of the global UBO. The
+  fragment shader discards pixels outside the unit disc.
+- **Key Functions:**
+  - `init(alloc, device, renderPass, globalSetLayout)` - Creates the
+    pipeline layout (one descriptor set at set 0, no push constants)
+    and the graphics pipeline against `renderPass`. The pipeline is
+    built with empty `bindingDescriptions` / `attributeDescriptions`
+    so Vulkan accepts a draw with no vertex buffers bound.
+  - `deinit()` - Destroys the pipeline and layout.
+  - `render(frameInfo)` - Binds the pipeline, calls
+    `vkCmdBindDescriptorSets` with `frameInfo.globalDescriptorSet`
+    (set = 0), then issues `vkCmdDraw(cb, 6, 1, 0, 0)`.
+- Embeds `point_light.vert.spv` / `point_light.frag.spv` via
+  `@embedFile`.
 
 ## `Buffer.zig` — VkBuffer + Memory Wrapper
 
