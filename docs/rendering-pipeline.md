@@ -2,7 +2,7 @@
 globs:
   - "shaders/**"
   - "src/Pipeline.zig"
-  - "src/SimpleRenderSystem.zig"
+  - "src/systems/**"
   - "src/Renderer.zig"
   - "src/Swapchain.zig"
   - "src/FrameInfo.zig"
@@ -42,7 +42,8 @@ graphics pipeline model:
 - Location: `build.zig` + `shaders/`
 - Build-time: `glslc` compiles every file under `shaders/` to SPIR-V.
 - Runtime: SPIR-V is added as anonymous module imports and embedded via
-  `@embedFile` in `SimpleRenderSystem.zig`.
+  `@embedFile` in `systems/SimpleRenderSystem.zig` and
+  `systems/PointLightSystem.zig`.
 - Files:
   - `shader.vert` - Vertex shader for `SimpleRenderSystem`. Reads
     `ubo.projection` and `ubo.view` (now stored separately) from
@@ -77,7 +78,7 @@ graphics pipeline model:
 
 ### 4. Graphics Pipeline & Render Systems
 
-- Location: `Pipeline.zig` + `SimpleRenderSystem.zig` + `PointLightSystem.zig`
+- Location: `Pipeline.zig` + `systems/SimpleRenderSystem.zig` + `systems/PointLightSystem.zig`
 - `Pipeline` owns the shader modules and the `VkPipeline`.
 - `PipelineConfigInfo` now carries the vertex
   binding / attribute description slices so render systems can

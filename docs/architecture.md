@@ -12,8 +12,9 @@ Layered, component-based.
 **Tier Structure:**
 
 1. **Application Layer** (`main.zig`, `FirstApp.zig`, `Loop.zig`)
-2. **Frame / Scene Layer** (`Renderer.zig`, `SimpleRenderSystem.zig`,
-   `GameObject.zig`, `Model.zig`)
+2. **Frame / Scene Layer** (`Renderer.zig`,
+   `systems/SimpleRenderSystem.zig`,
+   `systems/PointLightSystem.zig`, `GameObject.zig`, `Model.zig`)
 3. **High-Level Abstractions** (`Window.zig`, `Device.zig`,
    `Swapchain.zig`, `Pipeline.zig`)
 4. **Vulkan Core Layer** (`Vulkan.zig`)
@@ -43,10 +44,10 @@ FirstApp.zig (Application root)
     │     ↓
     │   Swapchain.zig (images, image views, depth, render pass,
     │                  framebuffers, sync, acquire/present)
-    ├── SimpleRenderSystem.zig (consumes FrameInfo per frame)
+    ├── systems/SimpleRenderSystem.zig (consumes FrameInfo per frame)
     │     └── Pipeline.zig (graphics pipeline, shader modules)
-    ├── PointLightSystem.zig (camera-facing billboard for the point
-    │                         light; no vertex buffers)
+    ├── systems/PointLightSystem.zig (camera-facing billboard for the
+    │                                 point light; no vertex buffers)
     │     └── Pipeline.zig
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
     ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
@@ -291,14 +292,16 @@ vulkan-engine/
 │   │                        #   beginFrame / beginSwapChainRenderPass /
 │   │                        #   endSwapChainRenderPass / endFrame
 │   ├── Pipeline.zig         # Graphics pipeline configuration & creation
-│   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
-│   │                          # that draws a list of GameObjects from
-│   │                          # a FrameInfo bundle
-│   ├── PointLightSystem.zig # Draws the point light as a camera-facing
-│   │                        # billboard (6 vertices generated from
-│   │                        # gl_VertexIndex, no vertex/push-constant
-│   │                        # data — light pos/color come from the
-│   │                        # global UBO)
+│   ├── systems/             # Per-frame render systems built on top of
+│   │   │                    #   Pipeline + the global descriptor set
+│   │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
+│   │   │                          # that draws a list of GameObjects from
+│   │   │                          # a FrameInfo bundle
+│   │   └── PointLightSystem.zig # Draws the point light as a camera-facing
+│   │                            # billboard (6 vertices generated from
+│   │                            # gl_VertexIndex, no vertex/push-constant
+│   │                            # data — light pos/color come from the
+│   │                            # global UBO)
 │   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
 │   │                        #   VkDeviceMemory: map / unmap /
 │   │                        #   writeToBuffer / flush / invalidate

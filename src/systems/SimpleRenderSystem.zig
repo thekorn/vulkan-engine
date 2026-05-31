@@ -1,11 +1,11 @@
 const std = @import("std");
 
-const c = @import("c.zig").c;
-const math = @import("math.zig");
-const Device = @import("Device.zig");
-const FrameInfo = @import("FrameInfo.zig");
-const Pipeline = @import("Pipeline.zig");
-const checkSuccess = @import("utils.zig").checkSuccess;
+const c = @import("../c.zig").c;
+const math = @import("../math.zig");
+const Device = @import("../Device.zig");
+const FrameInfo = @import("../FrameInfo.zig");
+const Pipeline = @import("../Pipeline.zig");
+const checkSuccess = @import("../utils.zig").checkSuccess;
 
 const Self = @This();
 

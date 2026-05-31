@@ -24,8 +24,8 @@ test {
     _ = @import("Buffer.zig");
     _ = @import("Descriptors.zig");
     _ = @import("Renderer.zig");
-    _ = @import("SimpleRenderSystem.zig");
-    _ = @import("PointLightSystem.zig");
+    _ = @import("systems/SimpleRenderSystem.zig");
+    _ = @import("systems/PointLightSystem.zig");
     _ = @import("FrameInfo.zig");
     _ = @import("Camera.zig");
     _ = @import("GameObject.zig");

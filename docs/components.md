@@ -283,7 +283,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   - Depth test enabled, `LESS` compare
   - Dynamic viewport + scissor
 
-## `SimpleRenderSystem.zig` — GameObject Renderer
+## `systems/SimpleRenderSystem.zig` — GameObject Renderer
 
 - **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` and draws a list
   of `GameObject`s using a per-frame global descriptor set plus
@@ -311,7 +311,7 @@ big-picture data flow see [architecture.md](./architecture.md).
     `GameObject.Map` out of the `*FrameInfo` bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
-## `PointLightSystem.zig` — Point-Light Billboard Renderer
+## `systems/PointLightSystem.zig` — Point-Light Billboard Renderer
 
 - **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` that draws the
   point light as a small camera-facing disc, so the light source is
