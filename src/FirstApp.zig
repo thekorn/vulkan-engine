@@ -269,6 +269,12 @@ pub fn run(self: *Self) !void {
                     self.renderer.getSwapChainRenderPass(),
                     globalSetLayout.getDescriptorSetLayout(),
                 );
+                // The ImGui Vulkan backend keeps a pipeline bound to
+                // the old (now-destroyed) render pass too — rebuild
+                // it against the new one so the next
+                // `debugUi.render(cb)` doesn't reference freed
+                // Vulkan objects.
+                try debugUi.recreate(self.renderer.getSwapChainRenderPass());
                 continue;
             },
             else => return err,
@@ -329,6 +335,10 @@ pub fn run(self: *Self) !void {
                         self.renderer.getSwapChainRenderPass(),
                         globalSetLayout.getDescriptorSetLayout(),
                     );
+                    // Same swapchain-format-change handling as on
+                    // `beginFrame` above — the ImGui pipeline needs
+                    // to be rebuilt against the new render pass.
+                    try debugUi.recreate(self.renderer.getSwapChainRenderPass());
                     continue;
                 },
                 else => return err,

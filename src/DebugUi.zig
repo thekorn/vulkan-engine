@@ -34,6 +34,15 @@ const descriptor_pool_size: u32 = 64;
 device: *Device,
 descriptorPool: c.VkDescriptorPool,
 context: ?*c.ImGuiContext,
+/// Cached graphics-queue family index. Stored so `recreate` can
+/// re-init the Vulkan backend without re-querying it (and without
+/// needing an allocator at recreate time).
+graphicsQueueFamily: u32,
+/// Cached swap-chain image count the backend was initialized with.
+/// `recreate` re-uses this value when rebuilding `initInfo`; if the
+/// image count ever changes too, the call site should pass the new
+/// value to `recreate` directly.
+imageCount: u32,
 
 pub fn init(
     alloc: std.mem.Allocator,
@@ -104,15 +113,45 @@ pub fn init(
     errdefer c.ImGui_ImplGlfw_Shutdown();
 
     // Vulkan backend. The queue family index isn't cached on `Device`,
-    // so re-query it here (the surface is owned by `Device`).
+    // so re-query it here (the surface is owned by `Device`) and
+    // store it on the struct so `recreate` can rebuild the backend
+    // later without an allocator.
     const indices = try Vulkan.findQueueFamilies(alloc, device.physicalDevice, device.surface);
+    const graphicsQueueFamily = indices.graphicsFamily.?;
 
+    try initVulkanBackend(
+        device,
+        descriptorPool,
+        graphicsQueueFamily,
+        imageCount,
+        renderPass,
+    );
+
+    return .{
+        .device = device,
+        .descriptorPool = descriptorPool,
+        .context = context,
+        .graphicsQueueFamily = graphicsQueueFamily,
+        .imageCount = imageCount,
+    };
+}
+
+/// Build a fresh `ImGui_ImplVulkan_InitInfo` and call
+/// `ImGui_ImplVulkan_Init`. Shared between `init` and `recreate` so
+/// the two call sites can't drift apart.
+fn initVulkanBackend(
+    device: *Device,
+    descriptorPool: c.VkDescriptorPool,
+    graphicsQueueFamily: u32,
+    imageCount: u32,
+    renderPass: c.VkRenderPass,
+) !void {
     var initInfo: c.ImGui_ImplVulkan_InitInfo = std.mem.zeroes(c.ImGui_ImplVulkan_InitInfo);
     initInfo.ApiVersion = c.VK_API_VERSION_1_0;
     initInfo.Instance = device.vulkanInstance.instance;
     initInfo.PhysicalDevice = device.physicalDevice;
     initInfo.Device = device.globalDevice;
-    initInfo.QueueFamily = indices.graphicsFamily.?;
+    initInfo.QueueFamily = graphicsQueueFamily;
     initInfo.Queue = device.graphicsQueue;
     initInfo.DescriptorPool = descriptorPool;
     initInfo.MinImageCount = imageCount;
@@ -124,12 +163,34 @@ pub fn init(
     if (!c.ImGui_ImplVulkan_Init(&initInfo)) {
         return error.ImGuiVulkanInitFailed;
     }
+}
 
-    return .{
-        .device = device,
-        .descriptorPool = descriptorPool,
-        .context = context,
-    };
+/// Tear down and rebuild the Vulkan backend against a new render
+/// pass. Call this after the swap chain has been recreated with a
+/// different color/depth format (`Renderer.beginFrame` /
+/// `Renderer.endFrame` return `error.SwapChainFormatChanged`). The
+/// ImGui pipeline created inside `ImGui_ImplVulkan_Init` is bound to
+/// the *old* render pass and would otherwise reference freed Vulkan
+/// objects on the next `render(commandBuffer)` call — mirroring the
+/// `SimpleRenderSystem` / `PointLightSystem` rebuild paths in
+/// `FirstApp.run`.
+///
+/// The ImGui context and the GLFW backend are preserved across the
+/// recreate so user-facing state (open windows, scroll positions,
+/// input focus) survives the swap-chain rebuild.
+pub fn recreate(self: *Self, renderPass: c.VkRenderPass) !void {
+    // Wait for the GPU so it isn't using the about-to-be-destroyed
+    // ImGui pipeline / descriptor sets when `ImGui_ImplVulkan_Shutdown`
+    // tears them down.
+    _ = c.vkDeviceWaitIdle(self.device.globalDevice);
+    c.ImGui_ImplVulkan_Shutdown();
+    try initVulkanBackend(
+        self.device,
+        self.descriptorPool,
+        self.graphicsQueueFamily,
+        self.imageCount,
+        renderPass,
+    );
 }
 
 pub fn deinit(self: *Self) void {

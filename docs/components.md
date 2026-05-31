@@ -404,7 +404,11 @@ big-picture data flow see [architecture.md](./architecture.md).
   here keeps the two concerns cleanly separated).
 - **Fields:** `device: *Device`,
   `descriptorPool: c.VkDescriptorPool`,
-  `context: ?*c.ImGuiContext`.
+  `context: ?*c.ImGuiContext`,
+  `graphicsQueueFamily: u32` (cached so `recreate` doesn't need an
+  allocator),
+  `imageCount: u32` (cached so `recreate` can rebuild the Vulkan
+  backend with the same image count the swap chain currently has).
 - **Key Functions:**
   - `init(alloc, device, window, renderPass, imageCount)` - Creates
     the descriptor pool, the ImGui context (`igCreateContext`) and
@@ -414,7 +418,20 @@ big-picture data flow see [architecture.md](./architecture.md).
     callbacks on top of any previously-installed GLFW callbacks;
     `Window` only sets the framebuffer-resize callback (which ImGui
     leaves untouched), so the existing resize-handling path keeps
-    working.
+    working. The Vulkan-backend init is split out into a private
+    `initVulkanBackend` helper so `recreate` shares the same call.
+  - `recreate(renderPass)` - Tears down and rebuilds the Vulkan
+    backend against a new render pass. Call this after the swap
+    chain has been recreated with a different color/depth format
+    (`Renderer.beginFrame` / `Renderer.endFrame` return
+    `error.SwapChainFormatChanged`); the ImGui pipeline that
+    `ImGui_ImplVulkan_Init` built is bound to the *old* render pass
+    and would otherwise reference freed Vulkan objects on the next
+    `render(commandBuffer)` call. Mirrors the
+    `SimpleRenderSystem` / `PointLightSystem` rebuild paths in
+    `FirstApp.run`. The ImGui context and the GLFW backend are
+    preserved across the recreate so user-facing state (open
+    windows, scroll positions, input focus) survives the rebuild.
   - `deinit()` - Calls `vkDeviceWaitIdle`, then shuts the two
     backends down, destroys the context and the descriptor pool.
   - `beginFrame()` - Calls the three `NewFrame` functions
