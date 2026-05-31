@@ -45,6 +45,12 @@ quick commands live in the top-level `AGENTS.md`.
   are added as anonymous module imports keyed by their basename (e.g.
   `smooth_vase.obj`), so call sites can use `@embedFile`. Located in
   the `embedAllModels()` function.
+- **Texture Asset Embedding:** Mirror of model embedding for
+  texture files under `textures/` (currently a single
+  `stonefloor01_color_rgba.ktx`). Each file is registered as an
+  anonymous import keyed by basename so `Texture.initFromKtxBytes`
+  can pull the bytes via `@embedFile`. Located in the
+  `embedAllTextures()` function.
 - **System Library Linking:**
   - `glfw3` - Window and input management
   - `vulkan` - Vulkan API

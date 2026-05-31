@@ -26,12 +26,22 @@ big-picture data flow see [architecture.md](./architecture.md).
     back-references for sub-components
   - `loop: Loop`, `renderer: Renderer`
   - `globalPool: Descriptors.DescriptorPool` - owned for the full
-    application lifetime; sized for one uniform-buffer descriptor per
-    frame in flight. Used by `run()` to allocate the per-frame global
-    descriptor sets that point at the per-frame UBO buffers.
+    application lifetime. Sized for one uniform-buffer descriptor
+    per frame in flight *plus* `MAX_TEXTURE_SETS = 8`
+    combined-image-sampler descriptors. Used by `run()` to allocate
+    both the per-frame global descriptor sets (pointing at the
+    per-frame UBO buffers) and the per-texture material descriptor
+    sets (one per unique entry in `self.textures`).
   - `gameObjects: GameObject.Map` (an
     `AutoHashMapUnmanaged(u64, GameObject)` keyed by `id_t`, matching
     the upstream `LveGameObject::Map`).
+  - `textures: StringHashMapUnmanaged(*Texture)` - heap-allocated
+    `Texture` registry populated by `loadTextures()`. Keyed by
+    `@embedFile` basename (e.g. `"stonefloor01_color_rgba.ktx"`),
+    plus a synthetic `"__default_white__"` entry used as the
+    fallback for objects without a `textureName`. The pointers are
+    stable across HashMap resizes because each `Texture` is
+    `alloc.create`-d separately.
 - **Types:**
   - `GlobalUbo` - re-exported alias of [`FrameInfo.GlobalUbo`](#frameinfozig--per-frame-render-context)
     (the real definition moved into `FrameInfo.zig` so render
@@ -42,7 +52,9 @@ big-picture data flow see [architecture.md](./architecture.md).
     mirrors the std140 block the shaders expect at
     `set = 0, binding = 0`.
 - **Key Functions:**
-  - `init(alloc)` - Wires up window → device → loop → renderer, then calls
+  - `init(alloc)` - Wires up window → device → loop → renderer,
+    builds `globalPool` (sized for UBOs + textures), calls
+    `loadTextures()` to populate `self.textures`, then
     `loadGameObjects()`.
   - `deinit()` - Tears everything down in reverse order.
   - `run()` - Main loop:
@@ -62,18 +74,30 @@ big-picture data flow see [architecture.md](./architecture.md).
        `globalDescriptorSets[i]` per frame in flight out of
        `self.globalPool`, each pointing at the matching `uboBuffers[i]`
        via `Descriptors.DescriptorWriter`.
-    3. Build a `SimpleRenderSystem` and a `PointLightSystem` (both
-       passing `globalSetLayout`), a `Camera`, a model-less
-       `viewerObject` (via `GameObject.createGameObject`) and a
+    3. Build a `textureSetLayout` (one `COMBINED_IMAGE_SAMPLER`
+       binding at binding 0, fragment stage), allocate one
+       descriptor set per *unique* entry in `self.textures` out of
+       the same `globalPool` (each pointing at the matching
+       texture's view + sampler via `DescriptorWriter.writeImage`),
+       then walk `self.gameObjects` and stamp the chosen descriptor
+       set onto each renderable object's `textureDescriptorSet`
+       (using `"__default_white__"` for objects without a
+       `textureName`). Mirrors the upstream tutorial's
+       per-material descriptor-set pattern.
+    4. Build a `SimpleRenderSystem` (passing both `globalSetLayout`
+       and `textureSetLayout`) and a `PointLightSystem` (just
+       `globalSetLayout` — it doesn't sample any textures), a
+       `Camera`, a model-less `viewerObject` (via
+       `GameObject.createGameObject`) and a
        `KeyboardMovementController`.
-    4. Poll GLFW events.
-    5. Compute `frameTime` (seconds) from `glfwGetTime()`.
-    6. `cameraController.moveInPlaneXZ(...)` updates the viewer
+    5. Poll GLFW events.
+    6. Compute `frameTime` (seconds) from `glfwGetTime()`.
+    7. `cameraController.moveInPlaneXZ(...)` updates the viewer
        object's transform from keyboard input.
-    7. `camera.setViewYXZ(...)` syncs the camera to the viewer
+    8. `camera.setViewYXZ(...)` syncs the camera to the viewer
        object's translation/rotation, then `setPerspectiveProjection`
        updates the projection.
-    8. `renderer.beginFrame()` → build a `FrameInfo` for the current
+    9. `renderer.beginFrame()` → build a `FrameInfo` for the current
        frame (including `globalDescriptorSets[frameIndex]` and a
        pointer to `self.gameObjects`) → seed a fresh `GlobalUbo`
        with `camera.getProjection()` / `camera.getView()` → call
@@ -94,18 +118,29 @@ big-picture data flow see [architecture.md](./architecture.md).
        objects and issues one 6-vertex draw per light with
        `{ position, color, radius }` uploaded as push constants) →
        `endSwapChainRenderPass` → `endFrame`.
-    9. If the swapchain has to be recreated and reports
-       `error.SwapChainFormatChanged`, both render systems are
-       rebuilt against the new render pass and the frame is skipped.
-    10. `vkDeviceWaitIdle` before returning so the GPU is finished with
-        everything before resources are destroyed.
+    10. If the swapchain has to be recreated and reports
+        `error.SwapChainFormatChanged`, both render systems are
+        rebuilt against the new render pass and the frame is skipped.
+    11. `vkDeviceWaitIdle` before returning so the GPU is finished
+        with everything before resources are destroyed.
+  - `loadTextures()` - Populates `self.textures` with every KTX1
+    asset embedded under `textures/` (currently just
+    `stonefloor01_color_rgba.ktx`, parsed via
+    `Texture.initFromKtxBytes`) plus a synthetic 1×1 white texture
+    keyed by `"__default_white__"` that acts as the fallback for
+    objects without a `textureName`. Each `Texture` is
+    `alloc.create`-d separately so the pointers stored in the
+    `StringHashMap` remain stable as the map grows. Called from
+    `init`.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj`,
     `smooth_vase.obj` and `quad.obj` via `Model.createModelFromFile`
     and inserts each `GameObject` into `self.gameObjects` keyed by
     its `getId()`:
     - flat vase at `{-0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - smooth vase at `{0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
-    - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`.
+    - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`, with
+      `textureName = "stonefloor01_color_rgba.ktx"` so the stone
+      diffuse map is picked up by `SimpleRenderSystem`.
 
     It then creates six colored point lights (red, blue, green,
     yellow, cyan, white) via `GameObject.makePointLight(intensity =
@@ -208,6 +243,18 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `copyBuffer(src, dst, size)` - Issue a `vkCmdCopyBuffer` inside a
     single-time command buffer (used by `Model` to upload from a
     host-visible staging buffer into a DEVICE_LOCAL buffer).
+  - `transitionImageLayout(image, oldLayout, newLayout, mipLevels)` -
+    Insert a pipeline barrier transitioning every mip level of
+    `image` between the two layouts. Only the two transitions the
+    texture-upload path needs are wired up
+    (`UNDEFINED → TRANSFER_DST_OPTIMAL` and
+    `TRANSFER_DST_OPTIMAL → SHADER_READ_ONLY_OPTIMAL`); any other
+    pair returns `error.UnsupportedLayoutTransition`.
+  - `copyBufferToImage(buffer, image, width, height)` - Issue a
+    tightly-packed `vkCmdCopyBufferToImage` into mip level 0 of the
+    target image (which must already be in
+    `TRANSFER_DST_OPTIMAL`). Used by `Texture` to upload RGBA8
+    pixels from the host-visible staging buffer.
 - **Device Selection Criteria:**
   - Queue family support (graphics and present)
   - Required extension support
@@ -319,19 +366,23 @@ big-picture data flow see [architecture.md](./architecture.md).
     multiplies by `projection * view` — that lives in the global UBO
     and the shader does the final multiplication.
 - **Key Functions:**
-  - `init(alloc, device, renderPass, globalSetLayout)` - Creates the
-    pipeline layout (with one descriptor set at set 0 and one
-    push-constant range) and the graphics pipeline against
+  - `init(alloc, device, renderPass, globalSetLayout, textureSetLayout)` -
+    Creates the pipeline layout (with two descriptor sets — global
+    UBO at set 0, per-object combined-image-sampler at set 1 — and
+    one push-constant range) and the graphics pipeline against
     `renderPass`.
   - `deinit()` - Destroys the pipeline and layout.
   - `renderGameObjects(frameInfo)` - Binds the pipeline, calls
     `vkCmdBindDescriptorSets` once with `frameInfo.globalDescriptorSet`
     (set = 0), then iterates `frameInfo.gameObjects.valueIterator()`
-    and, for each `GameObject` with a non-null `model`, uploads
-    `obj.transform.mat4()` and `obj.transform.normalMatrix()` as push
-    constants and issues a draw via the object's `Model`. Pulls the
-    command buffer, the per-frame descriptor set and the scene's
-    `GameObject.Map` out of the `*FrameInfo` bundle.
+    and, for each `GameObject` with a non-null `model`, binds the
+    object's `textureDescriptorSet` (set = 1; `FirstApp.run`
+    guarantees it is non-null for every renderable object — assert
+    enforced), uploads `obj.transform.mat4()` and
+    `obj.transform.normalMatrix()` as push constants and issues a
+    draw via the object's `Model`. Pulls the command buffer, the
+    per-frame descriptor set and the scene's `GameObject.Map` out of
+    the `*FrameInfo` bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
 ## `systems/PointLightSystem.zig` — Point-Light Billboard Renderer
@@ -451,6 +502,49 @@ big-picture data flow see [architecture.md](./architecture.md).
     The formatted string is written into the caller-supplied stack
     buffer; on overflow the line is truncated silently. `FirstApp.run`
     reuses a single 256-byte buffer across the whole frame.
+
+## `Texture.zig` — VkImage + View + Sampler Wrapper
+
+- **Purpose:** Bundles a `VkImage`, its backing `VkDeviceMemory`, a
+  matching `VkImageView` and `VkSampler` into a single object with
+  RAII semantics. Mirrors `LveTexture` from the upstream Little
+  Vulkan Engine tutorial (loosely — upstream uses stb_image, here
+  the v1 asset is a KTX1 file).
+- **Fields:** `device: *Device`, `image: c.VkImage`,
+  `imageMemory: c.VkDeviceMemory`, `imageView: c.VkImageView`,
+  `sampler: c.VkSampler`, `width`, `height`, `mipLevels = 1`,
+  `format = VK_FORMAT_R8G8B8A8_UNORM`, `layout` (updated through the
+  layout-transition path).
+- **Key Functions:**
+  - `initFromPixels(device, pixels, width, height)` - Upload an
+    already-decoded RGBA8 buffer. `pixels.len` must equal
+    `width * height * 4`. Used for the 1×1 white fallback texture
+    that `FirstApp` registers under `"__default_white__"`.
+  - `initFromKtxBytes(device, bytes)` - Strict KTX1 parser. Rejects
+    anything outside the exact asset shape the project ships:
+    little-endian (`endianness == 0x04030201`), 2D, single layer +
+    face, `GL_RGBA8` (`glInternalFormat == 0x8058`) /
+    `GL_UNSIGNED_BYTE`. Only uploads mip level 0; skips the key /
+    value metadata block. Wrong-magic / unsupported variants return
+    `error.InvalidKtx` / `error.UnsupportedKtxEndianness` /
+    `error.UnsupportedKtxFormat` so corrupt assets fail loudly.
+    Delegates to `initFromPixels` once the pixel slice is located.
+  - `deinit()` - Destroys the sampler, image view, image and frees
+    the memory in reverse-init order. Safe on a partially-built
+    `Texture` (every handle is null-checked first).
+  - `descriptorInfo()` - Returns a `VkDescriptorImageInfo` covering
+    `(sampler, imageView, SHADER_READ_ONLY_OPTIMAL)` for use with
+    `DescriptorWriter.writeImage`.
+- **Sampler defaults:** `LINEAR` min/mag, `REPEAT` address modes,
+  no anisotropy (the `samplerAnisotropy` device feature isn't
+  enabled in `Vulkan.createLogicalDevice`), `maxLod = 0` since we
+  only upload mip 0.
+- **Upload path:** host-visible staging `Buffer` →
+  `Device.transitionImageLayout(UNDEFINED → TRANSFER_DST_OPTIMAL)` →
+  `Device.copyBufferToImage` →
+  `Device.transitionImageLayout(TRANSFER_DST_OPTIMAL →
+  SHADER_READ_ONLY_OPTIMAL)`. Mirrors the standard Vulkan tutorial
+  pattern.
 
 ## `Buffer.zig` — VkBuffer + Memory Wrapper
 
@@ -615,7 +709,12 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Purpose:** A simple scene entity: id, optionally owned `Model`,
   color, a `TransformComponent` and an optional `PointLightComponent`.
 - **Fields:** `id_t: u64`, `model: ?Model`, `color: Vec3`,
-  `transform: TransformComponent`, `pointLight: ?PointLightComponent`.
+  `transform: TransformComponent`, `pointLight: ?PointLightComponent`,
+  `textureName: ?[]const u8` (basename of the embedded texture the
+  object should render with — `null` means "use the default white
+  fallback"), `textureDescriptorSet: c.VkDescriptorSet` (stamped
+  onto the object by `FirstApp.run` after the per-texture descriptor
+  sets are built; bound at `set = 1` by `SimpleRenderSystem`).
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
   `math.Vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)

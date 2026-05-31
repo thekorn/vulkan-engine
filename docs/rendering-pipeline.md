@@ -53,22 +53,28 @@ graphics pipeline model:
     world-space normal
     (`fragNormalWorld = normalize(mat3(normalMatrix) * normal)`)
     and the clip-space `gl_Position = projection * view * positionWorld`.
-    The raw vertex `color` is forwarded unchanged as `fragColor` —
-    lighting is no longer evaluated here.
+    The raw vertex `color` is forwarded unchanged as `fragColor`
+    and the vertex `uv` as `fragUv` — lighting is no longer
+    evaluated here.
   - `shader.frag` - Fragment shader for `SimpleRenderSystem`.
     Reads the full global UBO at `set = 0, binding = 0`:
     `mat4 projection`, `mat4 view`, `mat4 invView`,
     `vec4 ambientLightColor` (`w` is intensity),
     `PointLight pointLights[10]` (each `{ vec4 position; vec4 color }`,
-    `color.w` is intensity) and `int numLights`. Using the
-    interpolated `fragPosWorld` and `fragNormalWorld`, it recovers
-    the camera world-space position as `ubo.invView[3].xyz`,
-    seeds `diffuseLight` with the ambient term, then loops
-    `for (int i = 0; i < ubo.numLights; i++)` accumulating each
-    light's `1 / distance²`-attenuated diffuse contribution plus a
-    Blinn-Phong specular term (half-angle `H = normalize(L + V)`,
-    raised to the 512th power for a sharp highlight) before writing
-    `(diffuseLight + specularLight) * fragColor` to `outColor`.
+    `color.w` is intensity) and `int numLights`. Also samples a
+    `diffuseMap` (combined image sampler) at
+    `set = 1, binding = 0`. Using the interpolated `fragPosWorld`
+    and `fragNormalWorld`, it recovers the camera world-space
+    position as `ubo.invView[3].xyz`, seeds `diffuseLight` with the
+    ambient term, then loops `for (int i = 0; i < ubo.numLights;
+    i++)` accumulating each light's `1 / distance²`-attenuated
+    diffuse contribution plus a Blinn-Phong specular term
+    (half-angle `H = normalize(L + V)`, raised to the 512th power
+    for a sharp highlight) before writing
+    `(diffuseLight + specularLight) * fragColor *
+    texture(diffuseMap, fragUv).rgb` to `outColor`. Objects without
+    a named texture get a 1×1 white fallback descriptor set so the
+    texture multiplier is `1` and their look is unchanged.
   - `point_light.vert` - Vertex shader for `PointLightSystem`. Takes
     no vertex input; emits the six corners of a screen-aligned quad
     from `OFFSETS[gl_VertexIndex]`. Extracts the camera right / up
@@ -164,6 +170,7 @@ layout(location = 3) in vec2 uv;
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragPosWorld;
 layout(location = 2) out vec3 fragNormalWorld;
+layout(location = 3) out vec2 fragUv;
 
 // GlobalUbo at set = 0, binding = 0 (shown above)
 
@@ -178,6 +185,7 @@ void main() {
     fragNormalWorld = normalize(mat3(push.normalMatrix) * normal);
     fragPosWorld = positionWorld.xyz;
     fragColor = color;
+    fragUv = uv;
 }
 ```
 
@@ -189,10 +197,16 @@ void main() {
 layout (location = 0) in vec3 fragColor;
 layout (location = 1) in vec3 fragPosWorld;
 layout (location = 2) in vec3 fragNormalWorld;
+layout (location = 3) in vec2 fragUv;
 
 layout (location = 0) out vec4 outColor;
 
 // GlobalUbo at set = 0, binding = 0 (shown above)
+
+// Per-object material texture, bound by `SimpleRenderSystem` from
+// each `GameObject.textureDescriptorSet`. Objects without a named
+// texture get a 1×1 white fallback.
+layout(set = 1, binding = 0) uniform sampler2D diffuseMap;
 
 layout(push_constant) uniform Push {
     mat4 modelMatrix;
@@ -224,7 +238,8 @@ void main() {
         specularLight += intensity * blinnTerm;
     }
 
-    outColor = vec4(diffuseLight * fragColor + specularLight * fragColor, 1.0);
+    vec3 materialColor = fragColor * texture(diffuseMap, fragUv).rgb;
+    outColor = vec4((diffuseLight + specularLight) * materialColor, 1.0);
 }
 ```
 
@@ -328,6 +343,17 @@ world-space normal/position; the **fragment shader** loops over
 Blinn-Phong specular term using the camera position recovered
 from `ubo.invView[3].xyz`. `projection * view` is applied in the
 shader instead of being baked into the push-constant transform.
+
+The floor quad samples `stonefloor01_color_rgba.ktx` via a
+`COMBINED_IMAGE_SAMPLER` bound at `set = 1, binding = 0` (the
+`diffuseMap` declaration in `shader.frag`). `FirstApp.run`
+allocates one descriptor set per *unique* texture out of
+`globalPool`, then stamps each game object's
+`textureDescriptorSet` with either the named texture's set or a
+1×1 white fallback (registered as `"__default_white__"`) so the
+shader path is uniform across textured and untextured objects.
+`SimpleRenderSystem.renderGameObjects` binds the chosen set per
+draw before the push constants.
 
 ## Key Configuration Parameters
 

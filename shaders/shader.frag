@@ -3,6 +3,7 @@
 layout (location = 0) in vec3 fragColor;
 layout (location = 1) in vec3 fragPosWorld;
 layout (location = 2) in vec3 fragNormalWorld;
+layout (location = 3) in vec2 fragUv;
 
 layout (location = 0) out vec4 outColor;
 
@@ -19,6 +20,13 @@ layout(set = 0, binding = 0) uniform GlobalUbo {
     PointLight pointLights[10];
     int numLights;
 } ubo;
+
+// Per-object material texture, bound at set = 1, binding = 0 by
+// `SimpleRenderSystem.renderGameObjects` (the descriptor set is
+// stored on each `GameObject` as `textureDescriptorSet`). Objects
+// without a `textureName` get a 1×1 white fallback, so multiplying
+// `fragColor` by the sampled RGB leaves their look unchanged.
+layout(set = 1, binding = 0) uniform sampler2D diffuseMap;
 
 layout(push_constant) uniform Push {
     mat4 modelMatrix;
@@ -52,5 +60,9 @@ void main() {
         specularLight += intensity * blinnTerm;
     }
 
-    outColor = vec4(diffuseLight * fragColor + specularLight * fragColor, 1.0);
+    // Modulate by the sampled diffuse texture so the floor picks up
+    // the stone albedo while objects with the default 1×1 white
+    // fallback texture (multiplier == 1) are visually unchanged.
+    vec3 materialColor = fragColor * texture(diffuseMap, fragUv).rgb;
+    outColor = vec4((diffuseLight + specularLight) * materialColor, 1.0);
 }

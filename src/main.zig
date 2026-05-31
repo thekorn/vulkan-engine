@@ -23,6 +23,7 @@ test {
     _ = @import("Model.zig");
     _ = @import("Buffer.zig");
     _ = @import("Descriptors.zig");
+    _ = @import("Texture.zig");
     _ = @import("Renderer.zig");
     _ = @import("systems/SimpleRenderSystem.zig");
     _ = @import("systems/PointLightSystem.zig");

@@ -1,5 +1,7 @@
 zig-out
 .zig-cache
+# macOS Finder metadata
+.DS_Store
 # Zig 0.16+ fetches third-party packages into a local `zig-pkg/`
 # directory next to `build.zig` (in addition to the global cache).
 zig-pkg
