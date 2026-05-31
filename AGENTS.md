@@ -43,7 +43,7 @@ nix develop                       # enter the dev shell (recommended)
 zig build                         # compile
 zig build run                     # compile and run
 zig build test                    # run the Zig test suite
-zig build coverage                # kcov coverage report (Linux only)
+zig build coverage                # run the Zig test suite and generate a coverage report
 zig build test -Dcover -Dopen     # run under kcov and open the HTML report
 zig build --help                  # show all options
 ```

@@ -22,18 +22,24 @@ keep in context for orientation.
 - Validation layer cleanup incomplete — debug messenger destruction is
   TODO (see `Device.deinit`).
 - Only a small hardcoded scene (two `.obj`-loaded vases sitting on a
-  flat quad "floor" wired up in `FirstApp.loadGameObjects`).
-- Lighting is a single point light + constant ambient term. The
-  point-light position, color/intensity and ambient color/intensity
-  now come from the per-frame `GlobalUbo`, but the values are still
-  set once at startup (`GlobalUbo` defaults) rather than driven by a
-  scene-level light list. The point light is now also visualized on
-  screen by `PointLightSystem` as a small camera-facing disc at the
-  light's world position (drawn via a 6-vertex billboard generated
-  procedurally from `gl_VertexIndex`, no vertex buffers bound).
-  Lighting is evaluated per-pixel in `shader.frag` (the vertex
-  shader only emits world-space position and normal); the next big
-  lighting step is multiple lights.
+  flat quad "floor" plus six colored point lights arranged in a
+  circle, all wired up in `FirstApp.loadGameObjects`).
+- Lighting is a fixed set of up to `MAX_LIGHTS = 10` point lights
+  plus a constant ambient term. The point lights live in the scene
+  as `GameObject`s carrying an optional `PointLightComponent`;
+  `PointLightSystem.update()` walks them once per frame, rotates each
+  around the world's Y axis (the demo animation) and copies the
+  visible ones into `ubo.pointLights[0 .. ubo.numLights]`. The
+  ambient color/intensity still comes from `GlobalUbo` defaults
+  rather than a scene-level setting. Each point light is also
+  visualized on screen by `PointLightSystem.render()` as a small
+  camera-facing disc at its world position — one 6-vertex billboard
+  draw per light, with the light's position/color/radius uploaded as
+  per-draw push constants (no vertex buffers bound). Lighting is
+  evaluated per-pixel in `shader.frag` (the vertex shader only emits
+  world-space position and normal); the fragment shader loops over
+  `ubo.pointLights[0 .. ubo.numLights]` accumulating the diffuse
+  contribution from each light.
 - The shader still ignores `uv` (uploaded to the GPU but unused), so
   there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but

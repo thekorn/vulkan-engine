@@ -33,15 +33,14 @@ big-picture data flow see [architecture.md](./architecture.md).
     `AutoHashMapUnmanaged(u64, GameObject)` keyed by `id_t`, matching
     the upstream `LveGameObject::Map`).
 - **Types:**
-  - `GlobalUbo` - `extern struct` mirroring the std140 layout the
-    shaders expect at `set = 0, binding = 0`:
-    `projection: Mat4`, `view: Mat4` (split so the point-light
-    vertex shader can extract the camera basis from `view`),
-    `ambientLightColor: Vec4` (`xyz`=color, `w`=intensity),
-    `lightPosition: Vec3` (point-light world-space position) and
-    `lightColor: Vec4 align(16)` (`xyz`=color, `w`=intensity).
-    Explicit `align(16)` mirrors the `alignas(16)` on the C++ side
-    to guarantee the std140 offset the shader expects.
+  - `GlobalUbo` - re-exported alias of [`FrameInfo.GlobalUbo`](#frameinfozig--per-frame-render-context)
+    (the real definition moved into `FrameInfo.zig` so render
+    systems can mutate the UBO from their `update()` calls without
+    depending on `FirstApp`). The `extern struct` layout —
+    `projection: Mat4`, `view: Mat4`, `ambientLightColor: Vec4`,
+    `pointLights: [MAX_LIGHTS]PointLight`, `numLights: i32` —
+    mirrors the std140 block the shaders expect at
+    `set = 0, binding = 0`.
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer, then calls
     `loadGameObjects()`.
@@ -76,17 +75,25 @@ big-picture data flow see [architecture.md](./architecture.md).
        updates the projection.
     8. `renderer.beginFrame()` → build a `FrameInfo` for the current
        frame (including `globalDescriptorSets[frameIndex]` and a
-       pointer to `self.gameObjects`) → write `projection` + `view`
-       into the current frame's UBO buffer via
+       pointer to `self.gameObjects`) → seed a fresh `GlobalUbo`
+       with `camera.getProjection()` / `camera.getView()` → call
+       `pointLightSystem.update(&frameInfo, &ubo)` which walks the
+       scene's point-light game objects, rotates each around
+       `(0,-1,0)` by `0.5 * frameTime` and copies them into
+       `ubo.pointLights[0 .. ubo.numLights]` → write the whole UBO
+       into the current frame's buffer via
        `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)` →
        `beginSwapChainRenderPass` →
        `simpleRenderSystem.renderGameObjects(&frameInfo)` (which
        binds the global descriptor set once and then iterates
        `frameInfo.gameObjects.valueIterator()`, issuing a draw per
-       `GameObject` with just the model + normal matrices as push
-       constants) → `pointLightSystem.render(&frameInfo)` (binds the
-       global descriptor set and issues a single 6-vertex draw with
-       no vertex buffers) → `endSwapChainRenderPass` → `endFrame`.
+       model-bearing `GameObject` with just the model + normal
+       matrices as push constants) →
+       `pointLightSystem.render(&frameInfo)` (binds the global
+       descriptor set, then iterates the scene's point-light game
+       objects and issues one 6-vertex draw per light with
+       `{ position, color, radius }` uploaded as push constants) →
+       `endSwapChainRenderPass` → `endFrame`.
     9. If the swapchain has to be recreated and reports
        `error.SwapChainFormatChanged`, both render systems are
        rebuilt against the new render pass and the frame is skipped.
@@ -98,9 +105,16 @@ big-picture data flow see [architecture.md](./architecture.md).
     its `getId()`:
     - flat vase at `{-0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - smooth vase at `{0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
-    - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`. `run()`
-      also pulls the viewer object back to `z = -2.5` so the scene
-      is in view at startup.
+    - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`.
+
+    It then creates six colored point lights (red, blue, green,
+    yellow, cyan, white) via `GameObject.makePointLight(intensity =
+    0.2, radius = 0.1, color = white)` and arranges them in a
+    circle by rotating the seed position `(-1, -1, -1)` around the
+    world's Y axis by `i * 2π / N`. `PointLightSystem.update()`
+    then spins them around the same axis once per frame. `run()`
+    also pulls the viewer object back to `z = -2.5` so the scene
+    is in view at startup.
 
 ## `Window.zig` — GLFW Window Management
 
@@ -313,26 +327,46 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 ## `systems/PointLightSystem.zig` — Point-Light Billboard Renderer
 
-- **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` that draws the
-  point light as a small camera-facing disc, so the light source is
-  visible in the scene. Mirrors `PointLightSystem` from the upstream
-  Little Vulkan Engine tutorial.
-- **No vertex buffers, no push constants:** the vertex shader
+- **Purpose:** Owns a `Pipeline` + `VkPipelineLayout` that draws each
+  point light in the scene as a small camera-facing disc, *and*
+  fills the `pointLights[]` slice of the global UBO so the simple
+  render system's fragment shader can light the scene with them.
+  Mirrors `PointLightSystem` from the upstream Little Vulkan Engine
+  tutorial (tutorial 25).
+- **No vertex buffers, per-draw push constants:** the vertex shader
   generates the 6 corners of a screen-aligned quad from
-  `gl_VertexIndex` indexing a constant `OFFSETS[6]` table, and reads
-  the world-space light position, the camera basis (extracted from
-  `ubo.view`) and the light color out of the global UBO. The
-  fragment shader discards pixels outside the unit disc.
+  `gl_VertexIndex` indexing a constant `OFFSETS[6]` table. The
+  vertex and fragment shaders share a push-constant block —
+  `PointLightPushConstants { position: Vec4, color: Vec4, radius:
+  f32 }` (vertex + fragment stages) — so each draw can supply the
+  light's world-space position, color (with intensity in `w`) and
+  billboard radius without re-indexing into the UBO array. The
+  vertex shader also extracts the camera right/up basis from
+  `ubo.view`. The fragment shader discards pixels outside the unit
+  disc.
 - **Key Functions:**
   - `init(alloc, device, renderPass, globalSetLayout)` - Creates the
-    pipeline layout (one descriptor set at set 0, no push constants)
-    and the graphics pipeline against `renderPass`. The pipeline is
-    built with empty `bindingDescriptions` / `attributeDescriptions`
-    so Vulkan accepts a draw with no vertex buffers bound.
+    pipeline layout (one descriptor set at set 0 plus one
+    push-constant range covering `PointLightPushConstants` over
+    vertex + fragment stages) and the graphics pipeline against
+    `renderPass`. The pipeline is built with empty
+    `bindingDescriptions` / `attributeDescriptions` so Vulkan
+    accepts a draw with no vertex buffers bound.
   - `deinit()` - Destroys the pipeline and layout.
+  - `update(frameInfo, ubo)` - Walks `frameInfo.gameObjects`,
+    rotates every game object carrying a `PointLightComponent`
+    around the world's Y axis by `0.5 * frameInfo.frameTime` (the
+    upstream tutorial's demo animation) and copies its current
+    position + color/intensity into `ubo.pointLights[lightIndex]`,
+    capping the count at `FrameInfo.MAX_LIGHTS` and writing the
+    actual count into `ubo.numLights`.
   - `render(frameInfo)` - Binds the pipeline, calls
-    `vkCmdBindDescriptorSets` with `frameInfo.globalDescriptorSet`
-    (set = 0), then issues `vkCmdDraw(cb, 6, 1, 0, 0)`.
+    `vkCmdBindDescriptorSets` once with `frameInfo.globalDescriptorSet`
+    (set = 0), then iterates the scene's point-light game objects
+    again — for each one it uploads a `PointLightPushConstants`
+    (`position`, `color` with intensity in `w`,
+    `radius = transform.scale[0]`) and issues
+    `vkCmdDraw(cb, 6, 1, 0, 0)`.
 - Embeds `point_light.vert.spv` / `point_light.frag.spv` via
   `@embedFile`.
 
@@ -373,11 +407,37 @@ big-picture data flow see [architecture.md](./architecture.md).
     `index * alignmentSize`, used to store one `GlobalUbo` per frame
     in flight.
 
-## `FrameInfo.zig` — Per-Frame Render Context
+## `FrameInfo.zig` — Per-Frame Render Context, `GlobalUbo` & `PointLight`
 
-- **Purpose:** Small struct bundling the per-frame state passed into
-  render systems each frame, so signatures stay stable as more
-  per-frame state (lights, …) is added in later tutorials.
+- **Purpose:** Bundles the per-frame state passed into render
+  systems and owns the GPU-facing `GlobalUbo` / `PointLight` types
+  + the `MAX_LIGHTS` constant. Mirrors the upstream tutorial 25
+  refactor that moved `GlobalUbo` out of `first_app.cpp` and into
+  `lve_frame_info.hpp` so render systems can mutate the UBO from
+  their `update()` calls.
+- **Constants:**
+  - `MAX_LIGHTS: usize = 10` — must match the `PointLight
+    pointLights[10]` array size in every GLSL `GlobalUbo`
+    declaration.
+- **Types:**
+  - `PointLight` - `extern struct { position: Vec4, color: Vec4 }`
+    (std140, 32 bytes, 16-byte aligned). `position.w` is ignored;
+    `color.w` carries per-light intensity.
+  - `GlobalUbo` - `extern struct` mirroring the std140 block the
+    shaders read at `set = 0, binding = 0`:
+    - `projection: Mat4` (default identity)
+    - `view: Mat4` (default identity) — stored separately so the
+      point-light vertex shader can extract the camera basis from
+      `view`
+    - `ambientLightColor: Vec4` (default `{1, 1, 1, 0.02}`,
+      `xyz`=color, `w`=intensity)
+    - `pointLights: [MAX_LIGHTS]PointLight` (all-zero defaults;
+      only the first `numLights` slots are read by the fragment
+      shader)
+    - `numLights: i32 = 0`
+    Unit tests in `FrameInfo.zig` lock the field offsets to the
+    std140 layout (`projection=0, view=64, ambient=128,
+    pointLights=144, numLights=464`).
 - **Fields:** `frameIndex: usize`, `frameTime: f32`,
   `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`,
   `globalDescriptorSet: c.VkDescriptorSet`,
@@ -467,19 +527,32 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 ## `GameObject.zig` — Renderable Entity
 
-- **Purpose:** A simple renderable: id, optionally owned `Model`, color
-  and a `TransformComponent`.
+- **Purpose:** A simple scene entity: id, optionally owned `Model`,
+  color, a `TransformComponent` and an optional `PointLightComponent`.
+- **Fields:** `id_t: u64`, `model: ?Model`, `color: Vec3`,
+  `transform: TransformComponent`, `pointLight: ?PointLightComponent`.
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
   `math.Vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)
   angles, plus a `normalMatrix()` helper that returns the matching
   normal matrix (`R * diag(1/scale)`, identity-extended to `Mat4` so
   it fits in the push-constant layout the shader expects).
+- **PointLightComponent:** `{ lightIntensity: f32 = 1.0 }`. When
+  non-null the object is treated as a point light by
+  `PointLightSystem` (mirroring `LveGameObject::pointLight` in the
+  upstream tutorial — an optional `std::unique_ptr<PointLightComponent>`).
+  The light's RGB comes from the parent `GameObject.color`; the
+  billboard radius comes from `transform.scale[0]`.
 - **Key Functions:**
   - `init(model, color, transform)` - Auto-assigns a monotonically
     increasing `id_t`; the object owns the model.
   - `createGameObject()` - Factory for a model-less object (used for
     the camera "viewer" object driven by the keyboard controller).
+  - `makePointLight(intensity, radius, color)` - Factory for a
+    model-less point-light object: sets `color`, stores `radius` in
+    `transform.scale[0]` and sets `pointLight = .{ .lightIntensity
+    = intensity }`. Mirrors `LveGameObject::makePointLight` in the
+    upstream tutorial.
   - `deinit()` - Tears down the owned `Model` if any.
   - `getId()` - Returns the object's id.
 - **Map alias:** `GameObject.Map = std.AutoHashMapUnmanaged(u64, GameObject)`
@@ -507,8 +580,28 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 ## `Camera.zig` — View / Projection Helpers
 
-View/projection matrix helpers: orthographic, perspective,
-`setViewDirection` / `setViewTarget` / `setViewYXZ`.
+- **Purpose:** Holds the current view and projection matrices for
+  the active camera. Mirrors `LveCamera` from the upstream tutorial.
+- **Fields:**
+  - `projectionMatrix: Mat4 = identity_mat4`
+  - `viewMatrix: Mat4 = identity_mat4`
+- **Key Functions:**
+  - `setOrthographicProjection(left, right, top, bottom, near, far)`
+  - `setPerspectiveProjection(fovy, aspect, near, far)` — asserts
+    `|aspect| > floatEps(f32)` to avoid the divide-by-zero the
+    upstream `assert(glm::abs(aspect - epsilon) > 0)` would let
+    through when `aspect == 0`.
+  - `setViewDirection(position, direction, up)`,
+    `setViewTarget(position, target, up)`,
+    `setViewYXZ(position, rotation)` — three ways to overwrite
+    `viewMatrix`. `setViewYXZ` matches the Tait-Bryan Y-X-Z
+    rotation order used by `GameObject.TransformComponent.mat4`,
+    so the viewer object's transform feeds directly into it.
+  - `getProjection()` / `getView()` — read-only accessors used by
+    `FirstApp.run` when seeding the per-frame `GlobalUbo`.
+- **Conventions:** the default "up" vector is `default_up = (0, -1, 0)`
+  (Vulkan-style negative Y up) and the projection uses the Vulkan
+  depth range `[0, 1]`.
 
 ## `Loop.zig` — Main Event Loop
 

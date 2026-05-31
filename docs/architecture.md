@@ -46,8 +46,11 @@ FirstApp.zig (Application root)
     │                  framebuffers, sync, acquire/present)
     ├── systems/SimpleRenderSystem.zig (consumes FrameInfo per frame)
     │     └── Pipeline.zig (graphics pipeline, shader modules)
-    ├── systems/PointLightSystem.zig (camera-facing billboard for the
-    │                                 point light; no vertex buffers)
+    ├── systems/PointLightSystem.zig (per-frame light update +
+    │                                 one camera-facing billboard
+    │                                 draw per point-light GameObject;
+    │                                 no vertex buffers, per-light
+    │                                 push constants)
     │     └── Pipeline.zig
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
     ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
@@ -143,18 +146,22 @@ while Loop.is_running():
                            camera              = &camera,
                            globalDescriptorSet = globalDescriptorSets[frameInfo.frameIndex] }
 
-    // update: write this frame's dedicated UBO buffer in whole.
-    // Projection and view are now stored separately so the point-light
+    // update: build this frame's UBO. `pointLightSystem.update`
+    // rotates each point-light game object around the world's Y axis
+    // and copies the visible lights into `ubo.pointLights[0 .. numLights]`.
+    // Projection and view are stored separately so the point-light
     // vertex shader can extract the camera basis from `view` to build
     // a camera-facing billboard.
-    ubo = GlobalUbo{ projection = camera.projection, view = camera.view }
+    ubo = GlobalUbo{ projection = camera.getProjection(),
+                     view       = camera.getView() }
+    pointLightSystem.update(&frameInfo, &ubo)
     uboBuffers[frameInfo.frameIndex].writeToBuffer(&ubo, VK_WHOLE_SIZE, 0)
     uboBuffers[frameInfo.frameIndex].flush(VK_WHOLE_SIZE, 0)
 
     // render
     renderer.beginSwapChainRenderPass(cb)
     simpleRenderSystem.renderGameObjects(&frameInfo)  // iterates frameInfo.gameObjects
-    pointLightSystem.render(&frameInfo)               // 6-vertex billboard
+    pointLightSystem.render(&frameInfo)               // one 6-vertex billboard per light
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
   // On error.SwapChainFormatChanged → rebuild both SimpleRenderSystem
@@ -225,35 +232,51 @@ End-to-end rendering pipeline working — `FirstApp` drives a
 `Renderer` plus two render systems each frame:
 
 1. `SimpleRenderSystem` draws two embedded Wavefront `.obj` vases on
-   top of a quad "floor" with point-light + ambient lighting.
-2. `PointLightSystem` then draws a 6-vertex camera-facing billboard
-   at the light's world-space position (a small disc rendered from
-   `gl_VertexIndex` lookups, no vertex buffers bound) so the light is
-   visible in the scene.
+   top of a quad "floor" with multi-point-light + ambient lighting.
+2. `PointLightSystem` first runs an `update()` step that walks the
+   scene's point-light game objects, rotates each around the world's
+   Y axis (the demo animation) and fills `ubo.pointLights[0 ..
+   numLights]`. Then `render()` issues one 6-vertex camera-facing
+   billboard draw per point light (a small disc rendered from
+   `gl_VertexIndex` lookups, no vertex buffers bound) so each light
+   is visible in the scene.
 
 Scene objects live in a `GameObject.Map`
 (`AutoHashMapUnmanaged(u64, GameObject)`) owned by `FirstApp`, which
 the simple render system iterates via a `*GameObject.Map` carried
-through `FrameInfo`. The **projection** matrix, the **view** matrix
-(now stored separately so the point-light vertex shader can extract
-the camera basis from `view`), point-light position, light
-color/intensity and ambient color/intensity are all delivered
-through a per-frame global UBO bound at descriptor set 0, binding 0
-(visible to `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment
-shader took over the lighting). Only the simple render system's
-per-object model + normal matrices still travel as push constants;
-the point-light system uses no push constants — every per-frame
-value its shader needs comes from the global UBO. Lighting is
-evaluated per-pixel in the fragment shader (smoother highlights than
-the previous per-vertex pass).
+through `FrameInfo`. Point lights are also `GameObject`s — they
+carry an optional `PointLightComponent` and no `Model`. The
+**projection** matrix, the **view** matrix (stored separately so the
+point-light vertex shader can extract the camera basis from `view`),
+the array `pointLights[MAX_LIGHTS = 10]` of `{ vec4 position; vec4 color }`
+slots (`color.w` = intensity), the live `numLights` count and the
+ambient color/intensity are all delivered through a per-frame global
+UBO bound at descriptor set 0, binding 0 (visible to
+`VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment shader took
+over the lighting). The simple render system's per-object model +
+normal matrices travel as push constants; the point-light system
+*also* uses per-draw push constants (`{ vec4 position; vec4 color;
+float radius }`, vertex + fragment stages) so the vertex shader can
+position each billboard and the fragment shader can color the disc
+without re-indexing into the UBO array. Lighting is evaluated
+per-pixel in the fragment shader, looping over `ubo.pointLights[0
+.. ubo.numLights]` and accumulating the diffuse contribution from
+each light.
 
-The `Pipeline.PipelineConfigInfo` now carries the vertex
+The `Pipeline.PipelineConfigInfo` carries the vertex
 binding/attribute description slices (defaulting to `Model.Vertex`'s
 single binding) so render systems can override them — the
 point-light system supplies empty slices because it generates its
 vertices procedurally from `gl_VertexIndex`.
 
-Next up: a scene-level light list and (eventually) texturing.
+`GlobalUbo`, the `PointLight` slot type and the `MAX_LIGHTS`
+constant all live in [`FrameInfo.zig`](../src/FrameInfo.zig) so
+render systems can mutate the UBO from their `update()` methods
+without depending on `FirstApp`; `FirstApp` simply re-exports
+`GlobalUbo = FrameInfo.GlobalUbo` for convenience.
+
+Next up: a scene-level light list (lights still defaulted in
+`loadGameObjects`) and texturing.
 
 ## Project Directory Structure
 
@@ -297,11 +320,14 @@ vulkan-engine/
 │   │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
 │   │   │                          # that draws a list of GameObjects from
 │   │   │                          # a FrameInfo bundle
-│   │   └── PointLightSystem.zig # Draws the point light as a camera-facing
-│   │                            # billboard (6 vertices generated from
-│   │                            # gl_VertexIndex, no vertex/push-constant
-│   │                            # data — light pos/color come from the
-│   │                            # global UBO)
+│   │   └── PointLightSystem.zig # update(): walks point-light GameObjects,
+│   │                            #   rotates them around (0,-1,0) and fills
+│   │                            #   ubo.pointLights[0..numLights].
+│   │                            # render(): one 6-vertex camera-facing
+│   │                            #   billboard draw per point light;
+│   │                            #   vertices generated from gl_VertexIndex,
+│   │                            #   per-draw push constants carry
+│   │                            #   {position, color, radius}.
 │   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
 │   │                        #   VkDeviceMemory: map / unmap /
 │   │                        #   writeToBuffer / flush / invalidate
@@ -309,8 +335,14 @@ vulkan-engine/
 │   │                        #   UBO slices aligned to a configurable
 │   │                        #   minOffsetAlignment.
 │   ├── FrameInfo.zig        # Per-frame context (frameIndex, frameTime,
-│   │                        #   commandBuffer, camera, globalDescriptorSet)
-│   │                        #   passed into the render systems each frame.
+│   │                        #   commandBuffer, camera, globalDescriptorSet,
+│   │                        #   *GameObject.Map) passed into the render
+│   │                        #   systems each frame. Also defines
+│   │                        #   GlobalUbo (projection, view, ambient,
+│   │                        #   pointLights[MAX_LIGHTS], numLights) and
+│   │                        #   the PointLight slot type so render
+│   │                        #   systems can mutate the UBO from their
+│   │                        #   update() calls.
 │   ├── Descriptors.zig      # Descriptor set layouts, pools and writers
 │   │                        #   (DescriptorSetLayout / DescriptorPool /
 │   │                        #   DescriptorWriter, each with a Builder).
@@ -331,12 +363,17 @@ vulkan-engine/
 │   │                        #   in-memory OBJ bytes (typically
 │   │                        #   `@embedFile`'d).
 │   ├── GameObject.zig       # Renderable entity: id, optional model,
-│   │                        #   color and TransformComponent
-│   │                        #   (translation / scale / rotation -> mat4
-│   │                        #   via Tait-Bryan Y-X-Z); also provides a
-│   │                        #   `createGameObject()` factory for
-│   │                        #   model-less objects (e.g. the camera
-│   │                        #   "viewer" object)
+│   │                        #   color, TransformComponent (translation /
+│   │                        #   scale / rotation -> mat4 via Tait-Bryan
+│   │                        #   Y-X-Z) and an optional PointLightComponent
+│   │                        #   (lightIntensity). Provides factories:
+│   │                        #   `init(model, color, transform)`,
+│   │                        #   `createGameObject()` for model-less
+│   │                        #   objects (e.g. the camera "viewer") and
+│   │                        #   `makePointLight(intensity, radius, color)`
+│   │                        #   which produces a model-less object whose
+│   │                        #   `pointLight` component is consumed by
+│   │                        #   `PointLightSystem`.
 │   ├── KeyboardMovementController.zig
 │   │                        # WASD + QE position + arrow-key look
 │   │                        #   controller that drives a GameObject's
@@ -364,16 +401,17 @@ vulkan-engine/
 │   │                      #   vertex color through to the fragment
 │   │                      #   shader)
 │   ├── shader.frag        # Fragment shader for SimpleRenderSystem
-│   │                      #   (per-pixel point-light + ambient
-│   │                      #   shading using the global UBO)
+│   │                      #   (per-pixel ambient + multi-point-light
+│   │                      #   diffuse loop over
+│   │                      #   ubo.pointLights[0..ubo.numLights])
 │   ├── point_light.vert   # Vertex shader for PointLightSystem
 │   │                      #   (no vertex input; emits a 6-vertex
 │   │                      #   camera-facing quad from
 │   │                      #   gl_VertexIndex / OFFSETS lookup +
-│   │                      #   ubo.lightPosition)
+│   │                      #   push.position and push.radius)
 │   └── point_light.frag   # Fragment shader for PointLightSystem
 │                          #   (discards pixels outside the unit
-│                          #   disc, writes ubo.lightColor)
+│                          #   disc, writes push.color.xyz)
 ├── models/                # Wavefront .obj model assets (embedded at
 │   │                      #   build time via embedAllModels())
 │   ├── flat_vase.obj      # Default scene model (flat-shaded normals)
