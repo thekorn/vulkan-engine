@@ -159,6 +159,14 @@ pub fn lookWithMouse(
 // Tests (pure logic only — no GLFW window required)
 // ---------------------------------------------------------------------------
 
+test "imgui_want_capture_mouse returns false when no ImGui context exists" {
+    // No `igCreateContext()` is called from the test suite, so the
+    // wrapper's `igGetCurrentContext() == nullptr` early-return path is
+    // taken. Guards against a regression that would either crash on the
+    // missing-context assertion or read uninitialized memory.
+    try std.testing.expect(!c.imgui_want_capture_mouse());
+}
+
 test "KeyboardMovementController defaults" {
     const ctrl: Self = .{};
     try std.testing.expectEqual(@as(f32, 3.0), ctrl.moveSpeed);

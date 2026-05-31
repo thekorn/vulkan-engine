@@ -366,3 +366,228 @@ test "deinit on an empty (uninitialized) Texture is a safe no-op" {
     try std.testing.expectEqual(@as(c.VkImageView, null), tex.imageView);
     try std.testing.expectEqual(@as(c.VkSampler, null), tex.sampler);
 }
+
+test "descriptorInfo returns sampler/imageView/SHADER_READ_ONLY_OPTIMAL" {
+    // Use sentinel pointer values so we can verify the fields are
+    // forwarded verbatim into the VkDescriptorImageInfo without needing
+    // a live Vulkan context.
+    const sampler_handle: c.VkSampler = @ptrFromInt(0xCAFE);
+    const view_handle: c.VkImageView = @ptrFromInt(0xBEEF);
+    const tex: Self = .{
+        .device = @ptrFromInt(0x1000),
+        .width = 4,
+        .height = 4,
+        .sampler = sampler_handle,
+        .imageView = view_handle,
+    };
+    const info = tex.descriptorInfo();
+    try std.testing.expectEqual(sampler_handle, info.sampler);
+    try std.testing.expectEqual(view_handle, info.imageView);
+    try std.testing.expectEqual(
+        @as(c.VkImageLayout, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+        info.imageLayout,
+    );
+}
+
+// ---------------------------------------------------------------------
+// KTX1 parser rejection tests
+//
+// `initFromKtxBytes` validates the header against the exact shape the
+// project's assets ship in. Each test below targets one of the
+// rejection branches and uses `buildKtxHeader` to seed a baseline
+// "would otherwise pass" header so the test only mutates the single
+// field under test. None of these tests reach the Vulkan upload path.
+// ---------------------------------------------------------------------
+
+const ktx_identifier = [_]u8{
+    0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB,
+    0x0D, 0x0A, 0x1A, 0x0A,
+};
+
+/// Build a 64-byte KTX1 header with valid magic + format fields by
+/// default. Callers mutate individual fields before passing the bytes
+/// to `initFromKtxBytes`. The order of the `u32`s matches the
+/// `Header extern struct` declared inside `initFromKtxBytes`.
+fn buildKtxHeader(
+    pixel_width: u32,
+    pixel_height: u32,
+    bytes_of_key_value_data: u32,
+) [64]u8 {
+    var bytes: [64]u8 = @splat(0);
+    @memcpy(bytes[0..12], &ktx_identifier);
+    // endianness = 0x04030201 (native little-endian).
+    std.mem.writeInt(u32, bytes[12..16], 0x04030201, .little);
+    // glType = GL_UNSIGNED_BYTE (0x1401)
+    std.mem.writeInt(u32, bytes[16..20], 0x1401, .little);
+    // glTypeSize = 1
+    std.mem.writeInt(u32, bytes[20..24], 1, .little);
+    // glFormat = GL_RGBA (0x1908)
+    std.mem.writeInt(u32, bytes[24..28], 0x1908, .little);
+    // glInternalFormat = GL_RGBA8 (0x8058)
+    std.mem.writeInt(u32, bytes[28..32], 0x8058, .little);
+    // glBaseInternalFormat = GL_RGBA (0x1908) — not validated but
+    // populated for completeness.
+    std.mem.writeInt(u32, bytes[32..36], 0x1908, .little);
+    // pixelWidth
+    std.mem.writeInt(u32, bytes[36..40], pixel_width, .little);
+    // pixelHeight
+    std.mem.writeInt(u32, bytes[40..44], pixel_height, .little);
+    // pixelDepth = 0 (2D image)
+    std.mem.writeInt(u32, bytes[44..48], 0, .little);
+    // numberOfArrayElements = 0 (not an array)
+    std.mem.writeInt(u32, bytes[48..52], 0, .little);
+    // numberOfFaces = 1 (not a cubemap)
+    std.mem.writeInt(u32, bytes[52..56], 1, .little);
+    // numberOfMipmapLevels = 1
+    std.mem.writeInt(u32, bytes[56..60], 1, .little);
+    // bytesOfKeyValueData
+    std.mem.writeInt(u32, bytes[60..64], bytes_of_key_value_data, .little);
+    return bytes;
+}
+
+test "initFromKtxBytes rejects an unsupported glType" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    // glType = GL_UNSIGNED_SHORT (0x1403) — not supported.
+    std.mem.writeInt(u32, bytes[16..20], 0x1403, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects an unsupported glTypeSize" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    std.mem.writeInt(u32, bytes[20..24], 2, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects an unsupported glFormat" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    // GL_RGB (0x1907) instead of GL_RGBA.
+    std.mem.writeInt(u32, bytes[24..28], 0x1907, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects an unsupported glInternalFormat" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    // GL_RGB8 (0x8051) instead of GL_RGBA8 (0x8058).
+    std.mem.writeInt(u32, bytes[28..32], 0x8051, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects a non-zero pixelDepth (3D image)" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    std.mem.writeInt(u32, bytes[44..48], 4, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects array textures" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    // numberOfArrayElements != 0 → array texture, unsupported.
+    std.mem.writeInt(u32, bytes[48..52], 2, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects cubemap textures (numberOfFaces != 1)" {
+    var device: Device = undefined;
+    var bytes = buildKtxHeader(1, 1, 0);
+    std.mem.writeInt(u32, bytes[52..56], 6, .little);
+    try std.testing.expectError(
+        error.UnsupportedKtxFormat,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects a zero pixelWidth" {
+    var device: Device = undefined;
+    const bytes = buildKtxHeader(0, 1, 0);
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects a zero pixelHeight" {
+    var device: Device = undefined;
+    const bytes = buildKtxHeader(1, 0, 0);
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects a bytesOfKeyValueData that runs past EOF" {
+    var device: Device = undefined;
+    // bytesOfKeyValueData much larger than what the buffer can hold, so
+    // the mip-0 imageSize slot would land past the end of `bytes`.
+    const bytes = buildKtxHeader(1, 1, 1024);
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects an imageSize that disagrees with pixelWidth*pixelHeight*4" {
+    var device: Device = undefined;
+    // Header for a 2x2 RGBA8 image (expected imageSize = 16 bytes), plus
+    // 4 bytes for the imageSize field and 16 bytes of pixel data.
+    var buf: [64 + 4 + 16]u8 = @splat(0);
+    const header = buildKtxHeader(2, 2, 0);
+    @memcpy(buf[0..64], &header);
+    // Write a wrong imageSize (8 instead of 16).
+    std.mem.writeInt(u32, buf[64..68], 8, .little);
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, buf[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects when declared imageSize extends past the buffer" {
+    var device: Device = undefined;
+    // Header for a 2x2 RGBA8 image but the buffer only carries 8 bytes
+    // of pixel data instead of the required 16.
+    var buf: [64 + 4 + 8]u8 = @splat(0);
+    const header = buildKtxHeader(2, 2, 0);
+    @memcpy(buf[0..64], &header);
+    // imageSize = 16 matches width*height*4 so the equality check
+    // passes, but the slice [pixels_start..pixels_end] would overrun
+    // the buffer.
+    std.mem.writeInt(u32, buf[64..68], 16, .little);
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, buf[0..]),
+    );
+}
+
+test "initFromKtxBytes rejects bytesOfKeyValueData causing usize overflow" {
+    var device: Device = undefined;
+    // Set bytesOfKeyValueData to its max value so
+    // `@sizeOf(Header) + kv_len` overflows usize on every platform and
+    // the `std.math.add` catch path returns InvalidKtx.
+    const bytes = buildKtxHeader(1, 1, std.math.maxInt(u32));
+    try std.testing.expectError(
+        error.InvalidKtx,
+        initFromKtxBytes(&device, bytes[0..]),
+    );
+}
