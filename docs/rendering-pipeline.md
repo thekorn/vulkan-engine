@@ -57,15 +57,18 @@ graphics pipeline model:
     lighting is no longer evaluated here.
   - `shader.frag` - Fragment shader for `SimpleRenderSystem`.
     Reads the full global UBO at `set = 0, binding = 0`:
-    `mat4 projection`, `mat4 view`,
+    `mat4 projection`, `mat4 view`, `mat4 invView`,
     `vec4 ambientLightColor` (`w` is intensity),
     `PointLight pointLights[10]` (each `{ vec4 position; vec4 color }`,
     `color.w` is intensity) and `int numLights`. Using the
-    interpolated `fragPosWorld` and `fragNormalWorld`, it seeds
-    `diffuseLight` with the ambient term, then loops `for (int i =
-    0; i < ubo.numLights; i++)` accumulating each light's
-    `1 / distance²`-attenuated diffuse contribution before writing
-    `diffuseLight * fragColor` to `outColor`.
+    interpolated `fragPosWorld` and `fragNormalWorld`, it recovers
+    the camera world-space position as `ubo.invView[3].xyz`,
+    seeds `diffuseLight` with the ambient term, then loops
+    `for (int i = 0; i < ubo.numLights; i++)` accumulating each
+    light's `1 / distance²`-attenuated diffuse contribution plus a
+    Blinn-Phong specular term (half-angle `H = normalize(L + V)`,
+    raised to the 512th power for a sharp highlight) before writing
+    `(diffuseLight + specularLight) * fragColor` to `outColor`.
   - `point_light.vert` - Vertex shader for `PointLightSystem`. Takes
     no vertex input; emits the six corners of a screen-aligned quad
     from `OFFSETS[gl_VertexIndex]`. Extracts the camera right / up
@@ -136,6 +139,7 @@ struct PointLight {
 layout(set = 0, binding = 0) uniform GlobalUbo {
     mat4 projection;
     mat4 view;
+    mat4 invView;           // camera-to-world; invView[3].xyz = camera position
     vec4 ambientLightColor; // w is intensity
     PointLight pointLights[10];
     int numLights;
@@ -197,19 +201,30 @@ layout(push_constant) uniform Push {
 
 void main() {
     vec3 diffuseLight = ubo.ambientLightColor.xyz * ubo.ambientLightColor.w;
+    vec3 specularLight = vec3(0.0);
     vec3 surfaceNormal = normalize(fragNormalWorld);
+
+    vec3 cameraPosWorld = ubo.invView[3].xyz;
+    vec3 viewDirection = normalize(cameraPosWorld - fragPosWorld);
 
     for (int i = 0; i < ubo.numLights; i++) {
         PointLight light = ubo.pointLights[i];
         vec3 directionToLight = light.position.xyz - fragPosWorld;
         float attenuation = 1.0 / dot(directionToLight, directionToLight); // distance squared
-        float cosAngIncidence = max(dot(surfaceNormal, normalize(directionToLight)), 0);
+        directionToLight = normalize(directionToLight);
+
+        float cosAngIncidence = max(dot(surfaceNormal, directionToLight), 0);
         vec3 intensity = light.color.xyz * light.color.w * attenuation;
 
         diffuseLight += intensity * cosAngIncidence;
+
+        // specular lighting (Blinn-Phong half-angle)
+        vec3 halfAngle = normalize(directionToLight + viewDirection);
+        float blinnTerm = pow(clamp(dot(surfaceNormal, halfAngle), 0, 1), 512.0);
+        specularLight += intensity * blinnTerm;
     }
 
-    outColor = vec4(diffuseLight * fragColor, 1.0);
+    outColor = vec4(diffuseLight * fragColor + specularLight * fragColor, 1.0);
 }
 ```
 
@@ -302,10 +317,10 @@ global UBO.
 The vase vertex shader only computes clip-space position +
 world-space normal/position; the **fragment shader** loops over
 `ubo.pointLights[0 .. ubo.numLights]` and evaluates each light's
-`1 / distance²`-attenuated diffuse contribution per pixel,
-producing smoother highlights than the previous per-vertex
-lighting. `projection * view` is applied in the shader instead of
-being baked into the push-constant transform.
+`1 / distance²`-attenuated diffuse contribution per pixel, plus a
+Blinn-Phong specular term using the camera position recovered
+from `ubo.invView[3].xyz`. `projection * view` is applied in the
+shader instead of being baked into the push-constant transform.
 
 ## Key Configuration Parameters
 

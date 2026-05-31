@@ -429,6 +429,9 @@ big-picture data flow see [architecture.md](./architecture.md).
     - `view: Mat4` (default identity) — stored separately so the
       point-light vertex shader can extract the camera basis from
       `view`
+    - `inverseView: Mat4` (default identity) — camera-to-world
+      transform, used by the fragment shader to recover the camera
+      world-space position (`invView[3].xyz`) for specular lighting
     - `ambientLightColor: Vec4` (default `{1, 1, 1, 0.02}`,
       `xyz`=color, `w`=intensity)
     - `pointLights: [MAX_LIGHTS]PointLight` (all-zero defaults;
@@ -436,8 +439,8 @@ big-picture data flow see [architecture.md](./architecture.md).
       shader)
     - `numLights: i32 = 0`
     Unit tests in `FrameInfo.zig` lock the field offsets to the
-    std140 layout (`projection=0, view=64, ambient=128,
-    pointLights=144, numLights=464`).
+    std140 layout (`projection=0, view=64, inverseView=128,
+    ambient=192, pointLights=208, numLights=528`).
 - **Fields:** `frameIndex: usize`, `frameTime: f32`,
   `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`,
   `globalDescriptorSet: c.VkDescriptorSet`,
@@ -585,6 +588,11 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Fields:**
   - `projectionMatrix: Mat4 = identity_mat4`
   - `viewMatrix: Mat4 = identity_mat4`
+  - `inverseViewMatrix: Mat4 = identity_mat4` — camera-to-world
+    transform, updated alongside `viewMatrix` by `setViewDirection`
+    / `setViewYXZ`. The fragment shader reads `inverseView[3].xyz`
+    to recover the camera position in world space for the specular
+    lighting calculation.
 - **Key Functions:**
   - `setOrthographicProjection(left, right, top, bottom, near, far)`
   - `setPerspectiveProjection(fovy, aspect, near, far)` — asserts
@@ -594,11 +602,13 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `setViewDirection(position, direction, up)`,
     `setViewTarget(position, target, up)`,
     `setViewYXZ(position, rotation)` — three ways to overwrite
-    `viewMatrix`. `setViewYXZ` matches the Tait-Bryan Y-X-Z
-    rotation order used by `GameObject.TransformComponent.mat4`,
-    so the viewer object's transform feeds directly into it.
-  - `getProjection()` / `getView()` — read-only accessors used by
-    `FirstApp.run` when seeding the per-frame `GlobalUbo`.
+    `viewMatrix` (and `inverseViewMatrix`). `setViewYXZ` matches
+    the Tait-Bryan Y-X-Z rotation order used by
+    `GameObject.TransformComponent.mat4`, so the viewer object's
+    transform feeds directly into it.
+  - `getProjection()` / `getView()` / `getInverseView()` —
+    read-only accessors used by `FirstApp.run` when seeding the
+    per-frame `GlobalUbo`.
 - **Conventions:** the default "up" vector is `default_up = (0, -1, 0)`
   (Vulkan-style negative Y up) and the projection uses the Vulkan
   depth range `[0, 1]`.

@@ -255,6 +255,7 @@ pub fn run(self: *Self) !void {
             var ubo: GlobalUbo = .{
                 .projection = camera.getProjection(),
                 .view = camera.getView(),
+                .inverseView = camera.getInverseView(),
             };
             pointLightSystem.update(&frameInfo, &ubo);
             uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);

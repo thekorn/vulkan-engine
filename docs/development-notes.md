@@ -38,8 +38,9 @@ keep in context for orientation.
   per-draw push constants (no vertex buffers bound). Lighting is
   evaluated per-pixel in `shader.frag` (the vertex shader only emits
   world-space position and normal); the fragment shader loops over
-  `ubo.pointLights[0 .. ubo.numLights]` accumulating the diffuse
-  contribution from each light.
+  `ubo.pointLights[0 .. ubo.numLights]` accumulating each light's
+  diffuse contribution plus a Blinn-Phong specular term (the camera
+  position is recovered from `ubo.invView[3].xyz`).
 - The shader still ignores `uv` (uploaded to the GPU but unused), so
   there is no texturing.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but

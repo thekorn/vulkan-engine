@@ -152,8 +152,9 @@ while Loop.is_running():
     // Projection and view are stored separately so the point-light
     // vertex shader can extract the camera basis from `view` to build
     // a camera-facing billboard.
-    ubo = GlobalUbo{ projection = camera.getProjection(),
-                     view       = camera.getView() }
+    ubo = GlobalUbo{ projection  = camera.getProjection(),
+                     view        = camera.getView(),
+                     inverseView = camera.getInverseView() }
     pointLightSystem.update(&frameInfo, &ubo)
     uboBuffers[frameInfo.frameIndex].writeToBuffer(&ubo, VK_WHOLE_SIZE, 0)
     uboBuffers[frameInfo.frameIndex].flush(VK_WHOLE_SIZE, 0)
@@ -249,9 +250,11 @@ carry an optional `PointLightComponent` and no `Model`. The
 **projection** matrix, the **view** matrix (stored separately so the
 point-light vertex shader can extract the camera basis from `view`),
 the array `pointLights[MAX_LIGHTS = 10]` of `{ vec4 position; vec4 color }`
-slots (`color.w` = intensity), the live `numLights` count and the
-ambient color/intensity are all delivered through a per-frame global
-UBO bound at descriptor set 0, binding 0 (visible to
+slots (`color.w` = intensity), the live `numLights` count, the
+ambient color/intensity, plus the camera-to-world **inverse view**
+matrix (so the fragment shader can recover the camera position for
+the specular term) are all delivered through a per-frame global UBO
+bound at descriptor set 0, binding 0 (visible to
 `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment shader took
 over the lighting). The simple render system's per-object model +
 normal matrices travel as push constants; the point-light system
@@ -260,8 +263,9 @@ float radius }`, vertex + fragment stages) so the vertex shader can
 position each billboard and the fragment shader can color the disc
 without re-indexing into the UBO array. Lighting is evaluated
 per-pixel in the fragment shader, looping over `ubo.pointLights[0
-.. ubo.numLights]` and accumulating the diffuse contribution from
-each light.
+.. ubo.numLights]` and accumulating each light's diffuse
+contribution plus a Blinn-Phong specular term (using the camera
+position recovered from `ubo.invView[3].xyz`).
 
 The `Pipeline.PipelineConfigInfo` carries the vertex
 binding/attribute description slices (defaulting to `Model.Vertex`'s

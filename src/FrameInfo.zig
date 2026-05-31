@@ -47,6 +47,10 @@ pub const GlobalUbo = extern struct {
     /// build a camera-facing billboard.
     projection: math.Mat4 = math.identity_mat4,
     view: math.Mat4 = math.identity_mat4,
+    /// Camera-to-world transform (inverse of `view`). The fragment
+    /// shader reads `inverseView[3].xyz` to recover the camera's
+    /// world-space position for the specular lighting calculation.
+    inverseView: math.Mat4 = math.identity_mat4,
     /// `xyz` = ambient color, `w` = intensity.
     ambientLightColor: math.Vec4 = .{ 1.0, 1.0, 1.0, 0.02 },
     /// Up to `MAX_LIGHTS` point lights. Only the first
@@ -94,10 +98,11 @@ test "PointLight layout matches std140 (32 bytes, 16-byte aligned)" {
 test "GlobalUbo field offsets match std140 layout the shader expects" {
     try std.testing.expectEqual(@as(usize, 0), @offsetOf(GlobalUbo, "projection"));
     try std.testing.expectEqual(@as(usize, 64), @offsetOf(GlobalUbo, "view"));
-    try std.testing.expectEqual(@as(usize, 128), @offsetOf(GlobalUbo, "ambientLightColor"));
-    try std.testing.expectEqual(@as(usize, 144), @offsetOf(GlobalUbo, "pointLights"));
-    // 144 + 10 * 32 = 464
-    try std.testing.expectEqual(@as(usize, 464), @offsetOf(GlobalUbo, "numLights"));
+    try std.testing.expectEqual(@as(usize, 128), @offsetOf(GlobalUbo, "inverseView"));
+    try std.testing.expectEqual(@as(usize, 192), @offsetOf(GlobalUbo, "ambientLightColor"));
+    try std.testing.expectEqual(@as(usize, 208), @offsetOf(GlobalUbo, "pointLights"));
+    // 208 + 10 * 32 = 528
+    try std.testing.expectEqual(@as(usize, 528), @offsetOf(GlobalUbo, "numLights"));
 }
 
 test "GlobalUbo default has zero lights so the fragment loop is a no-op" {

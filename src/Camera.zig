@@ -10,6 +10,12 @@ const Self = @This();
 projectionMatrix: Mat4 = math.identity_mat4,
 // Column-major 4x4 view matrix, identity by default.
 viewMatrix: Mat4 = math.identity_mat4,
+// Column-major 4x4 inverse view matrix (camera-to-world transform),
+// identity by default. Updated alongside `viewMatrix` by
+// `setViewDirection` / `setViewYXZ`. The fragment shader reads
+// `inverseView[3].xyz` to recover the camera position in world space
+// for the specular lighting calculation.
+inverseViewMatrix: Mat4 = math.identity_mat4,
 
 pub fn setOrthographicProjection(
     self: *Self,
@@ -64,6 +70,10 @@ pub fn getView(self: *const Self) Mat4 {
     return self.viewMatrix;
 }
 
+pub fn getInverseView(self: *const Self) Mat4 {
+    return self.inverseViewMatrix;
+}
+
 pub const default_up: Vec3 = .{ 0.0, -1.0, 0.0 };
 
 pub fn setViewDirection(
@@ -89,6 +99,24 @@ pub fn setViewDirection(
     self.viewMatrix[3][0] = -math.dot3(u, position);
     self.viewMatrix[3][1] = -math.dot3(v, position);
     self.viewMatrix[3][2] = -math.dot3(w, position);
+
+    // Inverse view = camera-to-world transform: the orthonormal basis
+    // (u, v, w) written into the *rows* of the rotation block of
+    // `viewMatrix` instead lives in the *columns* of `inverseViewMatrix`,
+    // and the translation is the camera's world-space position.
+    self.inverseViewMatrix = math.identity_mat4;
+    self.inverseViewMatrix[0][0] = u[0];
+    self.inverseViewMatrix[0][1] = u[1];
+    self.inverseViewMatrix[0][2] = u[2];
+    self.inverseViewMatrix[1][0] = v[0];
+    self.inverseViewMatrix[1][1] = v[1];
+    self.inverseViewMatrix[1][2] = v[2];
+    self.inverseViewMatrix[2][0] = w[0];
+    self.inverseViewMatrix[2][1] = w[1];
+    self.inverseViewMatrix[2][2] = w[2];
+    self.inverseViewMatrix[3][0] = position[0];
+    self.inverseViewMatrix[3][1] = position[1];
+    self.inverseViewMatrix[3][2] = position[2];
 }
 
 pub fn setViewTarget(
@@ -135,6 +163,23 @@ pub fn setViewYXZ(self: *Self, position: Vec3, rotation: Vec3) void {
     self.viewMatrix[3][0] = -math.dot3(u, position);
     self.viewMatrix[3][1] = -math.dot3(v, position);
     self.viewMatrix[3][2] = -math.dot3(w, position);
+
+    // See `setViewDirection` for the rationale; the construction is
+    // the same — write the camera basis into the columns and the
+    // camera position into the translation row.
+    self.inverseViewMatrix = math.identity_mat4;
+    self.inverseViewMatrix[0][0] = u[0];
+    self.inverseViewMatrix[0][1] = u[1];
+    self.inverseViewMatrix[0][2] = u[2];
+    self.inverseViewMatrix[1][0] = v[0];
+    self.inverseViewMatrix[1][1] = v[1];
+    self.inverseViewMatrix[1][2] = v[2];
+    self.inverseViewMatrix[2][0] = w[0];
+    self.inverseViewMatrix[2][1] = w[1];
+    self.inverseViewMatrix[2][2] = w[2];
+    self.inverseViewMatrix[3][0] = position[0];
+    self.inverseViewMatrix[3][1] = position[1];
+    self.inverseViewMatrix[3][2] = position[2];
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +368,41 @@ test "Camera.setViewYXZ produces an orthonormal basis for non-zero rotation" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][1], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][2], 1e-6);
+}
+
+test "Camera.getInverseView is the inverse of getView (setViewYXZ)" {
+    var cam: Self = .{};
+    const position: Vec3 = .{ 1.5, -0.3, 4.0 };
+    const rotation: Vec3 = .{ 0.3, -0.7, 1.2 };
+    cam.setViewYXZ(position, rotation);
+
+    const product = math.mul4(cam.getView(), cam.getInverseView());
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            const expected: f32 = if (col == row) 1.0 else 0.0;
+            try std.testing.expectApproxEqAbs(expected, product[col][row], 1e-5);
+        }
+    }
+
+    // `inverseView[3].xyz` must recover the camera world-space position,
+    // since the fragment shader reads it that way for specular lighting.
+    try std.testing.expectApproxEqAbs(position[0], cam.getInverseView()[3][0], 1e-6);
+    try std.testing.expectApproxEqAbs(position[1], cam.getInverseView()[3][1], 1e-6);
+    try std.testing.expectApproxEqAbs(position[2], cam.getInverseView()[3][2], 1e-6);
+}
+
+test "Camera.getInverseView is the inverse of getView (setViewDirection)" {
+    var cam: Self = .{};
+    const position: Vec3 = .{ -2.0, 1.0, 0.5 };
+    cam.setViewDirection(position, .{ 0.5, -0.25, 1.0 }, default_up);
+
+    const product = math.mul4(cam.getView(), cam.getInverseView());
+    inline for (0..4) |col| {
+        inline for (0..4) |row| {
+            const expected: f32 = if (col == row) 1.0 else 0.0;
+            try std.testing.expectApproxEqAbs(expected, product[col][row], 1e-5);
+        }
+    }
 }
 
 test "Camera.getProjection / getView return the stored matrices" {
