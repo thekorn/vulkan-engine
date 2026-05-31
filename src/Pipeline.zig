@@ -14,6 +14,15 @@ const default_dynamic_state_enables = [_]c.VkDynamicState{
     c.VK_DYNAMIC_STATE_SCISSOR,
 };
 
+// Module-level storage backing the default binding/attribute description
+// slices in `PipelineConfigInfo`. Mirrors the upstream tutorial's change
+// to move these descriptions out of `Pipeline::createGraphicsPipeline`
+// and into `PipelineConfigInfo` so render systems can override them
+// (e.g. the point-light system uses empty arrays because it generates
+// its vertices procedurally from `gl_VertexIndex`).
+const default_binding_descriptions = Model.Vertex.getBindingDescriptions();
+const default_attribute_descriptions = Model.Vertex.getAttributeDescriptions();
+
 const Self = @This();
 alloc: std.mem.Allocator,
 device: *Device,
@@ -21,7 +30,15 @@ graphicsPipeline: ?c.VkPipeline,
 vertShaderModule: c.VkShaderModule,
 fragShaderModule: c.VkShaderModule,
 
-const PipelineConfigInfo = struct {
+pub const PipelineConfigInfo = struct {
+    /// Vertex input binding descriptions. Defaults to `Model.Vertex`'s
+    /// single binding via `defaultPipelineConfigInfo`; render systems
+    /// that draw without vertex buffers (e.g. the point-light billboard
+    /// generated from `gl_VertexIndex`) override this with `&.{}`.
+    bindingDescriptions: []const c.VkVertexInputBindingDescription = &.{},
+    /// Vertex input attribute descriptions; same defaulting rules as
+    /// `bindingDescriptions`.
+    attributeDescriptions: []const c.VkVertexInputAttributeDescription = &.{},
     viewportInfo: c.VkPipelineViewportStateCreateInfo,
     inputAssemblyInfo: c.VkPipelineInputAssemblyStateCreateInfo,
     rasterizationInfo: c.VkPipelineRasterizationStateCreateInfo,
@@ -69,15 +86,18 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
         },
     };
 
-    const bindingDescriptions = Model.Vertex.getBindingDescriptions();
-    const attributeDescriptions = Model.Vertex.getAttributeDescriptions();
+    // Pull the binding/attribute descriptions from the caller-supplied
+    // config. The point-light system supplies empty slices because it
+    // generates its vertices procedurally from `gl_VertexIndex`.
+    const bindingDescriptions = configInfo.bindingDescriptions;
+    const attributeDescriptions = configInfo.attributeDescriptions;
 
     const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = bindingDescriptions.len,
-        .pVertexBindingDescriptions = &bindingDescriptions,
-        .vertexAttributeDescriptionCount = attributeDescriptions.len,
-        .pVertexAttributeDescriptions = &attributeDescriptions,
+        .vertexBindingDescriptionCount = @intCast(bindingDescriptions.len),
+        .pVertexBindingDescriptions = if (bindingDescriptions.len == 0) null else bindingDescriptions.ptr,
+        .vertexAttributeDescriptionCount = @intCast(attributeDescriptions.len),
+        .pVertexAttributeDescriptions = if (attributeDescriptions.len == 0) null else attributeDescriptions.ptr,
     };
 
     const pipelineInfo: c.VkGraphicsPipelineCreateInfo = .{
@@ -206,6 +226,9 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
             .pDynamicStates = &default_dynamic_state_enables,
             .flags = 0,
         },
+
+        .bindingDescriptions = &default_binding_descriptions,
+        .attributeDescriptions = &default_attribute_descriptions,
     };
 }
 
