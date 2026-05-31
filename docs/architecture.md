@@ -215,12 +215,13 @@ defer extensions.deinit(alloc);
 
 End-to-end rendering pipeline working — `FirstApp` drives a
 `Renderer` + `SimpleRenderSystem` to draw two embedded Wavefront
-`.obj` vases every frame with directional + ambient lighting. The
-projection-view matrix and light direction are delivered through a
-per-frame global UBO bound at descriptor set 0, binding 0; only the
-per-object model + normal matrices still travel as push constants.
-Next up: a scene-level light list, fragment-side lighting and
-(eventually) texturing.
+`.obj` vases on top of a quad "floor" every frame with point-light +
+ambient lighting. The projection-view matrix, point-light position,
+light color/intensity and ambient color/intensity are all delivered
+through a per-frame global UBO bound at descriptor set 0, binding 0;
+only the per-object model + normal matrices still travel as push
+constants. Next up: a scene-level light list, fragment-side lighting
+and (eventually) texturing.
 
 ## Project Directory Structure
 
@@ -325,7 +326,8 @@ vulkan-engine/
 ├── models/                # Wavefront .obj model assets (embedded at
 │   │                      #   build time via embedAllModels())
 │   ├── flat_vase.obj      # Default scene model (flat-shaded normals)
-│   └── smooth_vase.obj    # Default scene model (smoothed normals)
+│   ├── smooth_vase.obj    # Default scene model (smoothed normals)
+│   └── quad.obj           # Flat floor quad used in the default scene
 ├── test_runner.zig        # Custom Zig test runner
 └── zig-out/               # Build output directory (generated)
 ```

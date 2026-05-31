@@ -1,4 +1,5 @@
 words = [
+    "alignas",
     "anyopaque",
     "arocc",
     "cbed",
@@ -79,6 +80,7 @@ words = [
     "willems",
     "workson",
     "xdg",
+    "xyz",
     "yxz",
     "zeditor",
     "zlint",

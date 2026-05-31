@@ -31,10 +31,13 @@ big-picture data flow see [architecture.md](./architecture.md).
     descriptor sets that point at the per-frame UBO buffers.
   - `gameObjects: ArrayList(GameObject)`
 - **Types:**
-  - `GlobalUbo` - `extern struct` with `projectionView: Mat4` and
-    `lightDirection: Vec3`. Written into the global UBO buffer once
-    per frame and exposed to the vertex shader via a descriptor set
-    at `set = 0, binding = 0`.
+  - `GlobalUbo` - `extern struct` mirroring the std140 layout the
+    vertex shader expects at `set = 0, binding = 0`:
+    `projectionView: Mat4`, `ambientLightColor: Vec4` (`xyz`=color,
+    `w`=intensity), `lightPosition: Vec3` (point-light world-space
+    position) and `lightColor: Vec4 align(16)` (`xyz`=color,
+    `w`=intensity). Explicit `align(16)` mirrors the `alignas(16)`
+    on the C++ side to guarantee the std140 offset of 96.
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer, then calls
     `loadGameObjects()`.
@@ -79,10 +82,14 @@ big-picture data flow see [architecture.md](./architecture.md).
        against the new render pass and the frame is skipped.
     10. `vkDeviceWaitIdle` before returning so the GPU is finished with
         everything before resources are destroyed.
-  - `loadGameObjects()` - Loads the embedded `flat_vase.obj` and
-    `smooth_vase.obj` via `Model.createModelFromFile` and wraps each
-    in a `GameObject` (translations `{-0.5, 0.5, 2.5}` and
-    `{0.5, 0.5, 2.5}`, scale `{3, 1.5, 3}`).
+  - `loadGameObjects()` - Loads the embedded `flat_vase.obj`,
+    `smooth_vase.obj` and `quad.obj` via `Model.createModelFromFile`
+    and wraps each in a `GameObject`:
+    - flat vase at `{-0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
+    - smooth vase at `{0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
+    - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`. `run()`
+      also pulls the viewer object back to `z = -2.5` so the scene
+      is in view at startup.
 
 ## `Window.zig` — GLFW Window Management
 
