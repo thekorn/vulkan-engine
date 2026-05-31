@@ -57,6 +57,7 @@ FirstApp.zig (Application root)
     │                backends and a dedicated descriptor pool;
     │                beginFrame + render per frame)
     ├── Buffer.zig (VkBuffer + memory wrapper; global UBO + staging)
+    ├── Texture.zig (VkImage/View/Sampler wrapper; KTX1 loader + 1×1 fallback)
     ├── Descriptors.zig (DescriptorSetLayout/Pool/Writer + Builders)
     ├── FrameInfo.zig (per-frame context bundle)
     ├── Camera.zig (projection + view matrices)
@@ -290,8 +291,27 @@ render systems can mutate the UBO from their `update()` methods
 without depending on `FirstApp`; `FirstApp` simply re-exports
 `GlobalUbo = FrameInfo.GlobalUbo` for convenience.
 
+Materials / texturing is wired up but minimal: each renderable
+`GameObject` carries a `textureName: ?[]const u8` (e.g.
+`"stonefloor01_color_rgba.ktx"`) plus a `textureDescriptorSet:
+c.VkDescriptorSet` that `FirstApp.run` stamps onto it before the main
+loop. `FirstApp` owns a `textures: StringHashMapUnmanaged(*Texture)`
+populated from `loadTextures()`, which loads every KTX1 asset
+embedded under `textures/` (currently just
+`stonefloor01_color_rgba.ktx`) plus a synthetic `"__default_white__"`
+fallback so the shader path is uniform for objects without a named
+texture. The combined-image-sampler descriptor sets are allocated one
+per *unique* texture out of `globalPool` (sized for
+`MAX_FRAMES_IN_FLIGHT` UBOs + `MAX_TEXTURE_SETS = 8` samplers) and
+shared across every object that references the same texture.
+`SimpleRenderSystem` binds `set = 1` per draw from
+`obj.textureDescriptorSet`; `shader.frag` samples it as
+`diffuseMap` and multiplies the RGB into the lit color.
+
 Next up: a scene-level light list (lights still defaulted in
-`loadGameObjects`) and texturing.
+`loadGameObjects`), uploading the full KTX mip chain instead of mip
+0 only, and a small `Material` indirection so textures can be
+shared via material handles rather than ad-hoc names.
 
 ## Project Directory Structure
 
@@ -360,6 +380,20 @@ vulkan-engine/
 │   │                        #   plus *Index variants for per-frame
 │   │                        #   UBO slices aligned to a configurable
 │   │                        #   minOffsetAlignment.
+│   ├── Texture.zig          # VkImage + VkDeviceMemory + VkImageView +
+│   │                        #   VkSampler wrapper. Two constructors:
+│   │                        #   `initFromPixels` uploads a decoded
+│   │                        #   RGBA8 buffer through a staging buffer
+│   │                        #   (used for the 1×1 white fallback) and
+│   │                        #   `initFromKtxBytes` parses a strict
+│   │                        #   subset of KTX1 (2D, single layer/face,
+│   │                        #   GL_RGBA8 / GL_UNSIGNED_BYTE) before
+│   │                        #   delegating to the same upload path.
+│   │                        #   Only mip 0 is uploaded for now;
+│   │                        #   `descriptorInfo()` returns the
+│   │                        #   VkDescriptorImageInfo bound at
+│   │                        #   `set = 1, binding = 0` by
+│   │                        #   `SimpleRenderSystem`.
 │   ├── FrameInfo.zig        # Per-frame context (frameIndex, frameTime,
 │   │                        #   commandBuffer, camera, globalDescriptorSet,
 │   │                        #   *GameObject.Map) passed into the render
@@ -450,6 +484,10 @@ vulkan-engine/
 │   ├── flat_vase.obj      # Default scene model (flat-shaded normals)
 │   ├── smooth_vase.obj    # Default scene model (smoothed normals)
 │   └── quad.obj           # Flat floor quad used in the default scene
+├── textures/              # Texture assets (KTX1, embedded at build
+│   │                      #   time via embedAllTextures())
+│   └── stonefloor01_color_rgba.ktx  # Stone-floor diffuse map applied
+│                                    #   to the floor quad.
 ├── test_runner.zig        # Custom Zig test runner
 └── zig-out/               # Build output directory (generated)
 ```

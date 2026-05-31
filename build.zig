@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 
 const shaders_dir = "./shaders";
 const models_dir = "./models";
+const textures_dir = "./textures";
 
 /// A step that runs kcov on an artifact binary (requires kcov to be
 /// installed). Adapted from https://github.com/vancluever/z2d.
@@ -160,6 +161,35 @@ fn embedAllModels(b: *std.Build, exe: anytype) !void {
     }
 }
 
+/// Walk `textures/` and expose each asset file (e.g. `.ktx`) to the
+/// executable as an anonymous module import keyed by the file's basename
+/// (e.g. `stonefloor01_color_rgba.ktx`), so call sites can use
+/// `@embedFile("stonefloor01_color_rgba.ktx")`. Mirrors `embedAllModels`
+/// — see that helper for the directory-discovery convention.
+fn embedAllTextures(b: *std.Build, exe: anytype) !void {
+    const io = b.graph.io;
+    var dir = std.Io.Dir.openDir(std.Io.Dir.cwd(), io, textures_dir, .{ .iterate = true }) catch |err| switch (err) {
+        // Tolerate a missing `textures/` directory so the project still
+        // builds before any asset has been added.
+        error.FileNotFound => return,
+        else => return err,
+    };
+    defer dir.close(io);
+
+    var walker = try dir.walk(b.allocator);
+    defer walker.deinit();
+
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+
+        const full_path = try std.fs.path.join(b.allocator, &[_][]const u8{ textures_dir, entry.path });
+        std.debug.print("embedding texture: {s}\n", .{full_path});
+        exe.root_module.addAnonymousImport(entry.path, .{
+            .root_source_file = b.path(full_path),
+        });
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -285,6 +315,10 @@ pub fn build(b: *std.Build) void {
 
     embedAllModels(b, exe) catch |e| {
         std.debug.print("Failed to embed models: {}\n", .{e});
+    };
+
+    embedAllTextures(b, exe) catch |e| {
+        std.debug.print("Failed to embed textures: {}\n", .{e});
     };
 
     b.installArtifact(exe);

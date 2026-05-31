@@ -41,8 +41,14 @@ keep in context for orientation.
   `ubo.pointLights[0 .. ubo.numLights]` accumulating each light's
   diffuse contribution plus a Blinn-Phong specular term (the camera
   position is recovered from `ubo.invView[3].xyz`).
-- The shader still ignores `uv` (uploaded to the GPU but unused), so
-  there is no texturing.
+- Texturing is wired up but minimal: each renderable `GameObject`
+  carries an optional `textureName` (currently the floor sets
+  `"stonefloor01_color_rgba.ktx"`); every other renderable falls
+  back to a 1×1 white texture so the shader path is uniform. The
+  KTX1 loader (`Texture.initFromKtxBytes`) only uploads mip level 0
+  and the sampler is created with `maxLod = 0`, so minification
+  quality at oblique floor angles is limited. Uploading the full
+  KTX mip chain (the asset ships with 11 levels) is a TODO.
 - The OBJ loader uses tinyobjloader through a thin C-ABI wrapper, but
   ignores materials (`mtllib` / `usemtl`) and only forwards the
   attributes consumed by `Vertex`.

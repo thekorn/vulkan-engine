@@ -328,6 +328,128 @@ pub fn copyBuffer(self: *Self, srcBuffer: c.VkBuffer, dstBuffer: c.VkBuffer, siz
     try self.endSingleTimeCommands(commandBuffer);
 }
 
+/// Insert a pipeline barrier that transitions every mip level of
+/// `image` from `oldLayout` to `newLayout`. Only the two transitions
+/// the texture-upload path needs are wired up:
+///
+///   1. `UNDEFINED → TRANSFER_DST_OPTIMAL` — taken right after the
+///      image is created, before `vkCmdCopyBufferToImage`.
+///   2. `TRANSFER_DST_OPTIMAL → SHADER_READ_ONLY_OPTIMAL` — taken
+///      after the copy so the fragment shader can sample the result.
+///
+/// Any other combination triggers `error.UnsupportedLayoutTransition`
+/// so missing barrier wiring fails loudly instead of silently
+/// producing validation errors.
+pub fn transitionImageLayout(
+    self: *Self,
+    image: c.VkImage,
+    oldLayout: c.VkImageLayout,
+    newLayout: c.VkImageLayout,
+    mipLevels: u32,
+) !void {
+    // Resolve the barrier masks *before* allocating a single-time
+    // command buffer so an unsupported layout pair doesn't leak one
+    // from `self.commandPool` on the early-return path.
+    var srcAccessMask: c.VkAccessFlags = 0;
+    var dstAccessMask: c.VkAccessFlags = 0;
+    var srcStage: c.VkPipelineStageFlags = 0;
+    var dstStage: c.VkPipelineStageFlags = 0;
+
+    if (oldLayout == c.VK_IMAGE_LAYOUT_UNDEFINED and
+        newLayout == c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
+        srcAccessMask = 0;
+        dstAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcStage = c.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dstStage = c.VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL and
+        newLayout == c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
+        srcAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+        dstAccessMask = c.VK_ACCESS_SHADER_READ_BIT;
+        srcStage = c.VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        return error.UnsupportedLayoutTransition;
+    }
+
+    const commandBuffer = try self.beginSingleTimeCommands();
+
+    const barrier: c.VkImageMemoryBarrier = .{
+        .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+        .srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = .{
+            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = mipLevels,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcAccessMask = srcAccessMask,
+        .dstAccessMask = dstAccessMask,
+    };
+
+    c.vkCmdPipelineBarrier(
+        commandBuffer,
+        srcStage,
+        dstStage,
+        0,
+        0,
+        null,
+        0,
+        null,
+        1,
+        &barrier,
+    );
+
+    try self.endSingleTimeCommands(commandBuffer);
+}
+
+/// Copy the contents of `buffer` (tightly packed RGBA8 pixels of
+/// `width × height`) into mip level 0 of `image`. The image must
+/// currently be in `VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL` (the
+/// caller is expected to call `transitionImageLayout` first).
+pub fn copyBufferToImage(
+    self: *Self,
+    buffer: c.VkBuffer,
+    image: c.VkImage,
+    width: u32,
+    height: u32,
+) !void {
+    const commandBuffer = try self.beginSingleTimeCommands();
+
+    const region: c.VkBufferImageCopy = .{
+        .bufferOffset = 0,
+        // `bufferRowLength = 0` + `bufferImageHeight = 0` means "tightly
+        // packed" — the source rows are exactly `width` texels wide.
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = .{
+            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = .{ .x = 0, .y = 0, .z = 0 },
+        .imageExtent = .{ .width = width, .height = height, .depth = 1 },
+    };
+
+    c.vkCmdCopyBufferToImage(
+        commandBuffer,
+        buffer,
+        image,
+        c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region,
+    );
+
+    try self.endSingleTimeCommands(commandBuffer);
+}
+
 // ---------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------

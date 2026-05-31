@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const c = @import("c.zig").c;
 const math = @import("math.zig");
 const Vec3 = math.Vec3;
 const Mat4 = math.Mat4;
@@ -26,6 +27,19 @@ transform: TransformComponent,
 /// `LveGameObject::pointLight` in the upstream tutorial — an
 /// optional `std::unique_ptr<PointLightComponent>`).
 pointLight: ?PointLightComponent = null,
+/// Basename of the embedded texture this object should be rendered
+/// with (e.g. `"stonefloor01_color_rgba.ktx"`). `null` means "no
+/// named texture" — `FirstApp` will bind a 1×1 white fallback set so
+/// the existing shader path still produces the unlit vertex color.
+/// The string lives in static program data (`@embedFile` keys), so no
+/// allocation/free is needed.
+textureName: ?[]const u8 = null,
+/// Descriptor set bound at `set = 1` by `SimpleRenderSystem` (one
+/// `COMBINED_IMAGE_SAMPLER` covering the chosen `Texture`). Assigned
+/// in `FirstApp.run` after the global pool and the per-texture
+/// descriptor sets are built; render-system code asserts it is
+/// non-null for any object with a `model`.
+textureDescriptorSet: c.VkDescriptorSet = null,
 
 pub const PointLightComponent = struct {
     lightIntensity: f32 = 1.0,
@@ -211,12 +225,14 @@ test "TransformComponent.mat4 places translation in the last column" {
 
 test "GameObject has expected fields" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 5), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 7), info.fields.len);
     try std.testing.expectEqual(u64, @FieldType(Self, "id_t"));
     try std.testing.expectEqual(?Model, @FieldType(Self, "model"));
     try std.testing.expectEqual(Vec3, @FieldType(Self, "color"));
     try std.testing.expectEqual(TransformComponent, @FieldType(Self, "transform"));
     try std.testing.expectEqual(?PointLightComponent, @FieldType(Self, "pointLight"));
+    try std.testing.expectEqual(?[]const u8, @FieldType(Self, "textureName"));
+    try std.testing.expectEqual(c.VkDescriptorSet, @FieldType(Self, "textureDescriptorSet"));
 }
 
 test "GameObject.makePointLight sets the pointLight component and radius" {

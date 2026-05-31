@@ -30,6 +30,9 @@ pub fn init(
     device: *Device,
     renderPass: c.VkRenderPass,
     globalSetLayout: c.VkDescriptorSetLayout,
+    /// Per-object material descriptor set layout bound at `set = 1`
+    /// (one `COMBINED_IMAGE_SAMPLER` for `diffuseMap` in `shader.frag`).
+    textureSetLayout: c.VkDescriptorSetLayout,
 ) !Self {
     var self: Self = .{
         .alloc = alloc,
@@ -39,7 +42,7 @@ pub fn init(
         .pipelineLayout = undefined,
     };
 
-    try self.createPipelineLayout(globalSetLayout);
+    try self.createPipelineLayout(globalSetLayout, textureSetLayout);
     errdefer c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
 
     try self.createPipeline(renderPass);
@@ -52,14 +55,25 @@ pub fn deinit(self: *Self) void {
     c.vkDestroyPipelineLayout(self.device.globalDevice, self.pipelineLayout, null);
 }
 
-fn createPipelineLayout(self: *Self, globalSetLayout: c.VkDescriptorSetLayout) !void {
+fn createPipelineLayout(
+    self: *Self,
+    globalSetLayout: c.VkDescriptorSetLayout,
+    textureSetLayout: c.VkDescriptorSetLayout,
+) !void {
     const pushConstantRange: c.VkPushConstantRange = .{
         .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = @sizeOf(SimplePushConstantData),
     };
 
-    const descriptorSetLayouts = [_]c.VkDescriptorSetLayout{globalSetLayout};
+    // Two descriptor sets: the per-frame global UBO at `set = 0`
+    // (camera + lights) and a per-object material texture at
+    // `set = 1`. The texture set is bound inside `renderGameObjects`
+    // from each `GameObject.textureDescriptorSet`.
+    const descriptorSetLayouts = [_]c.VkDescriptorSetLayout{
+        globalSetLayout,
+        textureSetLayout,
+    };
 
     const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -117,6 +131,22 @@ pub fn renderGameObjects(self: *Self, frameInfo: *FrameInfo) !void {
         // Skip model-less objects (e.g. the camera viewer object that
         // only carries a transform component).
         if (obj.model == null) continue;
+
+        // Per-object material texture (`set = 1`). `FirstApp.run`
+        // wires up either the named texture's descriptor set or the
+        // 1×1 white fallback for every renderable object, so a null
+        // handle here is a setup bug — assert loudly.
+        std.debug.assert(obj.textureDescriptorSet != null);
+        c.vkCmdBindDescriptorSets(
+            frameInfo.commandBuffer,
+            c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+            self.pipelineLayout,
+            1,
+            1,
+            &obj.textureDescriptorSet,
+            0,
+            null,
+        );
 
         const push: SimplePushConstantData = .{
             .modelMatrix = obj.transform.mat4(),
