@@ -154,18 +154,32 @@ pub fn initFromKtxBytes(
 
     // Skip the optional key-value metadata block (orientation, etc.)
     // and then read the first mip-level imageSize + data.
-    const mip0_offset = @sizeOf(Header) + header.bytesOfKeyValueData;
-    if (mip0_offset + 4 > bytes.len) return error.InvalidKtx;
+    //
+    // Every offset / size computation below is done in checked `usize`
+    // arithmetic so that a malformed KTX header (gigantic
+    // `bytesOfKeyValueData` / `pixelWidth` / `pixelHeight`) fails with
+    // `error.InvalidKtx` instead of trapping in safe builds or
+    // wrapping silently in unchecked builds.
+    const kv_len: usize = header.bytesOfKeyValueData;
+    const mip0_offset = std.math.add(usize, @sizeOf(Header), kv_len) catch
+        return error.InvalidKtx;
+    const image_size_offset_end = std.math.add(usize, mip0_offset, 4) catch
+        return error.InvalidKtx;
+    if (image_size_offset_end > bytes.len) return error.InvalidKtx;
 
     // SAFETY: written by the @memcpy below before any read.
     var image_size: u32 = undefined;
-    @memcpy(std.mem.asBytes(&image_size), bytes[mip0_offset .. mip0_offset + 4]);
+    @memcpy(std.mem.asBytes(&image_size), bytes[mip0_offset..image_size_offset_end]);
 
-    const expected_size = header.pixelWidth * header.pixelHeight * 4;
-    if (image_size != expected_size) return error.InvalidKtx;
+    const w: usize = header.pixelWidth;
+    const h: usize = header.pixelHeight;
+    const wh = std.math.mul(usize, w, h) catch return error.InvalidKtx;
+    const expected_size = std.math.mul(usize, wh, 4) catch return error.InvalidKtx;
+    if (@as(usize, image_size) != expected_size) return error.InvalidKtx;
 
-    const pixels_start = mip0_offset + 4;
-    const pixels_end = pixels_start + image_size;
+    const pixels_start = image_size_offset_end;
+    const pixels_end = std.math.add(usize, pixels_start, image_size) catch
+        return error.InvalidKtx;
     if (pixels_end > bytes.len) return error.InvalidKtx;
 
     return initFromPixels(

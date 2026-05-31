@@ -347,8 +347,9 @@ pub fn transitionImageLayout(
     newLayout: c.VkImageLayout,
     mipLevels: u32,
 ) !void {
-    const commandBuffer = try self.beginSingleTimeCommands();
-
+    // Resolve the barrier masks *before* allocating a single-time
+    // command buffer so an unsupported layout pair doesn't leak one
+    // from `self.commandPool` on the early-return path.
     var srcAccessMask: c.VkAccessFlags = 0;
     var dstAccessMask: c.VkAccessFlags = 0;
     var srcStage: c.VkPipelineStageFlags = 0;
@@ -371,6 +372,8 @@ pub fn transitionImageLayout(
     } else {
         return error.UnsupportedLayoutTransition;
     }
+
+    const commandBuffer = try self.beginSingleTimeCommands();
 
     const barrier: c.VkImageMemoryBarrier = .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,

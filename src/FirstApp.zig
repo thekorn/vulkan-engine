@@ -472,6 +472,14 @@ pub fn run(self: *Self) !void {
 /// texture. Mirrors the upstream tutorial's `LveTexture`-loading
 /// step in `FirstApp::loadGameObjects`.
 fn loadTextures(self: *Self) !void {
+    // Roll back the registry on a partial failure: any texture that
+    // already made it into `self.textures` (plus the map's backing
+    // allocation) needs to be torn down before this function returns
+    // an error, otherwise `init`'s `errdefer self.deinitTextures()`
+    // never fires (it's only registered *after* `loadTextures`
+    // succeeds).
+    errdefer self.deinitTextures();
+
     // 1×1 white fallback. The fragment shader multiplies the sampled
     // RGB into the final color, so (1, 1, 1, 1) leaves the look of
     // untextured objects unchanged.
