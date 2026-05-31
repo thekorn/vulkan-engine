@@ -24,6 +24,7 @@ words = [
     "glslang",
     "glslc",
     "cobertura",
+    "codecov",
     "dawidd",
     "infos",
     "kcov",
