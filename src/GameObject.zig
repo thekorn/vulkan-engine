@@ -21,6 +21,15 @@ id_t: u64,
 model: ?Model,
 color: Vec3,
 transform: TransformComponent,
+/// Optional point-light component. When non-null the object is
+/// treated as a point light by `PointLightSystem` (which mirrors
+/// `LveGameObject::pointLight` in the upstream tutorial — an
+/// optional `std::unique_ptr<PointLightComponent>`).
+pointLight: ?PointLightComponent = null,
+
+pub const PointLightComponent = struct {
+    lightIntensity: f32 = 1.0,
+};
 
 pub const TransformComponent = struct {
     translation: Vec3 = .{ 0, 0, 0 },
@@ -136,6 +145,19 @@ pub fn createGameObject() Self {
     };
 }
 
+/// Construct a model-less object representing a point light.
+/// Mirrors `LveGameObject::makePointLight` in the upstream tutorial:
+/// the radius is stored in `transform.scale[0]` and the
+/// `pointLight` component carries the light intensity. Color is the
+/// object's `color` field, mapped 1:1 onto the light's RGB.
+pub fn makePointLight(intensity: f32, radius: f32, color: Vec3) Self {
+    var obj = createGameObject();
+    obj.color = color;
+    obj.transform.scale[0] = radius;
+    obj.pointLight = .{ .lightIntensity = intensity };
+    return obj;
+}
+
 pub fn deinit(self: *Self) void {
     if (self.model) |*m| m.deinit();
 }
@@ -189,11 +211,28 @@ test "TransformComponent.mat4 places translation in the last column" {
 
 test "GameObject has expected fields" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 4), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 5), info.fields.len);
     try std.testing.expectEqual(u64, @FieldType(Self, "id_t"));
     try std.testing.expectEqual(?Model, @FieldType(Self, "model"));
     try std.testing.expectEqual(Vec3, @FieldType(Self, "color"));
     try std.testing.expectEqual(TransformComponent, @FieldType(Self, "transform"));
+    try std.testing.expectEqual(?PointLightComponent, @FieldType(Self, "pointLight"));
+}
+
+test "GameObject.makePointLight sets the pointLight component and radius" {
+    const obj = Self.makePointLight(0.2, 0.1, .{ 1, 0.5, 0.25 });
+    try std.testing.expect(obj.model == null);
+    try std.testing.expect(obj.pointLight != null);
+    try std.testing.expectEqual(@as(f32, 0.2), obj.pointLight.?.lightIntensity);
+    try std.testing.expectEqual(@as(f32, 0.1), obj.transform.scale[0]);
+    try std.testing.expectEqual(@as(f32, 1.0), obj.color[0]);
+    try std.testing.expectEqual(@as(f32, 0.5), obj.color[1]);
+    try std.testing.expectEqual(@as(f32, 0.25), obj.color[2]);
+}
+
+test "GameObject default pointLight is null for regular game objects" {
+    const obj = Self.createGameObject();
+    try std.testing.expect(obj.pointLight == null);
 }
 
 test "GameObject.init assigns strictly increasing ids and getId matches id_t" {

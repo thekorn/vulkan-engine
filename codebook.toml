@@ -1,5 +1,6 @@
 words = [
     "alignas",
+    "ang",
     "anyopaque",
     "arocc",
     "cbed",
@@ -56,6 +57,7 @@ words = [
     "programmatically",
     "raii",
     "renderable",
+    "rodrigues",
     "rtti",
     "sascha",
     "sfloat",
