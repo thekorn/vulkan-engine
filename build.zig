@@ -46,16 +46,35 @@ fn coverStep(
     // Compact terminal summary of the kcov report so the user can see
     // the coverage numbers without opening the HTML report. kcov
     // maintains a stable `<dir>/test` symlink pointing at the latest
-    // per-run output, so we can read `coverage.json` directly without
-    // globbing.
+    // per-run output, so we can read `coverage.json` (overall + per-file
+    // percentages) and `codecov.json` (per-line hit counts, used to list
+    // the uncovered line ranges per file) directly without globbing.
     const coverage_json = b.pathJoin(&.{ dir, "test", "coverage.json" });
+    const codecov_json = b.pathJoin(&.{ dir, "test", "codecov.json" });
     const summary_script = b.fmt(
         \\set -eu
         \\echo
         \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "{s}"
         \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "{s}"
+        \\echo "uncovered lines:"
+        \\jq -r '
+        \\  def collapse_ranges:
+        \\    reduce .[] as $n ([];
+        \\      if length == 0 then [[$n, $n]]
+        \\      elif .[-1][1] + 1 == $n then .[:-1] + [[.[-1][0], $n]]
+        \\      else . + [[$n, $n]]
+        \\      end)
+        \\    | map(if .[0] == .[1] then "\(.[0])" else "\(.[0])-\(.[1])" end)
+        \\    | join(", ");
+        \\  .coverage
+        \\  | to_entries
+        \\  | map({{file: .key, uncovered: (.value | to_entries | map(select(.value | startswith("0/"))) | map(.key | tonumber) | sort)}})
+        \\  | map(select(.uncovered | length > 0))
+        \\  | sort_by(.file)
+        \\  | if length == 0 then "  (none)" else (.[] | "  \(.file): \(.uncovered | collapse_ranges)") end
+        \\' "{s}"
         \\echo
-    , .{ coverage_json, coverage_json });
+    , .{ coverage_json, coverage_json, codecov_json });
 
     const summary_command = b.addSystemCommand(&.{ "sh", "-c", summary_script });
     summary_command.step.dependOn(&coverage_command.step);
