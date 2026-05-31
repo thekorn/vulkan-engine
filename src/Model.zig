@@ -25,6 +25,12 @@ pub const Vertex = extern struct {
     color: math.Vec3 = .{ 0, 0, 0 },
     normal: math.Vec3 = .{ 0, 0, 0 },
     uv: math.Vec2 = .{ 0, 0 },
+    /// Object-space tangent for normal mapping: `xyz` is the tangent
+    /// direction along +U, `w` carries the bitangent handedness sign
+    /// (+1 / -1) so the fragment shader can reconstruct the bitangent
+    /// as `cross(N, T) * tangent.w`. Computed by
+    /// `Builder.computeTangents` after the OBJ load + dedup pass.
+    tangent: math.Vec4 = .{ 0, 0, 0, 0 },
 
     pub fn getBindingDescriptions() [1]c.VkVertexInputBindingDescription {
         return [1]c.VkVertexInputBindingDescription{
@@ -36,8 +42,8 @@ pub const Vertex = extern struct {
         };
     }
 
-    pub fn getAttributeDescriptions() [4]c.VkVertexInputAttributeDescription {
-        return [4]c.VkVertexInputAttributeDescription{
+    pub fn getAttributeDescriptions() [5]c.VkVertexInputAttributeDescription {
+        return [5]c.VkVertexInputAttributeDescription{
             c.VkVertexInputAttributeDescription{
                 .location = 0,
                 .binding = 0,
@@ -61,6 +67,12 @@ pub const Vertex = extern struct {
                 .binding = 0,
                 .format = c.VK_FORMAT_R32G32_SFLOAT,
                 .offset = @offsetOf(Vertex, "uv"),
+            },
+            c.VkVertexInputAttributeDescription{
+                .location = 4,
+                .binding = 0,
+                .format = c.VK_FORMAT_R32G32B32A32_SFLOAT,
+                .offset = @offsetOf(Vertex, "tangent"),
             },
         };
     }
@@ -136,6 +148,117 @@ pub const Builder = struct {
 
         if (indices_count > 0) {
             try self.indices.appendSlice(alloc, indices_ptr[0..indices_count]);
+        }
+
+        try self.computeTangents(alloc);
+    }
+
+    /// Compute per-vertex tangents (with handedness sign) from the
+    /// already-populated `vertices` + `indices` arrays. Implements the
+    /// standard "Lengyel" algorithm: per-triangle tangent / bitangent
+    /// from `(edge1, edge2, dUV1, dUV2)`, accumulated per vertex,
+    /// then Gram-Schmidt-orthogonalized against the vertex normal.
+    /// The handedness sign in `tangent.w` lets the fragment shader
+    /// reconstruct the bitangent as `cross(N, T) * tangent.w`.
+    ///
+    /// Triangles with a near-zero UV determinant (e.g. a mesh whose
+    /// OBJ has no `vt` directives — tinyobjloader writes
+    /// `uv = (0, 0)` for every vertex in that case) contribute
+    /// nothing; vertices not reached by a well-conditioned triangle
+    /// fall back to an arbitrary unit vector perpendicular to the
+    /// normal so the TBN matrix in the shader stays valid even when
+    /// the object is later rendered with the flat-normal fallback.
+    fn computeTangents(self: *Builder, alloc: std.mem.Allocator) !void {
+        const n = self.vertices.items.len;
+        if (n == 0) return;
+
+        const accum_t = try alloc.alloc(math.Vec3, n);
+        defer alloc.free(accum_t);
+        const accum_b = try alloc.alloc(math.Vec3, n);
+        defer alloc.free(accum_b);
+        @memset(accum_t, math.Vec3{ 0, 0, 0 });
+        @memset(accum_b, math.Vec3{ 0, 0, 0 });
+
+        // Walk the index buffer one triangle at a time. The vertex
+        // indices are named `idx0` / `idx1` / `idx2` (rather than the
+        // mathematical `i0` / `i1` / `i2`) because Zig 0.16 made
+        // `i0`, `i1`, ... primitive integer type names.
+        var tri: usize = 0;
+        while (tri + 3 <= self.indices.items.len) : (tri += 3) {
+            const idx0: usize = self.indices.items[tri];
+            const idx1: usize = self.indices.items[tri + 1];
+            const idx2: usize = self.indices.items[tri + 2];
+            const v0 = self.vertices.items[idx0];
+            const v1 = self.vertices.items[idx1];
+            const v2 = self.vertices.items[idx2];
+
+            const e1 = v1.position - v0.position;
+            const e2 = v2.position - v0.position;
+            const du1 = v1.uv - v0.uv;
+            const du2 = v2.uv - v0.uv;
+
+            const det = du1[0] * du2[1] - du2[0] * du1[1];
+            if (@abs(det) < 1e-8) continue;
+            const r: f32 = 1.0 / det;
+
+            const t: math.Vec3 = .{
+                (e1[0] * du2[1] - e2[0] * du1[1]) * r,
+                (e1[1] * du2[1] - e2[1] * du1[1]) * r,
+                (e1[2] * du2[1] - e2[2] * du1[1]) * r,
+            };
+            const b: math.Vec3 = .{
+                (e2[0] * du1[0] - e1[0] * du2[0]) * r,
+                (e2[1] * du1[0] - e1[1] * du2[0]) * r,
+                (e2[2] * du1[0] - e1[2] * du2[0]) * r,
+            };
+
+            accum_t[idx0] += t;
+            accum_t[idx1] += t;
+            accum_t[idx2] += t;
+            accum_b[idx0] += b;
+            accum_b[idx1] += b;
+            accum_b[idx2] += b;
+        }
+
+        for (self.vertices.items, 0..) |*v, idx| {
+            const n_vec = v.normal;
+            var t_vec = accum_t[idx];
+
+            // Gram-Schmidt: project T onto the tangent plane defined
+            // by N. Without this, non-orthogonal contributions across
+            // shared edges drift the tangent away from the surface.
+            const dot_nt = math.dot3(n_vec, t_vec);
+            const n_scaled: math.Vec3 = n_vec * @as(math.Vec3, @splat(dot_nt));
+            t_vec -= n_scaled;
+
+            const tlen = math.length3(t_vec);
+            if (tlen < 1e-6) {
+                // Fallback: any vector perpendicular to N. Used by
+                // vertices that weren't reached by a well-conditioned
+                // triangle (e.g. the vase meshes whose OBJ has no
+                // texcoords, so every triangle has det == 0).
+                const axis: math.Vec3 = if (@abs(n_vec[0]) < 0.9)
+                    .{ 1, 0, 0 }
+                else
+                    .{ 0, 1, 0 };
+                t_vec = math.cross3(n_vec, axis);
+                const fl = math.length3(t_vec);
+                if (fl > 0.0) {
+                    t_vec /= @as(math.Vec3, @splat(fl));
+                }
+            } else {
+                t_vec /= @as(math.Vec3, @splat(tlen));
+            }
+
+            // Handedness: +1 when the reconstructed bitangent
+            // (`cross(N, T)`) agrees with the accumulated B, -1
+            // otherwise. Mirrors the standard MikkTSpace convention.
+            const b_actual = math.cross3(n_vec, t_vec);
+            const w: f32 = if (math.dot3(b_actual, accum_b[idx]) < 0.0)
+                -1.0
+            else
+                1.0;
+            v.tangent = .{ t_vec[0], t_vec[1], t_vec[2], w };
         }
     }
 };
@@ -262,12 +385,14 @@ test "Vertex has expected size derived from field layout" {
     const color_type = @TypeOf(@field(@as(Vertex, undefined), "color"));
     const normal_type = @TypeOf(@field(@as(Vertex, undefined), "normal"));
     const uv_type = @TypeOf(@field(@as(Vertex, undefined), "uv"));
+    const tangent_type = @TypeOf(@field(@as(Vertex, undefined), "tangent"));
 
     const ends = [_]usize{
         @offsetOf(Vertex, "position") + @sizeOf(position_type),
         @offsetOf(Vertex, "color") + @sizeOf(color_type),
         @offsetOf(Vertex, "normal") + @sizeOf(normal_type),
         @offsetOf(Vertex, "uv") + @sizeOf(uv_type),
+        @offsetOf(Vertex, "tangent") + @sizeOf(tangent_type),
     };
     var data_end: usize = 0;
     for (ends) |e| if (e > data_end) {
@@ -285,6 +410,7 @@ test "Vertex has expected size derived from field layout" {
         .color = .{ 1.0, 0.0, 0.0 },
         .normal = .{ 0.0, 1.0, 0.0 },
         .uv = .{ 0.5, 0.25 },
+        .tangent = .{ 1.0, 0.0, 0.0, 1.0 },
     };
     try std.testing.expectEqual(@as(f32, 1.0), v.position[0]);
     try std.testing.expectEqual(@as(f32, 2.0), v.position[1]);
@@ -294,6 +420,8 @@ test "Vertex has expected size derived from field layout" {
     try std.testing.expectEqual(@as(f32, 1.0), v.normal[1]);
     try std.testing.expectEqual(@as(f32, 0.5), v.uv[0]);
     try std.testing.expectEqual(@as(f32, 0.25), v.uv[1]);
+    try std.testing.expectEqual(@as(f32, 1.0), v.tangent[0]);
+    try std.testing.expectEqual(@as(f32, 1.0), v.tangent[3]);
 }
 
 test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
@@ -308,10 +436,10 @@ test "Vertex.getBindingDescriptions returns a single binding for binding 0" {
     );
 }
 
-test "Vertex.getAttributeDescriptions has position, color, normal, uv" {
+test "Vertex.getAttributeDescriptions has position, color, normal, uv, tangent" {
     const attrs = Vertex.getAttributeDescriptions();
 
-    try std.testing.expectEqual(@as(usize, 4), attrs.len);
+    try std.testing.expectEqual(@as(usize, 5), attrs.len);
 
     // position @ location 0
     try std.testing.expectEqual(@as(u32, 0), attrs[0].location);
@@ -348,6 +476,15 @@ test "Vertex.getAttributeDescriptions has position, color, normal, uv" {
         attrs[3].format,
     );
     try std.testing.expectEqual(@as(u32, @offsetOf(Vertex, "uv")), attrs[3].offset);
+
+    // tangent @ location 4 (4-component: xyz direction + handedness sign in w)
+    try std.testing.expectEqual(@as(u32, 4), attrs[4].location);
+    try std.testing.expectEqual(@as(u32, 0), attrs[4].binding);
+    try std.testing.expectEqual(
+        @as(c_uint, c.VK_FORMAT_R32G32B32A32_SFLOAT),
+        attrs[4].format,
+    );
+    try std.testing.expectEqual(@as(u32, @offsetOf(Vertex, "tangent")), attrs[4].offset);
 }
 
 test "Vertex.getAttributeDescriptions offsets are all distinct" {

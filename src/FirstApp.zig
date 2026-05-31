@@ -42,19 +42,22 @@ device: *Device,
 loop: Loop,
 renderer: Renderer,
 /// Pool used to allocate the per-frame global descriptor sets *and*
-/// the per-unique-texture material descriptor sets in `run()`.
-/// Sized for one uniform-buffer descriptor per frame in flight plus
-/// one combined-image-sampler descriptor per entry in `textures`.
+/// the per-game-object material descriptor sets in `run()`. Sized
+/// for one uniform-buffer descriptor per frame in flight plus
+/// `2 * MAX_TEXTURE_SETS` combined-image-sampler descriptors (two
+/// per material set: binding 0 diffuse + binding 1 normal map).
 /// Owned by `FirstApp` so its lifetime spans every render-system
 /// rebuild triggered by swapchain recreation.
 globalPool: Descriptors.DescriptorPool,
 gameObjects: GameObject.Map,
 /// Heap-allocated `Texture` registry keyed by `@embedFile` basename
-/// (e.g. `"stonefloor01_color_rgba.ktx"`), plus a synthetic
-/// `"__default_white__"` entry used as the fallback for objects
-/// without a `textureName`. Stored as pointers so the addresses
-/// remain stable as the map grows. Populated by `loadTextures` from
-/// `init`; torn down in `deinit`.
+/// (e.g. `"stonefloor01_color_rgba.ktx"`,
+/// `"stonefloor01_normal_rgba.ktx"`), plus two synthetic fallbacks:
+/// `"__default_white__"` (1×1 RGBA8 white) for objects without a
+/// `textureName` and `"__default_flat_normal__"` (1×1 RGBA8
+/// (128, 128, 255)) for objects without a `normalName`. Stored as
+/// pointers so the addresses remain stable as the map grows.
+/// Populated by `loadTextures` from `init`; torn down in `deinit`.
 textures: std.StringHashMapUnmanaged(*Texture),
 
 pub fn init(alloc: std.mem.Allocator) !Self {
@@ -72,9 +75,11 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
     var poolBuilder = Descriptors.DescriptorPool.Builder.init(alloc, device);
     errdefer poolBuilder.deinit();
-    // Per-frame UBO sets plus one combined-image-sampler set per
-    // unique texture loaded below (`loadTextures` adds two:
-    // `"__default_white__"` and `stonefloor01_color_rgba.ktx`).
+    // Per-frame UBO sets plus one material descriptor set per
+    // renderable game object. Each material set now binds **two**
+    // combined-image-samplers (`binding = 0` diffuse,
+    // `binding = 1` normal map), so the descriptor count for the
+    // sampler pool is `2 * MAX_TEXTURE_SETS`.
     poolBuilder.setMaxSets(Swapchain.MAX_FRAMES_IN_FLIGHT + MAX_TEXTURE_SETS);
     try poolBuilder.addPoolSize(
         c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -82,7 +87,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     );
     try poolBuilder.addPoolSize(
         c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        MAX_TEXTURE_SETS,
+        2 * MAX_TEXTURE_SETS,
     );
     var globalPool = try poolBuilder.build();
     errdefer globalPool.deinit();
@@ -106,8 +111,10 @@ pub fn init(alloc: std.mem.Allocator) !Self {
     return self;
 }
 
-/// Upper bound on the number of unique texture descriptor sets the
-/// `globalPool` is sized for. Bumped together with `loadTextures`.
+/// Upper bound on the number of per-game-object material descriptor
+/// sets the `globalPool` is sized for. Each set holds two
+/// combined-image-sampler descriptors (diffuse + normal map), so the
+/// pool's `COMBINED_IMAGE_SAMPLER` count is `2 * MAX_TEXTURE_SETS`.
 const MAX_TEXTURE_SETS: u32 = 8;
 
 pub fn deinit(self: *Self) void {
@@ -204,10 +211,13 @@ pub fn run(self: *Self) !void {
         if (!try writer.build(set)) return error.DescriptorAllocationFailed;
     }
 
-    // Per-object material descriptor set layout: one
-    // combined-image-sampler at binding 0 (fragment stage), bound at
-    // `set = 1` by `SimpleRenderSystem`. Built once and shared across
-    // every per-texture descriptor set allocated below.
+    // Per-object material descriptor set layout: two
+    // combined-image-samplers in the fragment stage, bound at
+    // `set = 1` by `SimpleRenderSystem`:
+    //   binding 0 → diffuse (`diffuseMap` in `shader.frag`)
+    //   binding 1 → tangent-space normal map (`normalMap`)
+    // Built once and shared across every per-material descriptor set
+    // allocated below.
     var textureSetLayoutBuilder = Descriptors.DescriptorSetLayout.Builder.init(
         self.alloc,
         self.device,
@@ -219,32 +229,44 @@ pub fn run(self: *Self) !void {
         c.VK_SHADER_STAGE_FRAGMENT_BIT,
         1,
     );
+    try textureSetLayoutBuilder.addBinding(
+        1,
+        c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        c.VK_SHADER_STAGE_FRAGMENT_BIT,
+        1,
+    );
     var textureSetLayout = try textureSetLayoutBuilder.build();
     defer textureSetLayout.deinit();
 
-    // One descriptor set per *unique* `Texture` (not per game
-    // object) — the oracle review flagged the per-object variant as
-    // wasteful here. Walk `self.textures` once and stash the
-    // resulting `VkDescriptorSet`s in a parallel map keyed by the
-    // same `@embedFile` basename. Renderable game objects then look
-    // their set up by `textureName` (falling back to
-    // `"__default_white__"`).
-    var textureDescriptorSets: std.StringHashMapUnmanaged(c.VkDescriptorSet) = .empty;
-    defer textureDescriptorSets.deinit(self.alloc);
+    // One descriptor set per renderable `GameObject`, each with both
+    // a diffuse and a normal map. Objects without a named diffuse
+    // (`textureName`) get the 1×1 white fallback; objects without a
+    // named normal map (`normalName`) get the 1×1 flat-normal
+    // fallback (RGB = (128, 128, 255), decoding to the tangent-space
+    // `+Z` unit vector). This means the shader path is uniform for
+    // every renderable, materials without a normal map fall back to
+    // the geometric normal in `shader.frag`, and we only need one
+    // descriptor set per object instead of cross-referencing two
+    // texture maps at draw time.
+    //
+    // The two `VkDescriptorImageInfo`s for each object live on the
+    // current iteration's stack frame; `DescriptorWriter.build`
+    // forwards their addresses to `vkUpdateDescriptorSets`
+    // immediately and never touches them again, so the per-iteration
+    // lifetime is enough.
+    var stamp_it = self.gameObjects.valueIterator();
+    while (stamp_it.next()) |obj| {
+        if (obj.model == null) continue;
 
-    // Each `VkDescriptorImageInfo` written to a descriptor set must
-    // outlive the `DescriptorWriter.build` call that consumes it —
-    // the writer stores a pointer, not a copy. The two-step
-    // collect-then-write pattern below keeps the infos alive in a
-    // stable `ArrayList` allocation while every set is built.
-    var imageInfos: std.ArrayList(c.VkDescriptorImageInfo) = .empty;
-    defer imageInfos.deinit(self.alloc);
-    try imageInfos.ensureTotalCapacityPrecise(self.alloc, self.textures.count());
+        const diffuse_name = obj.textureName orelse "__default_white__";
+        const normal_name = obj.normalName orelse "__default_flat_normal__";
+        const diffuse_tex = self.textures.get(diffuse_name) orelse
+            return error.MissingTexture;
+        const normal_tex = self.textures.get(normal_name) orelse
+            return error.MissingTexture;
 
-    var tex_it = self.textures.iterator();
-    while (tex_it.next()) |entry| {
-        imageInfos.appendAssumeCapacity(entry.value_ptr.*.descriptorInfo());
-        const info_ptr = &imageInfos.items[imageInfos.items.len - 1];
+        const diffuse_info = diffuse_tex.descriptorInfo();
+        const normal_info = normal_tex.descriptorInfo();
 
         var writer = Descriptors.DescriptorWriter.init(
             self.alloc,
@@ -252,29 +274,13 @@ pub fn run(self: *Self) !void {
             &self.globalPool,
         );
         defer writer.deinit();
-        try writer.writeImage(0, info_ptr);
+        try writer.writeImage(0, &diffuse_info);
+        try writer.writeImage(1, &normal_info);
 
         // SAFETY: written by writer.build below before any read.
         var set: c.VkDescriptorSet = undefined;
         if (!try writer.build(&set)) return error.DescriptorAllocationFailed;
-        try textureDescriptorSets.put(self.alloc, entry.key_ptr.*, set);
-    }
-
-    const default_texture_set = textureDescriptorSets.get("__default_white__") orelse
-        return error.MissingDefaultTexture;
-
-    // Stamp the chosen descriptor set onto every renderable game
-    // object so `SimpleRenderSystem.renderGameObjects` can bind it
-    // at `set = 1` without re-hashing per draw. Objects without a
-    // `textureName` get the white fallback so the shader path is
-    // uniform.
-    var stamp_it = self.gameObjects.valueIterator();
-    while (stamp_it.next()) |obj| {
-        if (obj.model == null) continue;
-        obj.textureDescriptorSet = if (obj.textureName) |name|
-            textureDescriptorSets.get(name) orelse return error.MissingTexture
-        else
-            default_texture_set;
+        obj.textureDescriptorSet = set;
     }
 
     var simpleRenderSystem = try SimpleRenderSystem.init(
@@ -472,10 +478,11 @@ pub fn run(self: *Self) !void {
 }
 
 /// Populate `self.textures` with every `Texture` the scene needs:
-/// the embedded KTX1 stone-floor asset, plus a synthetic 1×1 white
-/// fallback used by every object that does not opt in to a named
-/// texture. Mirrors the upstream tutorial's `LveTexture`-loading
-/// step in `FirstApp::loadGameObjects`.
+/// the embedded KTX1 stone-floor diffuse + normal maps, plus two
+/// synthetic 1×1 fallbacks (a white diffuse and a flat normal map)
+/// used by every object that does not opt in to a named texture.
+/// Mirrors the upstream tutorial's `LveTexture`-loading step in
+/// `FirstApp::loadGameObjects`.
 fn loadTextures(self: *Self) !void {
     // Roll back the registry on a partial failure: any texture that
     // already made it into `self.textures` (plus the map's backing
@@ -485,9 +492,9 @@ fn loadTextures(self: *Self) !void {
     // succeeds).
     errdefer self.deinitTextures();
 
-    // 1×1 white fallback. The fragment shader multiplies the sampled
-    // RGB into the final color, so (1, 1, 1, 1) leaves the look of
-    // untextured objects unchanged.
+    // 1×1 white diffuse fallback. The fragment shader multiplies the
+    // sampled RGB into the final color, so (1, 1, 1, 1) leaves the
+    // look of untextured objects unchanged.
     {
         const tex = try self.alloc.create(Texture);
         errdefer self.alloc.destroy(tex);
@@ -495,6 +502,20 @@ fn loadTextures(self: *Self) !void {
         tex.* = try Texture.initFromPixels(self.device, white[0..], 1, 1);
         errdefer tex.deinit();
         try self.textures.put(self.alloc, "__default_white__", tex);
+    }
+
+    // 1×1 flat-normal fallback. RGB (128, 128, 255) decodes to the
+    // tangent-space `+Z` unit vector — i.e. "no perturbation" — so
+    // objects without an explicit normal map still take the same
+    // codepath in `shader.frag` but come out indistinguishable from
+    // the pre-normal-mapping look.
+    {
+        const tex = try self.alloc.create(Texture);
+        errdefer self.alloc.destroy(tex);
+        const flat = [_]u8{ 128, 128, 255, 255 };
+        tex.* = try Texture.initFromPixels(self.device, flat[0..], 1, 1);
+        errdefer tex.deinit();
+        try self.textures.put(self.alloc, "__default_flat_normal__", tex);
     }
 
     // Stone-floor color map. Embedded at build time by
@@ -507,6 +528,18 @@ fn loadTextures(self: *Self) !void {
         tex.* = try Texture.initFromKtxBytes(self.device, ktx_bytes);
         errdefer tex.deinit();
         try self.textures.put(self.alloc, "stonefloor01_color_rgba.ktx", tex);
+    }
+
+    // Matching tangent-space normal map for the stone floor. Same
+    // loader path as the diffuse — the KTX1 file ships as RGBA8 so
+    // it satisfies `initFromKtxBytes`'s strict format checks.
+    {
+        const tex = try self.alloc.create(Texture);
+        errdefer self.alloc.destroy(tex);
+        const ktx_bytes = @embedFile("stonefloor01_normal_rgba.ktx");
+        tex.* = try Texture.initFromKtxBytes(self.device, ktx_bytes);
+        errdefer tex.deinit();
+        try self.textures.put(self.alloc, "stonefloor01_normal_rgba.ktx", tex);
     }
 }
 
@@ -563,14 +596,16 @@ fn loadGameObjects(self: *Self) !void {
                 .scale = .{ 3.0, 1.0, 3.0 },
             },
         );
-        // Tag the floor with the embedded KTX texture key. `run()`
-        // looks each texture up in `self.textures` after the
-        // descriptor sets have been built and stamps the matching
+        // Tag the floor with the embedded KTX texture keys (diffuse
+        // + matching tangent-space normal map). `run()` looks each
+        // texture up in `self.textures` after the descriptor sets
+        // have been built and stamps the matching
         // `textureDescriptorSet` onto each object. `GameObject.color`
         // is unused by `SimpleRenderSystem`; the per-vertex color
         // (white, supplied as the OBJ default by tinyobjloader) is
         // what the fragment shader multiplies the sampled texel by.
         floor.textureName = "stonefloor01_color_rgba.ktx";
+        floor.normalName = "stonefloor01_normal_rgba.ktx";
         try self.gameObjects.put(self.alloc, floor.getId(), floor);
     }
 

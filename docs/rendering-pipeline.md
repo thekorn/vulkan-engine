@@ -53,28 +53,37 @@ graphics pipeline model:
     world-space normal
     (`fragNormalWorld = normalize(mat3(normalMatrix) * normal)`)
     and the clip-space `gl_Position = projection * view * positionWorld`.
-    The raw vertex `color` is forwarded unchanged as `fragColor`
-    and the vertex `uv` as `fragUv` — lighting is no longer
-    evaluated here.
+    Also transforms the object-space tangent by the model matrix's
+    upper-3x3 and forwards it (together with the handedness sign
+    from `tangent.w`) as `fragTangentWorld` so the fragment shader
+    can build a TBN basis for normal mapping. The raw vertex
+    `color` is forwarded unchanged as `fragColor` and the vertex
+    `uv` as `fragUv` — lighting is no longer evaluated here.
   - `shader.frag` - Fragment shader for `SimpleRenderSystem`.
     Reads the full global UBO at `set = 0, binding = 0`:
     `mat4 projection`, `mat4 view`, `mat4 invView`,
     `vec4 ambientLightColor` (`w` is intensity),
     `PointLight pointLights[10]` (each `{ vec4 position; vec4 color }`,
-    `color.w` is intensity) and `int numLights`. Also samples a
-    `diffuseMap` (combined image sampler) at
-    `set = 1, binding = 0`. Using the interpolated `fragPosWorld`
-    and `fragNormalWorld`, it recovers the camera world-space
-    position as `ubo.invView[3].xyz`, seeds `diffuseLight` with the
-    ambient term, then loops `for (int i = 0; i < ubo.numLights;
-    i++)` accumulating each light's `1 / distance²`-attenuated
-    diffuse contribution plus a Blinn-Phong specular term
-    (half-angle `H = normalize(L + V)`, raised to the 512th power
-    for a sharp highlight) before writing
-    `(diffuseLight + specularLight) * fragColor *
+    `color.w` is intensity) and `int numLights`. Samples two
+    combined-image-samplers — `diffuseMap` at
+    `set = 1, binding = 0` and `normalMap` at
+    `set = 1, binding = 1`. Builds a world-space TBN basis from
+    the interpolated normal, the Gram-Schmidt-re-orthogonalized
+    tangent and the handedness sign, decodes the sampled tangent-
+    space normal (`sampled * 2 - 1`) and rotates it into world
+    space to obtain the perturbed `surfaceNormal`. Using the
+    interpolated `fragPosWorld`, it recovers the camera
+    world-space position as `ubo.invView[3].xyz`, seeds
+    `diffuseLight` with the ambient term, then loops
+    `for (int i = 0; i < ubo.numLights; i++)` accumulating each
+    light's `1 / distance²`-attenuated diffuse contribution plus a
+    Blinn-Phong specular term (half-angle `H = normalize(L + V)`,
+    raised to the 512th power for a sharp highlight) before
+    writing `(diffuseLight + specularLight) * fragColor *
     texture(diffuseMap, fragUv).rgb` to `outColor`. Objects without
-    a named texture get a 1×1 white fallback descriptor set so the
-    texture multiplier is `1` and their look is unchanged.
+    named textures get a 1×1 white diffuse + a 1×1 flat normal map
+    (`(128, 128, 255)` → `+Z` in tangent space) so the codepath is
+    uniform and their look is unchanged.
   - `point_light.vert` - Vertex shader for `PointLightSystem`. Takes
     no vertex input; emits the six corners of a screen-aligned quad
     from `OFFSETS[gl_VertexIndex]`. Extracts the camera right / up
@@ -166,11 +175,13 @@ layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
+layout(location = 4) in vec4 tangent; // xyz = tangent direction, w = handedness sign
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragPosWorld;
 layout(location = 2) out vec3 fragNormalWorld;
 layout(location = 3) out vec2 fragUv;
+layout(location = 4) out vec4 fragTangentWorld; // xyz world-space tangent, w handedness
 
 // GlobalUbo at set = 0, binding = 0 (shown above)
 
@@ -183,6 +194,8 @@ void main() {
     vec4 positionWorld = push.modelMatrix * vec4(position, 1.0);
     gl_Position = ubo.projection * ubo.view * positionWorld;
     fragNormalWorld = normalize(mat3(push.normalMatrix) * normal);
+    vec3 tangentWorld = normalize(mat3(push.modelMatrix) * tangent.xyz);
+    fragTangentWorld = vec4(tangentWorld, tangent.w);
     fragPosWorld = positionWorld.xyz;
     fragColor = color;
     fragUv = uv;
@@ -198,15 +211,18 @@ layout (location = 0) in vec3 fragColor;
 layout (location = 1) in vec3 fragPosWorld;
 layout (location = 2) in vec3 fragNormalWorld;
 layout (location = 3) in vec2 fragUv;
+layout (location = 4) in vec4 fragTangentWorld;
 
 layout (location = 0) out vec4 outColor;
 
 // GlobalUbo at set = 0, binding = 0 (shown above)
 
-// Per-object material texture, bound by `SimpleRenderSystem` from
+// Per-object material textures bound by `SimpleRenderSystem` from
 // each `GameObject.textureDescriptorSet`. Objects without a named
-// texture get a 1×1 white fallback.
+// diffuse / normal texture get the 1×1 white / 1×1 flat-normal
+// fallback respectively.
 layout(set = 1, binding = 0) uniform sampler2D diffuseMap;
+layout(set = 1, binding = 1) uniform sampler2D normalMap;
 
 layout(push_constant) uniform Push {
     mat4 modelMatrix;
@@ -214,9 +230,22 @@ layout(push_constant) uniform Push {
 } push;
 
 void main() {
+    // Reconstruct the world-space TBN basis: Gram-Schmidt
+    // orthogonalize the tangent against the normal so non-uniform
+    // scaling on the model matrix doesn't tilt the basis, then
+    // recover the bitangent from the pre-computed handedness sign.
+    vec3 N = normalize(fragNormalWorld);
+    vec3 T = normalize(fragTangentWorld.xyz - N * dot(N, fragTangentWorld.xyz));
+    vec3 B = cross(N, T) * fragTangentWorld.w;
+    mat3 TBN = mat3(T, B, N);
+
+    // Decode the tangent-space normal (RGB 0..1 -> -1..1) and rotate
+    // it into world space.
+    vec3 sampledNormalTS = texture(normalMap, fragUv).xyz * 2.0 - 1.0;
+    vec3 surfaceNormal = normalize(TBN * sampledNormalTS);
+
     vec3 diffuseLight = ubo.ambientLightColor.xyz * ubo.ambientLightColor.w;
     vec3 specularLight = vec3(0.0);
-    vec3 surfaceNormal = normalize(fragNormalWorld);
 
     vec3 cameraPosWorld = ubo.invView[3].xyz;
     vec3 viewDirection = normalize(cameraPosWorld - fragPosWorld);
@@ -344,16 +373,27 @@ Blinn-Phong specular term using the camera position recovered
 from `ubo.invView[3].xyz`. `projection * view` is applied in the
 shader instead of being baked into the push-constant transform.
 
-The floor quad samples `stonefloor01_color_rgba.ktx` via a
-`COMBINED_IMAGE_SAMPLER` bound at `set = 1, binding = 0` (the
-`diffuseMap` declaration in `shader.frag`). `FirstApp.run`
-allocates one descriptor set per *unique* texture out of
-`globalPool`, then stamps each game object's
-`textureDescriptorSet` with either the named texture's set or a
-1×1 white fallback (registered as `"__default_white__"`) so the
-shader path is uniform across textured and untextured objects.
-`SimpleRenderSystem.renderGameObjects` binds the chosen set per
-draw before the push constants.
+The floor quad samples `stonefloor01_color_rgba.ktx` (diffuse)
+together with its matching `stonefloor01_normal_rgba.ktx`
+(tangent-space normal map) via two `COMBINED_IMAGE_SAMPLER`s bound
+at `set = 1, binding = 0` and `set = 1, binding = 1` (the
+`diffuseMap` / `normalMap` declarations in `shader.frag`).
+`FirstApp.run` allocates one descriptor set per renderable
+`GameObject` out of `globalPool`, filling binding 0 with the
+object's `textureName` (defaulting to `"__default_white__"`) and
+binding 1 with its `normalName` (defaulting to
+`"__default_flat_normal__"`, which decodes to the tangent-space
+`+Z` unit vector — i.e. "no perturbation"). The chosen set is
+stamped onto each object's `textureDescriptorSet` so the shader
+path is uniform across textured and untextured objects, and
+`SimpleRenderSystem.renderGameObjects` binds it per draw before
+the push constants.
+
+Tangents for normal mapping are generated by
+`Model.Builder.computeTangents` (a Lengyel-style per-triangle
+accumulation plus Gram-Schmidt orthogonalization) and uploaded as
+a fifth `Vec4` vertex attribute (`xyz` direction plus handedness
+sign in `w`).
 
 ## Key Configuration Parameters
 

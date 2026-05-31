@@ -74,16 +74,21 @@ big-picture data flow see [architecture.md](./architecture.md).
        `globalDescriptorSets[i]` per frame in flight out of
        `self.globalPool`, each pointing at the matching `uboBuffers[i]`
        via `Descriptors.DescriptorWriter`.
-    3. Build a `textureSetLayout` (one `COMBINED_IMAGE_SAMPLER`
-       binding at binding 0, fragment stage), allocate one
-       descriptor set per *unique* entry in `self.textures` out of
-       the same `globalPool` (each pointing at the matching
-       texture's view + sampler via `DescriptorWriter.writeImage`),
-       then walk `self.gameObjects` and stamp the chosen descriptor
-       set onto each renderable object's `textureDescriptorSet`
-       (using `"__default_white__"` for objects without a
-       `textureName`). Mirrors the upstream tutorial's
-       per-material descriptor-set pattern.
+    3. Build a `textureSetLayout` with two
+       `COMBINED_IMAGE_SAMPLER` bindings at binding 0 (diffuse)
+       and binding 1 (tangent-space normal map), both in the
+       fragment stage. Then walk `self.gameObjects` and, for each
+       renderable, allocate **one descriptor set per game object**
+       out of `globalPool` with both bindings filled in — diffuse
+       from `obj.textureName` (falling back to
+       `"__default_white__"`) and normal from `obj.normalName`
+       (falling back to `"__default_flat_normal__"`). The
+       resulting `VkDescriptorSet` is stamped onto each object's
+       `textureDescriptorSet`. Per-object sets are simpler than the
+       previous per-unique-texture cache and let materials mix the
+       diffuse / normal pair freely without bookkeeping; the
+       overhead is one extra descriptor set per renderable, which
+       comfortably fits within `MAX_TEXTURE_SETS`.
     4. Build a `SimpleRenderSystem` (passing both `globalSetLayout`
        and `textureSetLayout`) and a `PointLightSystem` (just
        `globalSetLayout` — it doesn't sample any textures), a
@@ -124,14 +129,21 @@ big-picture data flow see [architecture.md](./architecture.md).
     11. `vkDeviceWaitIdle` before returning so the GPU is finished
         with everything before resources are destroyed.
   - `loadTextures()` - Populates `self.textures` with every KTX1
-    asset embedded under `textures/` (currently just
-    `stonefloor01_color_rgba.ktx`, parsed via
-    `Texture.initFromKtxBytes`) plus a synthetic 1×1 white texture
-    keyed by `"__default_white__"` that acts as the fallback for
-    objects without a `textureName`. Each `Texture` is
-    `alloc.create`-d separately so the pointers stored in the
-    `StringHashMap` remain stable as the map grows. Called from
-    `init`.
+    asset embedded under `textures/` (currently
+    `stonefloor01_color_rgba.ktx` and the matching
+    `stonefloor01_normal_rgba.ktx`, both parsed via
+    `Texture.initFromKtxBytes`) plus two synthetic 1×1 fallback
+    textures:
+    - `"__default_white__"` (RGBA `(255, 255, 255, 255)`) — the
+      diffuse fallback for objects without a `textureName`.
+    - `"__default_flat_normal__"` (RGBA `(128, 128, 255, 255)`) —
+      the normal-map fallback for objects without a `normalName`.
+      Decodes to the tangent-space `+Z` unit vector, so the
+      TBN computation in the fragment shader leaves the interpolated
+      normal unchanged.
+    Each `Texture` is `alloc.create`-d separately so the pointers
+    stored in the `StringHashMap` remain stable as the map grows.
+    Called from `init`.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj`,
     `smooth_vase.obj` and `quad.obj` via `Model.createModelFromFile`
     and inserts each `GameObject` into `self.gameObjects` keyed by
@@ -139,8 +151,10 @@ big-picture data flow see [architecture.md](./architecture.md).
     - flat vase at `{-0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - smooth vase at `{0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`, with
-      `textureName = "stonefloor01_color_rgba.ktx"` so the stone
-      diffuse map is picked up by `SimpleRenderSystem`.
+      `textureName = "stonefloor01_color_rgba.ktx"` and
+      `normalName = "stonefloor01_normal_rgba.ktx"` so both the
+      stone diffuse map and the matching tangent-space normal map
+      are picked up by `SimpleRenderSystem`.
 
     It then creates six colored point lights (red, blue, green,
     yellow, cyan, white) via `GameObject.makePointLight(intensity =
@@ -668,6 +682,12 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
   - `normal: math.Vec3` at location 2 (`R32G32B32_SFLOAT`)
   - `uv: math.Vec2` at location 3 (`R32G32_SFLOAT`)
+  - `tangent: math.Vec4` at location 4 (`R32G32B32A32_SFLOAT`) —
+    object-space tangent in `xyz`, bitangent handedness sign
+    (`+1` / `-1`) in `w`. Computed by `Builder.computeTangents`
+    after the OBJ load + dedup pass; the fragment shader uses it
+    together with the interpolated normal to build the TBN matrix
+    consumed by normal mapping.
 - **`Builder` struct:** mirrors the upstream C++ tutorial's
   `LveModel::Builder`. Owns its `vertices: ArrayList(Vertex)` and
   `indices: ArrayList(u32)` storage; call `deinit(alloc)` once a
@@ -710,11 +730,15 @@ big-picture data flow see [architecture.md](./architecture.md).
   color, a `TransformComponent` and an optional `PointLightComponent`.
 - **Fields:** `id_t: u64`, `model: ?Model`, `color: Vec3`,
   `transform: TransformComponent`, `pointLight: ?PointLightComponent`,
-  `textureName: ?[]const u8` (basename of the embedded texture the
-  object should render with — `null` means "use the default white
-  fallback"), `textureDescriptorSet: c.VkDescriptorSet` (stamped
-  onto the object by `FirstApp.run` after the per-texture descriptor
-  sets are built; bound at `set = 1` by `SimpleRenderSystem`).
+  `textureName: ?[]const u8` (basename of the embedded diffuse
+  texture — `null` falls back to a 1×1 white texture),
+  `normalName: ?[]const u8` (basename of the embedded tangent-space
+  normal map — `null` falls back to a 1×1 flat-normal texture
+  decoding to the unperturbed surface normal),
+  `textureDescriptorSet: c.VkDescriptorSet` (stamped onto the
+  object by `FirstApp.run` after the per-material descriptor sets
+  are built; bound at `set = 1` by `SimpleRenderSystem`, with
+  binding 0 = diffuse and binding 1 = normal map).
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
   `math.Vec3`) with a `mat4()` method that builds
   `Translate * Ry * Rx * Rz * Scale` using Tait-Bryan Y(1)-X(2)-Z(3)

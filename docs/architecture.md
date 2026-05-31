@@ -291,22 +291,31 @@ render systems can mutate the UBO from their `update()` methods
 without depending on `FirstApp`; `FirstApp` simply re-exports
 `GlobalUbo = FrameInfo.GlobalUbo` for convenience.
 
-Materials / texturing is wired up but minimal: each renderable
-`GameObject` carries a `textureName: ?[]const u8` (e.g.
-`"stonefloor01_color_rgba.ktx"`) plus a `textureDescriptorSet:
-c.VkDescriptorSet` that `FirstApp.run` stamps onto it before the main
-loop. `FirstApp` owns a `textures: StringHashMapUnmanaged(*Texture)`
-populated from `loadTextures()`, which loads every KTX1 asset
-embedded under `textures/` (currently just
-`stonefloor01_color_rgba.ktx`) plus a synthetic `"__default_white__"`
-fallback so the shader path is uniform for objects without a named
-texture. The combined-image-sampler descriptor sets are allocated one
-per *unique* texture out of `globalPool` (sized for
-`MAX_FRAMES_IN_FLIGHT` UBOs + `MAX_TEXTURE_SETS = 8` samplers) and
-shared across every object that references the same texture.
-`SimpleRenderSystem` binds `set = 1` per draw from
-`obj.textureDescriptorSet`; `shader.frag` samples it as
-`diffuseMap` and multiplies the RGB into the lit color.
+Materials / texturing covers diffuse + tangent-space normal
+mapping: each renderable `GameObject` carries a
+`textureName: ?[]const u8` (diffuse, e.g.
+`"stonefloor01_color_rgba.ktx"`), a `normalName: ?[]const u8`
+(normal map, e.g. `"stonefloor01_normal_rgba.ktx"`) and a
+`textureDescriptorSet: c.VkDescriptorSet` that `FirstApp.run`
+stamps onto it before the main loop. `FirstApp` owns a
+`textures: StringHashMapUnmanaged(*Texture)` populated from
+`loadTextures()`, which loads every KTX1 asset embedded under
+`textures/` (currently `stonefloor01_color_rgba.ktx` plus the
+matching `stonefloor01_normal_rgba.ktx`) plus two synthetic
+fallbacks: `"__default_white__"` (1×1 RGBA8 white diffuse) and
+`"__default_flat_normal__"` (1×1 RGBA8 `(128, 128, 255)`
+tangent-space `+Z` unit vector). The combined-image-sampler
+descriptor sets are allocated one per renderable `GameObject` out
+of `globalPool` (sized for `MAX_FRAMES_IN_FLIGHT` UBOs + up to
+`MAX_TEXTURE_SETS = 8` material sets, each holding two image
+samplers) with the chosen diffuse at binding 0 and normal map at
+binding 1. `SimpleRenderSystem` binds `set = 1` per draw from
+`obj.textureDescriptorSet`; `shader.frag` samples them as
+`diffuseMap` and `normalMap`, builds a TBN basis from the
+interpolated normal + tangent + handedness sign and perturbs the
+surface normal before the lighting loop. Tangents come from a
+fifth `Vec4` vertex attribute computed by
+`Model.Builder.computeTangents`.
 
 Next up: a scene-level light list (lights still defaulted in
 `loadGameObjects`), uploading the full KTX mip chain instead of mip

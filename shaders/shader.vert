@@ -4,11 +4,13 @@ layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
+layout(location = 4) in vec4 tangent; // xyz = tangent direction, w = handedness sign
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragPosWorld;
 layout(location = 2) out vec3 fragNormalWorld;
 layout(location = 3) out vec2 fragUv;
+layout(location = 4) out vec4 fragTangentWorld; // xyz world-space tangent, w handedness
 
 struct PointLight {
     vec4 position; // ignore w
@@ -33,6 +35,12 @@ void main() {
     vec4 positionWorld = push.modelMatrix * vec4(position, 1.0);
     gl_Position = ubo.projection * ubo.view * positionWorld;
     fragNormalWorld = normalize(mat3(push.normalMatrix) * normal);
+    // Tangent is a direction in the tangent plane, so transform it by
+    // the model matrix's upper-3x3 (not the normal matrix). The
+    // fragment shader will re-orthogonalize it against the normal so
+    // non-uniform scaling doesn't tilt the TBN basis.
+    vec3 tangentWorld = normalize(mat3(push.modelMatrix) * tangent.xyz);
+    fragTangentWorld = vec4(tangentWorld, tangent.w);
     fragPosWorld = positionWorld.xyz;
     fragColor = color;
     fragUv = uv;
