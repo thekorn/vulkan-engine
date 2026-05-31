@@ -121,7 +121,7 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
 pub fn update(self: *Self, frameInfo: *FrameInfo, ubo: *FrameInfo.GlobalUbo) void {
     _ = self;
 
-    // Rotation around axis (0, -1, 0) by `angle`. Rodriguez's formula
+    // Rotation around axis (0, -1, 0) by `angle`. Rodrigues' rotation formula
     // gives:
     //   x' = cos(a)*x - sin(a)*z
     //   y' = y
