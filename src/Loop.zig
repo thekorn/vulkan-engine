@@ -94,6 +94,34 @@ test "is_running returns false once shutdown is requested, regardless of window"
     try std.testing.expect(!loop.is_running());
 }
 
+// Skip the test on Linux / when GLFW can't initialize a window (CI containers
+// often run headless), mirroring `Window.initOrSkip`.
+fn windowOrSkip(alloc: std.mem.Allocator, width: i32, height: i32) !*Window {
+    if (builtin.os.tag == .linux) return error.SkipZigTest;
+    return Window.init(alloc, width, height) catch |err| switch (err) {
+        error.GlfwInitFailed, error.GlfwCreateWindowFailed => return error.SkipZigTest,
+        else => return err,
+    };
+}
+
+test "is_running returns true for a fresh window with no shutdown requested" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    resetShutdownForTesting();
+    defer resetShutdownForTesting();
+
+    const window = try windowOrSkip(std.testing.allocator, 320, 240);
+    defer window.deinit();
+
+    var loop = try Self.init(window);
+    defer loop.deinit();
+
+    // No shutdown signaled and GLFW has not been told to close the window,
+    // so the loop must keep running. This exercises the non-short-circuit
+    // path of `is_running` that calls into `window.should_close()`.
+    try std.testing.expect(loop.is_running());
+}
+
 test "handleSignal is idempotent (multiple deliveries leave flag true)" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
 

@@ -377,6 +377,22 @@ test "Model has expected fields and types" {
     try std.testing.expectEqual(?Buffer, fields[5].type);
 }
 
+test "Builder.loadModel returns InvalidObj on malformed input" {
+    var builder: Builder = .{};
+    defer builder.deinit(std.testing.allocator);
+
+    // A face line with non-numeric indices makes the tinyobjloader
+    // `LoadObj` call return false (with err = "Failed parse `f' line ..."),
+    // which the wrapper forwards as `err_msg`. This exercises the
+    // `if (err_msg != null)` log branch and the `return error.InvalidObj`
+    // exit in `loadModel`.
+    const bad_obj = "f a b c\n";
+    try std.testing.expectError(
+        error.InvalidObj,
+        builder.loadModel(std.testing.allocator, bad_obj),
+    );
+}
+
 test "createVertexBuffers rejects fewer than 3 vertices" {
     // SAFETY: createVertexBuffers returns InvalidArgument before touching `device`.
     var device: Device = undefined;
