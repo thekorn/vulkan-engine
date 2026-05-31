@@ -62,6 +62,15 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
     std.debug.assert(configInfo.pipelineLayout != null);
     std.debug.assert(configInfo.renderPass != null);
 
+    // Take a local mutable copy and re-point `colorBlendInfo.pAttachments`
+    // at our local `colorBlendAttachment`. The default produced by
+    // `defaultPipelineConfigInfo` captures the address of a stack-local
+    // in that helper, which is dangling by the time we get here. This
+    // also ensures any post-default mutations (e.g.
+    // `enableAlphaBlending`) actually reach `vkCreateGraphicsPipelines`.
+    var localConfig = configInfo;
+    localConfig.colorBlendInfo.pAttachments = &localConfig.colorBlendAttachment;
+
     const vertShaderModule = try createShaderModule(device, vertShader);
     const fragShaderModule = try createShaderModule(device, fragShader);
 
@@ -89,8 +98,8 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
     // Pull the binding/attribute descriptions from the caller-supplied
     // config. The point-light system supplies empty slices because it
     // generates its vertices procedurally from `gl_VertexIndex`.
-    const bindingDescriptions = configInfo.bindingDescriptions;
-    const attributeDescriptions = configInfo.attributeDescriptions;
+    const bindingDescriptions = localConfig.bindingDescriptions;
+    const attributeDescriptions = localConfig.attributeDescriptions;
 
     const vertexInputInfo: c.VkPipelineVertexInputStateCreateInfo = .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -105,16 +114,16 @@ pub fn init(alloc: std.mem.Allocator, device: *Device, fragShader: []const u8, v
         .stageCount = 2,
         .pStages = &shaderStages,
         .pVertexInputState = &vertexInputInfo,
-        .pInputAssemblyState = &configInfo.inputAssemblyInfo,
-        .pViewportState = &configInfo.viewportInfo,
-        .pRasterizationState = &configInfo.rasterizationInfo,
-        .pMultisampleState = &configInfo.multisampleInfo,
-        .pDepthStencilState = &configInfo.depthStencilInfo,
-        .pColorBlendState = &configInfo.colorBlendInfo,
-        .pDynamicState = &configInfo.dynamicStateInfo,
-        .layout = configInfo.pipelineLayout,
-        .renderPass = configInfo.renderPass,
-        .subpass = configInfo.subpass,
+        .pInputAssemblyState = &localConfig.inputAssemblyInfo,
+        .pViewportState = &localConfig.viewportInfo,
+        .pRasterizationState = &localConfig.rasterizationInfo,
+        .pMultisampleState = &localConfig.multisampleInfo,
+        .pDepthStencilState = &localConfig.depthStencilInfo,
+        .pColorBlendState = &localConfig.colorBlendInfo,
+        .pDynamicState = &localConfig.dynamicStateInfo,
+        .layout = localConfig.pipelineLayout,
+        .renderPass = localConfig.renderPass,
+        .subpass = localConfig.subpass,
         .basePipelineHandle = null,
         .basePipelineIndex = -1,
     };
@@ -230,6 +239,25 @@ pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
         .bindingDescriptions = &default_binding_descriptions,
         .attributeDescriptions = &default_attribute_descriptions,
     };
+}
+
+/// Mutates `configInfo.colorBlendAttachment` to enable the standard
+/// "source over" alpha blending used by the point-light billboards.
+/// Mirrors `LvePipeline::enableAlphaBlending` from the upstream
+/// tutorial 27.
+pub fn enableAlphaBlending(configInfo: *PipelineConfigInfo) void {
+    configInfo.colorBlendAttachment.blendEnable = c.VK_TRUE;
+    configInfo.colorBlendAttachment.colorWriteMask =
+        c.VK_COLOR_COMPONENT_R_BIT |
+        c.VK_COLOR_COMPONENT_G_BIT |
+        c.VK_COLOR_COMPONENT_B_BIT |
+        c.VK_COLOR_COMPONENT_A_BIT;
+    configInfo.colorBlendAttachment.srcColorBlendFactor = c.VK_BLEND_FACTOR_SRC_ALPHA;
+    configInfo.colorBlendAttachment.dstColorBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    configInfo.colorBlendAttachment.colorBlendOp = c.VK_BLEND_OP_ADD;
+    configInfo.colorBlendAttachment.srcAlphaBlendFactor = c.VK_BLEND_FACTOR_ONE;
+    configInfo.colorBlendAttachment.dstAlphaBlendFactor = c.VK_BLEND_FACTOR_ZERO;
+    configInfo.colorBlendAttachment.alphaBlendOp = c.VK_BLEND_OP_ADD;
 }
 
 fn createShaderModule(device: *Device, shaderCode: []const u8) !c.VkShaderModule {

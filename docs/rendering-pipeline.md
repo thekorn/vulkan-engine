@@ -281,12 +281,19 @@ layout(push_constant) uniform Push {
     float radius;
 } push;
 
+const float M_PI = 3.1415926538;
+
 void main() {
     float dis = sqrt(dot(fragOffset, fragOffset));
     if (dis >= 1.0) {
         discard;
     }
-    outColor = vec4(push.color.xyz, 1.0);
+
+    // Cosine fall-off from the center (1.0) to the rim (0.0). Used
+    // for both a soft additive bloom on the color *and* the alpha,
+    // so the disc fades out smoothly against the scene.
+    float cosDis = 0.5 * (cos(dis * M_PI) + 1.0);
+    outColor = vec4(push.color.xyz + 0.5 * cosDis, cosDis);
 }
 ```
 
@@ -338,8 +345,16 @@ shader instead of being baked into the push-constant transform.
 
 **Color Blending:**
 
-- Disabled (no blending operations)
-- RGBA write mask: All channels enabled
+- Default: disabled (used by `SimpleRenderSystem`).
+- `PointLightSystem` opts in via `Pipeline.enableAlphaBlending`,
+  which switches the attachment to standard "source over" alpha
+  blending: `srcColor=SRC_ALPHA`, `dstColor=ONE_MINUS_SRC_ALPHA`,
+  `srcAlpha=ONE`, `dstAlpha=ZERO`, both blend ops = `ADD`. Combined
+  with the cosine fall-off in `point_light.frag`, this gives soft
+  fading billboards; the system therefore sorts lights
+  back-to-front (by squared distance to
+  `camera.getPosition()`) before drawing.
+- RGBA write mask: All channels enabled.
 
 **Depth Stencil:**
 

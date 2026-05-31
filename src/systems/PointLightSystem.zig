@@ -97,6 +97,11 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
     std.debug.assert(self.pipelineLayout != null);
 
     var pipelineConfig = Pipeline.defaultPipelineConfigInfo();
+    // Enable standard "source over" alpha blending so the soft-edged
+    // billboards composite nicely over the scene (and over each other,
+    // provided we render them back-to-front; see `render`). Mirrors
+    // the upstream tutorial 27.
+    Pipeline.enableAlphaBlending(&pipelineConfig);
     // The point-light vertex shader generates its vertices procedurally
     // from `gl_VertexIndex`, so there's no vertex buffer bound.
     pipelineConfig.bindingDescriptions = &.{};
@@ -164,7 +169,44 @@ pub fn update(self: *Self, frameInfo: *FrameInfo, ubo: *FrameInfo.GlobalUbo) voi
     ubo.numLights = @intCast(lightIndex);
 }
 
+/// Sort entry used by `render` to draw point-light billboards
+/// back-to-front (farthest first). Mirrors the upstream
+/// `std::map<float, id_t>` + reverse iteration in tutorial 27,
+/// using a small stack-allocated array since we never have more
+/// than `FrameInfo.MAX_LIGHTS` lights.
+const SortedLight = struct {
+    disSquared: f32,
+    id: u64,
+
+    fn farthestFirst(_: void, a: SortedLight, b: SortedLight) bool {
+        return a.disSquared > b.disSquared;
+    }
+};
+
 pub fn render(self: *Self, frameInfo: *FrameInfo) void {
+    // Collect every point-light game object together with its
+    // squared distance to the camera, then sort farthest-first so
+    // the alpha-blended billboards composite correctly.
+    var sorted: [FrameInfo.MAX_LIGHTS]SortedLight = undefined;
+    var sortedCount: usize = 0;
+
+    const cameraPos = frameInfo.camera.getPosition();
+    var it = frameInfo.gameObjects.valueIterator();
+    while (it.next()) |obj| {
+        if (obj.pointLight == null) continue;
+        std.debug.assert(sortedCount < FrameInfo.MAX_LIGHTS);
+
+        const offset = cameraPos - obj.transform.translation;
+        sorted[sortedCount] = .{
+            .disSquared = math.dot3(offset, offset),
+            .id = obj.id_t,
+        };
+        sortedCount += 1;
+    }
+
+    const slice = sorted[0..sortedCount];
+    std.sort.insertion(SortedLight, slice, {}, SortedLight.farthestFirst);
+
     self.pipeline.?.bind(frameInfo.commandBuffer);
 
     c.vkCmdBindDescriptorSets(
@@ -178,9 +220,8 @@ pub fn render(self: *Self, frameInfo: *FrameInfo) void {
         null,
     );
 
-    var it = frameInfo.gameObjects.valueIterator();
-    while (it.next()) |obj| {
-        if (obj.pointLight == null) continue;
+    for (slice) |entry| {
+        const obj = frameInfo.gameObjects.getPtr(entry.id) orelse continue;
 
         const push: PointLightPushConstants = .{
             .position = .{

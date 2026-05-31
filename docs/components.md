@@ -289,6 +289,15 @@ big-picture data flow see [architecture.md](./architecture.md).
     `SimpleRenderSystem` / `Renderer`).
   - `defaultPipelineConfigInfo()` - Generates the default pipeline
     config used by `SimpleRenderSystem`.
+  - `enableAlphaBlending(configInfo)` - Helper that flips a
+    `PipelineConfigInfo` to standard "source over" alpha blending
+    (`SRC_ALPHA` / `ONE_MINUS_SRC_ALPHA`, alpha factors
+    `ONE` / `ZERO`, both blend ops `ADD`). Used by
+    `PointLightSystem` so the soft-edged billboards composite
+    cleanly over the scene. `Pipeline.init` also re-binds
+    `colorBlendInfo.pAttachments` to its own local
+    `colorBlendAttachment` so mutations like this actually reach
+    `vkCreateGraphicsPipelines`.
 - **Pipeline Configuration (defaultPipelineConfigInfo):**
   - Triangle list topology
   - Fill rasterization, no culling
@@ -360,13 +369,21 @@ big-picture data flow see [architecture.md](./architecture.md).
     position + color/intensity into `ubo.pointLights[lightIndex]`,
     capping the count at `FrameInfo.MAX_LIGHTS` and writing the
     actual count into `ubo.numLights`.
-  - `render(frameInfo)` - Binds the pipeline, calls
-    `vkCmdBindDescriptorSets` once with `frameInfo.globalDescriptorSet`
-    (set = 0), then iterates the scene's point-light game objects
-    again — for each one it uploads a `PointLightPushConstants`
-    (`position`, `color` with intensity in `w`,
-    `radius = transform.scale[0]`) and issues
-    `vkCmdDraw(cb, 6, 1, 0, 0)`.
+  - `render(frameInfo)` - First walks the scene's point-light
+    game objects collecting `{ disSquared, id }` pairs into a
+    stack-allocated `[MAX_LIGHTS]SortedLight` array (using
+    `frameInfo.camera.getPosition()` as the reference point), then
+    `std.sort.insertion`s them farthest-first so the alpha-blended
+    billboards composite back-to-front (mirroring the upstream
+    `std::map<float, id_t>` + reverse iteration from tutorial 27).
+    Binds the pipeline, calls `vkCmdBindDescriptorSets` once with
+    `frameInfo.globalDescriptorSet` (set = 0), then iterates the
+    sorted slice and, for each light, uploads a
+    `PointLightPushConstants` (`position`, `color` with intensity
+    in `w`, `radius = transform.scale[0]`) and issues
+    `vkCmdDraw(cb, 6, 1, 0, 0)`. The pipeline is created with
+    `Pipeline.enableAlphaBlending` so the cosine-fall-off disc in
+    `point_light.frag` blends softly into the scene.
 - Embeds `point_light.vert.spv` / `point_light.frag.spv` via
   `@embedFile`.
 
@@ -609,6 +626,10 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `getProjection()` / `getView()` / `getInverseView()` —
     read-only accessors used by `FirstApp.run` when seeding the
     per-frame `GlobalUbo`.
+  - `getPosition()` — convenience accessor returning the camera's
+    world-space position (`inverseViewMatrix[3].xyz`). Used by
+    `PointLightSystem.render` to sort the alpha-blended
+    billboards back-to-front.
 - **Conventions:** the default "up" vector is `default_up = (0, -1, 0)`
   (Vulkan-style negative Y up) and the projection uses the Vulkan
   depth range `[0, 1]`.

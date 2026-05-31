@@ -74,6 +74,17 @@ pub fn getInverseView(self: *const Self) Mat4 {
     return self.inverseViewMatrix;
 }
 
+/// Camera world-space position, extracted from the translation row
+/// of `inverseViewMatrix` (`invView[3].xyz`). Mirrors
+/// `LveCamera::getPosition` from the upstream tutorial 27.
+pub fn getPosition(self: *const Self) Vec3 {
+    return .{
+        self.inverseViewMatrix[3][0],
+        self.inverseViewMatrix[3][1],
+        self.inverseViewMatrix[3][2],
+    };
+}
+
 pub const default_up: Vec3 = .{ 0.0, -1.0, 0.0 };
 
 pub fn setViewDirection(
