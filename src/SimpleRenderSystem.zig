@@ -5,7 +5,6 @@ const math = @import("math.zig");
 const Device = @import("Device.zig");
 const FrameInfo = @import("FrameInfo.zig");
 const Pipeline = @import("Pipeline.zig");
-const GameObject = @import("GameObject.zig");
 const checkSuccess = @import("utils.zig").checkSuccess;
 
 const Self = @This();
@@ -93,11 +92,7 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
     );
 }
 
-pub fn renderGameObjects(
-    self: *Self,
-    frameInfo: *FrameInfo,
-    gameObjects: []GameObject,
-) !void {
+pub fn renderGameObjects(self: *Self, frameInfo: *FrameInfo) !void {
     self.pipeline.?.bind(frameInfo.commandBuffer);
 
     // Bind the global descriptor set (set = 0) once for this draw
@@ -113,7 +108,12 @@ pub fn renderGameObjects(
         null,
     );
 
-    for (gameObjects) |*obj| {
+    // Iterate the scene's `GameObject.Map` (matches the upstream
+    // `std::unordered_map` iteration). Order is unspecified, but
+    // depth testing is enabled on the pipeline so the visible result
+    // is invariant for opaque geometry.
+    var it = frameInfo.gameObjects.valueIterator();
+    while (it.next()) |obj| {
         // Skip model-less objects (e.g. the camera viewer object that
         // only carries a transform component).
         if (obj.model == null) continue;

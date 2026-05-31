@@ -29,7 +29,9 @@ big-picture data flow see [architecture.md](./architecture.md).
     application lifetime; sized for one uniform-buffer descriptor per
     frame in flight. Used by `run()` to allocate the per-frame global
     descriptor sets that point at the per-frame UBO buffers.
-  - `gameObjects: ArrayList(GameObject)`
+  - `gameObjects: GameObject.Map` (an
+    `AutoHashMapUnmanaged(u64, GameObject)` keyed by `id_t`, matching
+    the upstream `LveGameObject::Map`).
 - **Types:**
   - `GlobalUbo` - `extern struct` mirroring the std140 layout the
     vertex shader expects at `set = 0, binding = 0`:
@@ -53,7 +55,8 @@ big-picture data flow see [architecture.md](./architecture.md).
        independent allocation is `nonCoherentAtomSize`-aligned, and
        the per-frame buffer is always written and flushed in whole.
     2. Build a `globalSetLayout` (one `UNIFORM_BUFFER` binding at
-       binding 0, vertex stage) via
+       binding 0, `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment
+       shader now reads the UBO too) via
        `Descriptors.DescriptorSetLayout.Builder`, then allocate one
        `globalDescriptorSets[i]` per frame in flight out of
        `self.globalPool`, each pointing at the matching `uboBuffers[i]`
@@ -69,14 +72,16 @@ big-picture data flow see [architecture.md](./architecture.md).
        object's translation/rotation, then `setPerspectiveProjection`
        updates the projection.
     8. `renderer.beginFrame()` → build a `FrameInfo` for the current
-       frame (including `globalDescriptorSets[frameIndex]`) → write
-       `projectionView` into the current frame's UBO buffer via
+       frame (including `globalDescriptorSets[frameIndex]` and a
+       pointer to `self.gameObjects`) → write `projectionView` into
+       the current frame's UBO buffer via
        `writeToBuffer(VK_WHOLE_SIZE)` + `flush(VK_WHOLE_SIZE)` →
        `beginSwapChainRenderPass` →
-       `simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)`
-       (which binds the global descriptor set once and then issues a
-       draw per `GameObject` with just the model + normal matrices as
-       push constants) → `endSwapChainRenderPass` → `endFrame`.
+       `simpleRenderSystem.renderGameObjects(&frameInfo)` (which
+       binds the global descriptor set once and then iterates
+       `frameInfo.gameObjects.valueIterator()`, issuing a draw per
+       `GameObject` with just the model + normal matrices as push
+       constants) → `endSwapChainRenderPass` → `endFrame`.
     9. If the swapchain has to be recreated and reports
        `error.SwapChainFormatChanged`, the render system is rebuilt
        against the new render pass and the frame is skipped.
@@ -84,7 +89,8 @@ big-picture data flow see [architecture.md](./architecture.md).
         everything before resources are destroyed.
   - `loadGameObjects()` - Loads the embedded `flat_vase.obj`,
     `smooth_vase.obj` and `quad.obj` via `Model.createModelFromFile`
-    and wraps each in a `GameObject`:
+    and inserts each `GameObject` into `self.gameObjects` keyed by
+    its `getId()`:
     - flat vase at `{-0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - smooth vase at `{0.5, 0.5, 0.0}`, scale `{3, 1.5, 3}`
     - quad floor at `{0.0, 0.5, 0.0}`, scale `{3, 1, 3}`. `run()`
@@ -284,13 +290,14 @@ big-picture data flow see [architecture.md](./architecture.md).
     push-constant range) and the graphics pipeline against
     `renderPass`.
   - `deinit()` - Destroys the pipeline and layout.
-  - `renderGameObjects(frameInfo, gameObjects)` - Binds the pipeline,
-    calls `vkCmdBindDescriptorSets` once with
-    `frameInfo.globalDescriptorSet` (set = 0), then for each
-    `GameObject` uploads `obj.transform.mat4()` and
-    `obj.transform.normalMatrix()` as push constants and issues a
-    draw via the object's `Model`. Pulls the command buffer and the
-    per-frame descriptor set out of the `*FrameInfo` bundle.
+  - `renderGameObjects(frameInfo)` - Binds the pipeline, calls
+    `vkCmdBindDescriptorSets` once with `frameInfo.globalDescriptorSet`
+    (set = 0), then iterates `frameInfo.gameObjects.valueIterator()`
+    and, for each `GameObject` with a non-null `model`, uploads
+    `obj.transform.mat4()` and `obj.transform.normalMatrix()` as push
+    constants and issues a draw via the object's `Model`. Pulls the
+    command buffer, the per-frame descriptor set and the scene's
+    `GameObject.Map` out of the `*FrameInfo` bundle.
 - Embeds `shader.vert.spv` / `shader.frag.spv` via `@embedFile`.
 
 ## `Buffer.zig` — VkBuffer + Memory Wrapper
@@ -337,7 +344,10 @@ big-picture data flow see [architecture.md](./architecture.md).
   per-frame state (lights, …) is added in later tutorials.
 - **Fields:** `frameIndex: usize`, `frameTime: f32`,
   `commandBuffer: c.VkCommandBuffer`, `camera: *Camera`,
-  `globalDescriptorSet: c.VkDescriptorSet`.
+  `globalDescriptorSet: c.VkDescriptorSet`,
+  `gameObjects: *GameObject.Map` (pointer to the scene's hash-map of
+  renderable entities, so render systems iterate the scene directly
+  from `FrameInfo`).
 
 ## `Descriptors.zig` — Descriptor Set Layouts, Pools & Writers
 
@@ -436,6 +446,11 @@ big-picture data flow see [architecture.md](./architecture.md).
     the camera "viewer" object driven by the keyboard controller).
   - `deinit()` - Tears down the owned `Model` if any.
   - `getId()` - Returns the object's id.
+- **Map alias:** `GameObject.Map = std.AutoHashMapUnmanaged(u64, GameObject)`
+  mirrors the upstream `LveGameObject::Map`
+  (`std::unordered_map<id_t, LveGameObject>`). `FirstApp` owns the
+  scene's `Map`, and renders by passing a `*GameObject.Map` into
+  `FrameInfo`.
 
 ## `KeyboardMovementController.zig` — Camera Input
 

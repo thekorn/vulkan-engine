@@ -9,6 +9,11 @@ var currentId: u64 = 0;
 
 const Self = @This();
 
+/// Hash-map keyed by `id_t`, mirroring `LveGameObject::Map` in the
+/// upstream C++ tutorial (`std::unordered_map<id_t, LveGameObject>`).
+/// Iteration order is unspecified, matching `std::unordered_map`.
+pub const Map = std.AutoHashMapUnmanaged(u64, Self);
+
 id_t: u64,
 // The model is optional because some game objects exist purely to carry
 // a `TransformComponent` (e.g. the camera "viewer" object that is driven

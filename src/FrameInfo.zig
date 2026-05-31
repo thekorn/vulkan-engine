@@ -10,6 +10,7 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 const Camera = @import("Camera.zig");
+const GameObject = @import("GameObject.zig");
 
 const Self = @This();
 
@@ -21,13 +22,19 @@ camera: *Camera,
 /// Currently exposes the global UBO (projection-view matrix + light
 /// direction); future tutorials may add more bindings.
 globalDescriptorSet: c.VkDescriptorSet,
+/// Scene's renderable entities keyed by `GameObject.id_t`. Mirrors
+/// the `LveGameObject::Map &gameObjects` field added in the upstream
+/// tutorial so render systems can iterate the scene directly from
+/// `FrameInfo` instead of taking a separate slice argument.
+gameObjects: *GameObject.Map,
 
 test "FrameInfo has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 5), fields.len);
+    try std.testing.expectEqual(@as(usize, 6), fields.len);
     try std.testing.expectEqual(usize, @FieldType(Self, "frameIndex"));
     try std.testing.expectEqual(f32, @FieldType(Self, "frameTime"));
     try std.testing.expectEqual(c.VkCommandBuffer, @FieldType(Self, "commandBuffer"));
     try std.testing.expectEqual(*Camera, @FieldType(Self, "camera"));
     try std.testing.expectEqual(c.VkDescriptorSet, @FieldType(Self, "globalDescriptorSet"));
+    try std.testing.expectEqual(*GameObject.Map, @FieldType(Self, "gameObjects"));
 }

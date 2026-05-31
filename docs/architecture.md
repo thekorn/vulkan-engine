@@ -146,7 +146,7 @@ while Loop.is_running():
 
     // render
     renderer.beginSwapChainRenderPass(cb)
-    simpleRenderSystem.renderGameObjects(&frameInfo, gameObjects)
+    simpleRenderSystem.renderGameObjects(&frameInfo)  // iterates frameInfo.gameObjects
     renderer.endSwapChainRenderPass(cb)
     renderer.endFrame()         // submits + presents
   // On error.SwapChainFormatChanged → rebuild SimpleRenderSystem
@@ -216,12 +216,18 @@ defer extensions.deinit(alloc);
 End-to-end rendering pipeline working — `FirstApp` drives a
 `Renderer` + `SimpleRenderSystem` to draw two embedded Wavefront
 `.obj` vases on top of a quad "floor" every frame with point-light +
-ambient lighting. The projection-view matrix, point-light position,
-light color/intensity and ambient color/intensity are all delivered
-through a per-frame global UBO bound at descriptor set 0, binding 0;
-only the per-object model + normal matrices still travel as push
-constants. Next up: a scene-level light list, fragment-side lighting
-and (eventually) texturing.
+ambient lighting. Scene objects now live in a `GameObject.Map`
+(`AutoHashMapUnmanaged(u64, GameObject)`) owned by `FirstApp`, which
+the render system iterates via a `*GameObject.Map` carried through
+`FrameInfo`. The projection-view matrix, point-light position, light
+color/intensity and ambient color/intensity are all delivered
+through a per-frame global UBO bound at descriptor set 0, binding 0
+(now visible to `VK_SHADER_STAGE_ALL_GRAPHICS` because the fragment
+shader took over the lighting). Only the per-object model + normal
+matrices still travel as push constants. Lighting is now evaluated
+per-pixel in the fragment shader (smoother highlights than the
+previous per-vertex pass). Next up: a scene-level light list and
+(eventually) texturing.
 
 ## Project Directory Structure
 

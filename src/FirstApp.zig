@@ -15,7 +15,6 @@ const Swapchain = @import("Swapchain.zig");
 const Window = @import("Window.zig");
 const Model = @import("Model.zig");
 const GameObject = @import("GameObject.zig");
-const ArrayList = std.ArrayList;
 
 /// Per-frame uniform data uploaded to the global UBO. Mirrors
 /// `GlobalUbo` in `first_app.cpp`.
@@ -57,7 +56,7 @@ renderer: Renderer,
 /// flight. Owned by `FirstApp` so its lifetime spans every
 /// `SimpleRenderSystem` rebuild triggered by swapchain recreation.
 globalPool: Descriptors.DescriptorPool,
-gameObjects: ArrayList(GameObject),
+gameObjects: GameObject.Map,
 
 pub fn init(alloc: std.mem.Allocator) !Self {
     const window = try Window.init(alloc, width, height);
@@ -99,7 +98,8 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 
 pub fn deinit(self: *Self) void {
     std.log.scoped(.firstApp).info("deinit first app", .{});
-    for (self.gameObjects.items) |*obj| obj.deinit();
+    var it = self.gameObjects.valueIterator();
+    while (it.next()) |obj| obj.deinit();
     self.gameObjects.deinit(self.alloc);
     self.globalPool.deinit();
     self.renderer.deinit();
@@ -147,10 +147,13 @@ pub fn run(self: *Self) !void {
         self.device,
     );
     errdefer globalSetLayoutBuilder.deinit();
+    // Stage flags widened to `VK_SHADER_STAGE_ALL_GRAPHICS` because
+    // the fragment shader now reads the global UBO too (it took over
+    // the lighting calculation from the vertex shader).
     try globalSetLayoutBuilder.addBinding(
         0,
         c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        c.VK_SHADER_STAGE_VERTEX_BIT,
+        c.VK_SHADER_STAGE_ALL_GRAPHICS,
         1,
     );
     var globalSetLayout = try globalSetLayoutBuilder.build();
@@ -237,6 +240,7 @@ pub fn run(self: *Self) !void {
                 .commandBuffer = commandBuffer,
                 .camera = &camera,
                 .globalDescriptorSet = globalDescriptorSets[frameIndex],
+                .gameObjects = &self.gameObjects,
             };
 
             // update: write into this frame's dedicated UBO buffer
@@ -251,7 +255,7 @@ pub fn run(self: *Self) !void {
 
             // render
             self.renderer.beginSwapChainRenderPass(commandBuffer);
-            try simpleRenderSystem.renderGameObjects(&frameInfo, self.gameObjects.items);
+            try simpleRenderSystem.renderGameObjects(&frameInfo);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {
                 error.SwapChainFormatChanged => {
@@ -292,7 +296,7 @@ fn loadGameObjects(self: *Self) !void {
                 .scale = .{ 3.0, 1.5, 3.0 },
             },
         );
-        try self.gameObjects.append(self.alloc, flatVase);
+        try self.gameObjects.put(self.alloc, flatVase.getId(), flatVase);
     }
 
     {
@@ -308,7 +312,7 @@ fn loadGameObjects(self: *Self) !void {
                 .scale = .{ 3.0, 1.5, 3.0 },
             },
         );
-        try self.gameObjects.append(self.alloc, smoothVase);
+        try self.gameObjects.put(self.alloc, smoothVase.getId(), smoothVase);
     }
 
     {
@@ -328,7 +332,7 @@ fn loadGameObjects(self: *Self) !void {
                 .scale = .{ 3.0, 1.0, 3.0 },
             },
         );
-        try self.gameObjects.append(self.alloc, floor);
+        try self.gameObjects.put(self.alloc, floor.getId(), floor);
     }
 }
 
@@ -346,5 +350,5 @@ test "FirstApp has expected fields and types" {
     try std.testing.expectEqual(Loop, @FieldType(Self, "loop"));
     try std.testing.expectEqual(Renderer, @FieldType(Self, "renderer"));
     try std.testing.expectEqual(Descriptors.DescriptorPool, @FieldType(Self, "globalPool"));
-    try std.testing.expectEqual(ArrayList(GameObject), @FieldType(Self, "gameObjects"));
+    try std.testing.expectEqual(GameObject.Map, @FieldType(Self, "gameObjects"));
 }
