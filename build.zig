@@ -212,6 +212,23 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(imgui_root);
     exe.root_module.addIncludePath(imgui_root.path(b, "imgui"));
     exe.root_module.addIncludePath(imgui_root.path(b, "imgui/backends"));
+    // Tiny C-ABI shim that exposes a few Dear ImGui APIs the Zig
+    // `@cImport` can't materialize (notably `ImGui::GetIO()` field
+    // access — `ImGuiIO` references opaque types via `[*c]` pointers,
+    // which Zig refuses to dereference). Compiled against the cimgui
+    // include tree assembled just above.
+    exe.root_module.addIncludePath(b.path("src/wrapper/imgui"));
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/wrapper/imgui/imgui_wrapper.cpp"),
+        .flags = &.{
+            "-std=c++17",
+            "-fno-exceptions",
+            "-fno-rtti",
+            "-DCIMGUI_USE_GLFW",
+            "-DCIMGUI_USE_VULKAN",
+        },
+    });
+
     exe.root_module.addCSourceFiles(.{
         .root = imgui_root,
         .files = &.{

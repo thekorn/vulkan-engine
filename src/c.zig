@@ -16,4 +16,9 @@ pub const c = @cImport({
     @cDefine("CIMGUI_USE_VULKAN", {});
     @cInclude("cimgui.h");
     @cInclude("cimgui_impl.h");
+
+    // Tiny in-tree C-ABI shim that bridges the few Dear ImGui calls
+    // the cimport above can't materialize cleanly (see
+    // `src/wrapper/imgui/imgui_wrapper.h`).
+    @cInclude("imgui_wrapper.h");
 });

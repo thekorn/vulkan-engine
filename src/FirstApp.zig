@@ -202,7 +202,7 @@ pub fn run(self: *Self) !void {
     // Pull the camera back so the freshly-added scene (vases + floor at
     // the origin) is in view before the user starts moving.
     viewerObject.transform.translation[2] = -2.5;
-    const cameraController: KeyboardMovementController = .{};
+    var cameraController: KeyboardMovementController = .{};
 
     // Use the monotonic clock from GLFW — seconds (as f64) since
     // `glfwInit` — to compute per-frame delta time. This avoids
@@ -241,6 +241,11 @@ pub fn run(self: *Self) !void {
             c.igEnd();
         }
 
+        // Mouse-look first: pressing/holding the left mouse button
+        // (outside of any ImGui window) rotates the camera. Calling
+        // it before the keyboard pass lets `W` / `S` move along the
+        // direction the user just looked, matching FPS conventions.
+        cameraController.lookWithMouse(self.window.instance, &viewerObject);
         cameraController.moveInPlaneXZ(self.window.instance, frameTime, &viewerObject);
         camera.setViewYXZ(viewerObject.transform.translation, viewerObject.transform.rotation);
 

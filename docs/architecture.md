@@ -414,11 +414,18 @@ vulkan-engine/
 │   │                        #   dot/cross/normalize/length/mul4) built
 │   │                        #   on Zig's `@Vector` SIMD types
 │   ├── wrapper/
-│   │   └── tinyobj/         # C-ABI shim over the C++ tinyobjloader
-│   │       ├── README.md    #   library, used by Model.zig's
-│   │       ├── tinyobj_wrapper.h    #   Builder.loadModel via c.zig.
-│   │       └── tinyobj_wrapper.cpp  #   See the directory README for
-│   │                                #   the C++/C boundary rationale.
+│   │   ├── tinyobj/         # C-ABI shim over the C++ tinyobjloader
+│   │   │   ├── README.md    #   library, used by Model.zig's
+│   │   │   ├── tinyobj_wrapper.h    #   Builder.loadModel via c.zig.
+│   │   │   └── tinyobj_wrapper.cpp  #   See the directory README for
+│   │   │                            #   the C++/C boundary rationale.
+│   │   └── imgui/           # C-ABI shim over Dear ImGui APIs the
+│   │       ├── README.md    #   Zig @cImport can't materialize (the
+│   │       ├── imgui_wrapper.h    #   ImGuiIO struct contains [*c]
+│   │       └── imgui_wrapper.cpp  #   opaque fields). Currently
+│   │                              #   exposes `imgui_want_capture_mouse`
+│   │                              #   used by KeyboardMovementController
+│   │                              #   to gate mouse-look behind ImGui.
 │   └── utils.zig            # Utility functions (Vulkan result checking)
 ├── shaders/               # GLSL shader source files
 │   ├── shader.vert        # Vertex shader for SimpleRenderSystem

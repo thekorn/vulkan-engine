@@ -648,20 +648,34 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 ## `KeyboardMovementController.zig` — Camera Input
 
-- **Purpose:** Translate keyboard input into transform changes on a
-  `GameObject`. Used by `FirstApp` to drive the camera's view object.
+- **Purpose:** Translate keyboard and mouse input into transform
+  changes on a `GameObject`. Used by `FirstApp` to drive the camera's
+  view object.
 - **Default key mappings** (overridable via `keys: KeyMappings`):
   - Movement: `W` / `S` (forward / back), `A` / `D` (strafe left /
     right), `E` / `Q` (up / down in world space).
   - Look: arrow keys for yaw (`Left` / `Right`) and pitch (`Up` /
     `Down`).
+  - Mouse-look: hold the left mouse button and move the mouse to
+    yaw/pitch the camera (skipped when ImGui currently wants the
+    mouse, e.g. while dragging the debug overlay or interacting with
+    a widget — checked via `igGetIO_Nil().WantCaptureMouse`).
 - **Tunables:** `moveSpeed` (default `3.0` units/s), `lookSpeed`
-  (default `1.5` rad/s).
+  (default `1.5` rad/s), `mouseSensitivity` (default
+  `0.0025` rad/pixel).
 - **Key Functions:**
   - `moveInPlaneXZ(window, dt, gameObject)` - Reads currently-pressed
     keys, normalizes the rotation/translation deltas, integrates them
     over `dt`, clamps pitch to roughly +/- 85° and wraps yaw into
     `[0, 2*pi)`.
+  - `lookWithMouse(window, gameObject)` - While the left mouse button
+    is held (and ImGui is not capturing the mouse), applies the
+    cursor delta as yaw (`rotation[1] += dx * mouseSensitivity`) and
+    pitch (`rotation[0] -= dy * mouseSensitivity`, inverted so
+    forward-motion tilts up to match the arrow-key `lookUp`
+    mapping). On the press-edge the previous cursor position is
+    seeded so the view doesn't jump. Applies the same pitch
+    clamp / yaw wrap as `moveInPlaneXZ`.
 
 ## `Camera.zig` — View / Projection Helpers
 
@@ -730,11 +744,13 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Content:**
   - `c` - `@cImport` of `GLFW/glfw3.h`, `vulkan/vulkan_beta.h` (with
     `GLFW_INCLUDE_VULKAN` defined), the in-tree `tinyobj_wrapper.h`,
-    and the cimgui `cimgui.h` + `cimgui_impl.h` headers (with
+    the cimgui `cimgui.h` + `cimgui_impl.h` headers (with
     `CIMGUI_DEFINE_ENUMS_AND_STRUCTS` /
     `CIMGUI_USE_GLFW` / `CIMGUI_USE_VULKAN` defined to emit the C
     struct + enum bodies and gate the GLFW + Vulkan backend
-    declarations).
+    declarations), and the in-tree `imgui_wrapper.h` (a small
+    C-ABI shim around the Dear ImGui calls Zig can't materialize
+    directly — currently `imgui_want_capture_mouse`).
 - **Usage:** Vulkan / GLFW / tinyobjloader-wrapper / Dear ImGui
   calls go through `c`. Math types are provided by the in-tree
   `math.zig` module (Zig `@Vector`-based `Vec2`/`Vec3`/`Vec4` and
@@ -772,3 +788,19 @@ C-ABI shim over the C++ tinyobjloader library, used by `Model.zig`'s
 the C++/C boundary rationale. Compiled into the executable by
 `build.zig` with `link_libc` + `link_libcpp` enabled on every
 platform.
+
+## `wrapper/imgui/` — Dear ImGui C-ABI Shim
+
+A second C-ABI shim, this one covering the Dear ImGui APIs the Zig
+`@cImport` can't materialize cleanly. The cimgui-generated
+`ImGuiIO` struct contains `[*c]ImGuiContext` fields where
+`ImGuiContext` is forward-declared (and therefore demoted to
+`opaque` by Zig); dereferencing the `[*c]ImGuiIO` returned by
+`igGetIO_Nil()` would yield the "indexable pointer to opaque
+type" error from the Zig compiler. The shim does the IO struct access on the C++ side
+and exposes a single helper today,
+`imgui_want_capture_mouse()`, consumed by
+`KeyboardMovementController.lookWithMouse` so the mouse-look
+codepath doesn't fight ImGui for the cursor. See
+[`src/wrapper/imgui/README.md`](../src/wrapper/imgui/README.md)
+for the full rationale.
