@@ -121,7 +121,7 @@ graphics pipeline model:
   covering vertex + fragment stages) and a `Pipeline` built with
   empty binding / attribute descriptions so Vulkan accepts a draw
   with no vertex buffers bound.
-- `UiRenderSystem` (used by `SecondApp`) owns its own
+- `UiRenderSystem` (used by `CustomUiApp`) owns its own
   `VkPipelineLayout` with **no descriptor sets** and a single
   `UiPushConstants` range (`{ vec2 offset; vec2 extent; vec4 color }`,
   vertex stage only). Its `Pipeline` is built with empty binding /
@@ -132,17 +132,17 @@ graphics pipeline model:
 
 ### 5. Frame Rendering
 
-This section describes `FirstApp`'s frame. `SecondApp`'s frame is much
+This section describes `TutorialApp`'s frame. `CustomUiApp`'s frame is much
 simpler: it records only `uiRenderSystem.render(commandBuffer,
 swapChainExtent)` (after queuing rects with `beginFrame` + `rect`)
 followed by `debugUi.render(commandBuffer)` inside the swapchain render
 pass — there is no UBO seeding, point-light update or `SimpleRenderSystem`.
 
-- Location: `Renderer.zig` + `FirstApp.zig`
+- Location: `Renderer.zig` + `TutorialApp.zig`
 - `Renderer.beginFrame` acquires a swapchain image and starts recording
   the per-frame command buffer; `beginSwapChainRenderPass` begins the
   render pass with the current framebuffer, viewport and scissor.
-- Before recording draw calls, `FirstApp.run` seeds a `GlobalUbo`
+- Before recording draw calls, `TutorialApp.run` seeds a `GlobalUbo`
   with `camera.getProjection()` / `camera.getView()` and calls
   `pointLightSystem.update(&frameInfo, &ubo)` to fill in
   `ubo.pointLights[0 .. ubo.numLights]` from the scene's
@@ -412,14 +412,14 @@ void main() {
 
 ### Current State
 
-`main.zig` runs one of two app roots (currently `SecondApp`).
+`main.zig` runs one of two app roots (currently `CustomUiApp`).
 
-`SecondApp` renders no 3D scene: each frame it draws four colored
+`CustomUiApp` renders no 3D scene: each frame it draws four colored
 screen-space squares via `UiRenderSystem` (immediate-mode `beginFrame`
 + `rect` + `render`) and the Dear ImGui debug overlay on top. The
-description below covers `FirstApp`, the full 3D pipeline.
+description below covers `TutorialApp`, the full 3D pipeline.
 
-`FirstApp` renders the two vase models (`flat_vase.obj` and
+`TutorialApp` renders the two vase models (`flat_vase.obj` and
 `smooth_vase.obj`)
 side-by-side on top of a `quad.obj` floor as `GameObject`s — stored
 in a `GameObject.Map` keyed by id and iterated by
@@ -455,7 +455,7 @@ together with its matching `stonefloor01_normal_rgba.ktx`
 (tangent-space normal map) via two `COMBINED_IMAGE_SAMPLER`s bound
 at `set = 1, binding = 0` and `set = 1, binding = 1` (the
 `diffuseMap` / `normalMap` declarations in `shader.frag`).
-`FirstApp.run` allocates one descriptor set per renderable
+`TutorialApp.run` allocates one descriptor set per renderable
 `GameObject` out of `globalPool`, filling binding 0 with the
 object's `textureName` (defaulting to `"__default_white__"`) and
 binding 1 with its `normalName` (defaulting to

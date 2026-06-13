@@ -11,7 +11,7 @@ Layered, component-based.
 
 **Tier Structure:**
 
-1. **Application Layer** (`main.zig`, `SecondApp.zig`, `FirstApp.zig`,
+1. **Application Layer** (`main.zig`, `CustomUiApp.zig`, `TutorialApp.zig`,
    `Loop.zig`)
 2. **Frame / Scene Layer** (`Renderer.zig`,
    `systems/SimpleRenderSystem.zig`,
@@ -30,26 +30,26 @@ The engine follows a layered architecture with clear separation of
 concerns. `main.zig` is just a thin entry point that picks one of two
 interchangeable application roots:
 
-- `SecondApp.zig` (**current default**) — a minimal app that composes
+- `CustomUiApp.zig` (**current default**) — a minimal app that composes
   a window, device, loop and renderer and, in its `run()` loop, drives
   only a `UiRenderSystem` (a custom immediate-mode UI drawing four
   colored squares) plus the Dear ImGui `DebugUi` overlay. No 3D scene,
   camera, lighting, global UBO, descriptor pool or `GameObject`s.
-- `FirstApp.zig` — the full 3D application: it composes a window,
+- `TutorialApp.zig` — the full 3D application: it composes a window,
   device, loop, renderer and a list of `GameObject`s and drives them
   via a `SimpleRenderSystem` + `PointLightSystem` inside its `run()`
   loop.
 
 Switch which one runs by changing the `@import` in `main.zig`. The
-component graph below describes `FirstApp` (the richer of the two);
-`SecondApp` is the same minus the 3D-scene branches, keeping only
+component graph below describes `TutorialApp` (the richer of the two);
+`CustomUiApp` is the same minus the 3D-scene branches, keeping only
 `Window` / `Device` / `Loop` / `Renderer` / `UiRenderSystem` /
 `DebugUi`.
 
 ```
 main.zig (Entry Point)
     ↓
-FirstApp.zig (Application root)
+TutorialApp.zig (Application root)
     ├── Window.zig   (GLFW window + surface)
     ├── Device.zig   (physical/logical device, queues, command pool,
     │                 buffer/image helpers)
@@ -73,7 +73,7 @@ FirstApp.zig (Application root)
     │                               frame; draws colored screen-space
     │                               quads with no vertex buffers and
     │                               per-rect push constants. Used by
-    │                               SecondApp; FirstApp does not wire
+    │                               CustomUiApp; TutorialApp does not wire
     │                               it in.)
     │     └── Pipeline.zig
     ├── DebugUi.zig (Dear ImGui debug overlay via cimgui:
@@ -102,7 +102,7 @@ FirstApp.zig (Application root)
 
 ```
 main.zig
-  └─→ FirstApp.init(alloc)
+  └─→ TutorialApp.init(alloc)
        ├─→ Window.init()      glfwInit() + glfwCreateWindow()
        ├─→ Device.init()
        │    ├─→ Vulkan.init()           vkCreateInstance()
@@ -121,7 +121,7 @@ main.zig
             └─→ Model.init() + GameObject.init()
 ```
 
-### Runtime Flow (`FirstApp.run`)
+### Runtime Flow (`TutorialApp.run`)
 
 ```
 uboBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer
@@ -266,19 +266,19 @@ defer extensions.deinit(alloc);
 ## Current Stage
 
 Two application roots ship side by side; `main.zig` selects one by
-import (currently `SecondApp`).
+import (currently `CustomUiApp`).
 
-**`SecondApp` (current default)** — a minimal immediate-mode UI demo.
+**`CustomUiApp` (current default)** — a minimal immediate-mode UI demo.
 Its `run()` loop drives only a `UiRenderSystem` and the Dear ImGui
 `DebugUi` overlay each frame: it queues four colored squares
 (`uiRenderSystem.beginFrame()` + four `rect(...)` calls) and records
 them with `uiRenderSystem.render(commandBuffer, extent)` inside the
 swapchain render pass, just before `debugUi.render(commandBuffer)`.
 There is no global UBO, descriptor pool, camera, lighting, texture or
-`GameObject` map — `SecondApp` only owns `window` / `device` / `loop`
+`GameObject` map — `CustomUiApp` only owns `window` / `device` / `loop`
 / `renderer`.
 
-**`FirstApp`** — the full end-to-end rendering pipeline. `FirstApp`
+**`TutorialApp`** — the full end-to-end rendering pipeline. `TutorialApp`
 drives a `Renderer` plus two render systems each frame:
 
 1. `SimpleRenderSystem` draws two embedded Wavefront `.obj` vases on
@@ -292,7 +292,7 @@ drives a `Renderer` plus two render systems each frame:
    is visible in the scene.
 
 Scene objects live in a `GameObject.Map`
-(`AutoHashMapUnmanaged(u64, GameObject)`) owned by `FirstApp`, which
+(`AutoHashMapUnmanaged(u64, GameObject)`) owned by `TutorialApp`, which
 the simple render system iterates via a `*GameObject.Map` carried
 through `FrameInfo`. Point lights are also `GameObject`s — they
 carry an optional `PointLightComponent` and no `Model`. The
@@ -325,7 +325,7 @@ vertices procedurally from `gl_VertexIndex`.
 `GlobalUbo`, the `PointLight` slot type and the `MAX_LIGHTS`
 constant all live in [`FrameInfo.zig`](../src/FrameInfo.zig) so
 render systems can mutate the UBO from their `update()` methods
-without depending on `FirstApp`; `FirstApp` simply re-exports
+without depending on `TutorialApp`; `TutorialApp` simply re-exports
 `GlobalUbo = FrameInfo.GlobalUbo` for convenience.
 
 Materials / texturing covers diffuse + tangent-space normal
@@ -333,8 +333,8 @@ mapping: each renderable `GameObject` carries a
 `textureName: ?[]const u8` (diffuse, e.g.
 `"stonefloor01_color_rgba.ktx"`), a `normalName: ?[]const u8`
 (normal map, e.g. `"stonefloor01_normal_rgba.ktx"`) and a
-`textureDescriptorSet: c.VkDescriptorSet` that `FirstApp.run`
-stamps onto it before the main loop. `FirstApp` owns a
+`textureDescriptorSet: c.VkDescriptorSet` that `TutorialApp.run`
+stamps onto it before the main loop. `TutorialApp` owns a
 `textures: StringHashMapUnmanaged(*Texture)` populated from
 `loadTextures()`, which loads every KTX1 asset embedded under
 `textures/` (currently `stonefloor01_color_rgba.ktx` plus the
@@ -377,14 +377,14 @@ vulkan-engine/
 │   └── workflows/
 │       └── ci.yaml        # GitHub Actions CI/CD
 ├── src/                   # Core application source
-│   ├── main.zig             # Entry point (delegates to SecondApp by
-│   │                        #   default; swap the import for FirstApp)
-│   ├── SecondApp.zig        # Minimal app root: owns window, device,
+│   ├── main.zig             # Entry point (delegates to CustomUiApp by
+│   │                        #   default; swap the import for TutorialApp)
+│   ├── CustomUiApp.zig        # Minimal app root: owns window, device,
 │   │                        #   loop, renderer. run() drives only the
 │   │                        #   UiRenderSystem (four colored squares)
 │   │                        #   + Dear ImGui debug overlay. No 3D
 │   │                        #   scene/camera/lighting/textures.
-│   ├── FirstApp.zig         # Full 3D application root: owns window,
+│   ├── TutorialApp.zig         # Full 3D application root: owns window,
 │   │                        #   device, loop, renderer, descriptor
 │   │                        #   pool, textures and game objects
 │   ├── Vulkan.zig           # Vulkan instance & initialization
@@ -423,7 +423,7 @@ vulkan-engine/
 │   │                          #   draws one 6-vertex quad per rect (no
 │   │                          #   vertex buffers, per-rect push constants,
 │   │                          #   alpha blending, depth test off). Used
-│   │                          #   by SecondApp.
+│   │                          #   by CustomUiApp.
 │   ├── DebugUi.zig          # Dear ImGui integration (via the
 │   │                        #   `cimgui` C-ABI wrapper + ImGui's
 │   │                        #   GLFW & Vulkan backends): owns the
@@ -434,7 +434,7 @@ vulkan-engine/
 │   │                        #   beginFrame / render pair the main
 │   │                        #   loop calls each frame. UI building
 │   │                        #   (igBegin/igText/igEnd) happens in
-│   │                        #   FirstApp.run between the two.
+│   │                        #   TutorialApp.run between the two.
 │   ├── Buffer.zig           # Thin wrapper around a VkBuffer +
 │   │                        #   VkDeviceMemory: map / unmap /
 │   │                        #   writeToBuffer / flush / invalidate

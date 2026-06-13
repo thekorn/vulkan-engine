@@ -46,7 +46,7 @@ renderer: Renderer,
 /// for one uniform-buffer descriptor per frame in flight plus
 /// `2 * MAX_TEXTURE_SETS` combined-image-sampler descriptors (two
 /// per material set: binding 0 diffuse + binding 1 normal map).
-/// Owned by `FirstApp` so its lifetime spans every render-system
+/// Owned by `TutorialApp` so its lifetime spans every render-system
 /// rebuild triggered by swapchain recreation.
 globalPool: Descriptors.DescriptorPool,
 gameObjects: GameObject.Map,
@@ -175,7 +175,7 @@ pub fn run(self: *Self) !void {
 
     // Global descriptor set layout: one uniform buffer at binding 0,
     // accessed from the vertex stage. Mirrors `globalSetLayout` in
-    // the upstream tutorial's `FirstApp::run()`.
+    // the upstream tutorial's `TutorialApp::run()`.
     var globalSetLayoutBuilder = Descriptors.DescriptorSetLayout.Builder.init(
         self.alloc,
         self.device,
@@ -482,7 +482,7 @@ pub fn run(self: *Self) !void {
 /// synthetic 1×1 fallbacks (a white diffuse and a flat normal map)
 /// used by every object that does not opt in to a named texture.
 /// Mirrors the upstream tutorial's `LveTexture`-loading step in
-/// `FirstApp::loadGameObjects`.
+/// `TutorialApp::loadGameObjects`.
 fn loadTextures(self: *Self) !void {
     // Roll back the registry on a partial failure: any texture that
     // already made it into `self.textures` (plus the map's backing
@@ -663,12 +663,12 @@ fn countPointLights(objects: *const GameObject.Map) usize {
     return n;
 }
 
-test "FirstApp default window dimensions are 800x600" {
+test "TutorialApp default window dimensions are 800x600" {
     try std.testing.expectEqual(@as(comptime_int, 800), width);
     try std.testing.expectEqual(@as(comptime_int, 600), height);
 }
 
-test "FirstApp has expected fields and types" {
+test "TutorialApp has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
     try std.testing.expectEqual(@as(usize, 8), fields.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));

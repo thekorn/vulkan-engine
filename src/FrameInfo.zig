@@ -1,4 +1,4 @@
-//! Per-frame context passed from `FirstApp`'s render loop into the
+//! Per-frame context passed from `TutorialApp`'s render loop into the
 //! render systems (`SimpleRenderSystem`, `PointLightSystem`).
 //!
 //! Mirrors `FrameInfo` from the upstream Little Vulkan Engine tutorial.

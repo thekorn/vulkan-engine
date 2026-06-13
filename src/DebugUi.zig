@@ -2,14 +2,14 @@
 //!
 //! Owns the global `ImGuiContext`, the GLFW + Vulkan backends and a
 //! dedicated descriptor pool that the Vulkan backend allocates its
-//! per-texture descriptor sets out of (the engine's `FirstApp.globalPool`
+//! per-texture descriptor sets out of (the engine's `TutorialApp.globalPool`
 //! only holds `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` slots, which is the
 //! wrong type for the ImGui font / user textures).
 //!
 //! Mirrors the layout of the engine's other thin wrappers: a single
 //! `init` / `deinit` pair plus a `beginFrame` / `render` pair the main
 //! loop calls each frame. The actual UI building (`igBegin`, `igText`,
-//! `igEnd`, …) happens in `FirstApp.run` between `beginFrame` and
+//! `igEnd`, …) happens in `TutorialApp.run` between `beginFrame` and
 //! `render` so render-system independence stays the same as for
 //! `SimpleRenderSystem` / `PointLightSystem`.
 
@@ -173,7 +173,7 @@ fn initVulkanBackend(
 /// the *old* render pass and would otherwise reference freed Vulkan
 /// objects on the next `render(commandBuffer)` call — mirroring the
 /// `SimpleRenderSystem` / `PointLightSystem` rebuild paths in
-/// `FirstApp.run`.
+/// `TutorialApp.run`.
 ///
 /// The ImGui context and the GLFW backend are preserved across the
 /// recreate so user-facing state (open windows, scroll positions,

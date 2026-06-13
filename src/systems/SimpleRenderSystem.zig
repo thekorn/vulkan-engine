@@ -132,7 +132,7 @@ pub fn renderGameObjects(self: *Self, frameInfo: *FrameInfo) !void {
         // only carries a transform component).
         if (obj.model == null) continue;
 
-        // Per-object material texture (`set = 1`). `FirstApp.run`
+        // Per-object material texture (`set = 1`). `TutorialApp.run`
         // wires up either the named texture's descriptor set or the
         // 1×1 white fallback for every renderable object, so a null
         // handle here is a setup bug — assert loudly.

@@ -13,7 +13,7 @@
 //!     called from `deinit`)
 //!
 //! Does NOT own the `*Device` it points at — that lifetime is managed
-//! by the caller (typically `FirstApp` / `Model`).
+//! by the caller (typically `TutorialApp` / `Model`).
 
 const std = @import("std");
 

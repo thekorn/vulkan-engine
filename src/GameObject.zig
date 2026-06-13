@@ -29,7 +29,7 @@ transform: TransformComponent,
 pointLight: ?PointLightComponent = null,
 /// Basename of the embedded diffuse texture this object should be
 /// rendered with (e.g. `"stonefloor01_color_rgba.ktx"`). `null`
-/// means "no named texture" — `FirstApp` will bind a 1×1 white
+/// means "no named texture" — `TutorialApp` will bind a 1×1 white
 /// fallback at `set = 1, binding = 0` so the existing shader path
 /// still produces the unlit vertex color. The string lives in
 /// static program data (`@embedFile` keys), so no allocation/free
@@ -37,7 +37,7 @@ pointLight: ?PointLightComponent = null,
 textureName: ?[]const u8 = null,
 /// Basename of the embedded tangent-space normal map (e.g.
 /// `"stonefloor01_normal_rgba.ktx"`). `null` means "no normal
-/// map" — `FirstApp` will bind a 1×1 flat-normal fallback at
+/// map" — `TutorialApp` will bind a 1×1 flat-normal fallback at
 /// `set = 1, binding = 1` (RGB = (128, 128, 255), which decodes to
 /// the tangent-space `+Z` unit vector and thus leaves the
 /// interpolated geometric normal unchanged in the fragment
@@ -45,7 +45,7 @@ textureName: ?[]const u8 = null,
 normalName: ?[]const u8 = null,
 /// Descriptor set bound at `set = 1` by `SimpleRenderSystem` (two
 /// `COMBINED_IMAGE_SAMPLER` bindings covering the chosen diffuse
-/// + normal `Texture`s). Assigned in `FirstApp.run` after the
+/// + normal `Texture`s). Assigned in `TutorialApp.run` after the
 /// global pool and the per-material descriptor sets are built;
 /// render-system code asserts it is non-null for any object with a
 /// `model`.

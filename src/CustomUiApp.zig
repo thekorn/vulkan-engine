@@ -2,7 +2,7 @@
 //! immediate-mode UI (`UiRenderSystem`) plus the Dear ImGui debug
 //! overlay — no 3D scene, camera, lighting or textures.
 //!
-//! Mirrors the lifetime/ownership conventions of `FirstApp` (window
+//! Mirrors the lifetime/ownership conventions of `TutorialApp` (window
 //! and device are heap-allocated so sub-components can hold stable
 //! back-pointers) but drops everything the 3D pipeline needs: there
 //! is no global UBO, no descriptor pool and no `GameObject` map. The
@@ -183,12 +183,12 @@ pub fn run(self: *Self) !void {
     _ = c.vkDeviceWaitIdle(self.device.globalDevice);
 }
 
-test "SecondApp default window dimensions are 800x600" {
+test "CustomUiApp default window dimensions are 800x600" {
     try std.testing.expectEqual(@as(comptime_int, 800), width);
     try std.testing.expectEqual(@as(comptime_int, 600), height);
 }
 
-test "SecondApp has expected fields and types" {
+test "CustomUiApp has expected fields and types" {
     const fields = @typeInfo(Self).@"struct".fields;
     try std.testing.expectEqual(@as(usize, 5), fields.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));

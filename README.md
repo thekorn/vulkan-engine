@@ -8,11 +8,11 @@ recreation.
 The project ships **two interchangeable application roots**;
 [`src/main.zig`](src/main.zig) picks which one to run by importing it:
 
-- **`SecondApp`** (current default) — a minimal app demonstrating a
+- **`CustomUiApp`** (current default) — a minimal app demonstrating a
   custom **immediate-mode UI**: four colored squares laid out in a row
   drawn by [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig),
   plus the Dear ImGui debug overlay. No 3D scene, camera or lighting.
-- **`FirstApp`** — the full 3D scene: it renders `GameObject`s (two
+- **`TutorialApp`** — the full 3D scene: it renders `GameObject`s (two
   ceramic vases on a flat quad "floor", lit by six colored point
   lights spinning around the scene and rendered as camera-facing
   billboards), with the camera driven by a WASD + QE + arrow-key
@@ -26,7 +26,7 @@ The project ships **two interchangeable application roots**;
   C↔C++ boundary rationale.
 
 To switch between them, change the `@import` in
-[`src/main.zig`](src/main.zig) from `SecondApp.zig` to `FirstApp.zig`
+[`src/main.zig`](src/main.zig) from `CustomUiApp.zig` to `TutorialApp.zig`
 (or vice-versa).
 
 ## immediate-mode UI

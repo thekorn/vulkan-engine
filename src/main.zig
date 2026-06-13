@@ -1,11 +1,11 @@
 const std = @import("std");
 
-const SecondApp = @import("SecondApp.zig");
+const CustomUiApp = @import("CustomUiApp.zig");
 
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
-    var app = try SecondApp.init(alloc);
+    var app = try CustomUiApp.init(alloc);
     defer app.deinit();
 
     try app.run();
@@ -33,6 +33,6 @@ test {
     _ = @import("GameObject.zig");
     _ = @import("KeyboardMovementController.zig");
     _ = @import("DebugUi.zig");
-    _ = @import("FirstApp.zig");
-    _ = @import("SecondApp.zig");
+    _ = @import("TutorialApp.zig");
+    _ = @import("CustomUiApp.zig");
 }

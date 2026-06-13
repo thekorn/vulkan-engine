@@ -3,12 +3,12 @@
 A small Vulkan rendering engine written in Zig 0.16, built on GLFW +
 Vulkan + a C-ABI shim over `tinyobjloader`. Entry point is
 [`src/main.zig`](src/main.zig), which currently hands off to
-[`src/SecondApp.zig`](src/SecondApp.zig) — a minimal app that shows a
+[`src/CustomUiApp.zig`](src/CustomUiApp.zig) — a minimal app that shows a
 custom immediate-mode UI (four colored squares via
 [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig))
 plus the Dear ImGui debug overlay. The full 3D scene (vases, floor,
 spinning point lights) lives in
-[`src/FirstApp.zig`](src/FirstApp.zig); switch the import in
+[`src/TutorialApp.zig`](src/TutorialApp.zig); switch the import in
 `main.zig` to run it instead.
 
 Detailed guidance is split into focused docs under `docs/`:
@@ -60,9 +60,9 @@ Without Nix, install Zig 0.16.0, GLFW3, the Vulkan SDK and
 ## Key File Locations
 
 - Entry point: [`src/main.zig`](src/main.zig)
-- Application roots: [`src/SecondApp.zig`](src/SecondApp.zig) (current
+- Application roots: [`src/CustomUiApp.zig`](src/CustomUiApp.zig) (current
   default — immediate-mode UI + debug overlay) and
-  [`src/FirstApp.zig`](src/FirstApp.zig) (full 3D scene)
+  [`src/TutorialApp.zig`](src/TutorialApp.zig) (full 3D scene)
 - Custom UI render system:
   [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig)
 - Shader sources: [`shaders/`](shaders/)

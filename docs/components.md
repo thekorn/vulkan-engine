@@ -13,23 +13,23 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Purpose:** Construct the top-level application and run it.
 - **Key Functions:**
   - `main()` - Creates a page allocator, initializes the active
-    application root (currently `SecondApp`), runs it and `defer`s
-    `deinit`. Switch the single `@import` between `SecondApp.zig` and
-    `FirstApp.zig` to choose which app runs.
+    application root (currently `CustomUiApp`), runs it and `defer`s
+    `deinit`. Switch the single `@import` between `CustomUiApp.zig` and
+    `TutorialApp.zig` to choose which app runs.
 - All test imports for the test runner are also registered here
-  (including both `FirstApp` and `SecondApp` so both stay compiled and
+  (including both `TutorialApp` and `CustomUiApp` so both stay compiled and
   tested regardless of which one `main` runs).
 
-## `SecondApp.zig` — Minimal Immediate-Mode UI App Root
+## `CustomUiApp.zig` — Minimal Immediate-Mode UI App Root
 
 - **Purpose:** A pared-down application root that shows *only* the
   custom immediate-mode UI plus the Dear ImGui debug overlay — no 3D
   scene, camera, lighting, textures, global UBO, descriptor pool or
   `GameObject` map. Demonstrates `UiRenderSystem` in isolation.
-- **Window Size:** 800x600 (`SecondApp.width` / `SecondApp.height`)
+- **Window Size:** 800x600 (`CustomUiApp.width` / `CustomUiApp.height`)
 - **Fields:** `alloc`, `window: *Window`, `device: *Device`,
   `loop: Loop`, `renderer: Renderer` (the same heap-allocated /
-  stable-pointer conventions as `FirstApp`, minus everything the 3D
+  stable-pointer conventions as `TutorialApp`, minus everything the 3D
   pipeline needs).
 - **Key Functions:**
   - `init(alloc)` - Wires up window → device → loop → renderer and
@@ -53,10 +53,10 @@ big-picture data flow see [architecture.md](./architecture.md).
        against the new render pass and skip the frame.
     5. `vkDeviceWaitIdle` before returning.
 
-## `FirstApp.zig` — Application Root
+## `TutorialApp.zig` — Application Root
 
 - **Purpose:** Owns the full application lifetime and the per-frame loop.
-- **Window Size:** 800x600 (`FirstApp.width` / `FirstApp.height`)
+- **Window Size:** 800x600 (`TutorialApp.width` / `TutorialApp.height`)
 - **Fields:**
   - `alloc` - Allocator passed in from `main`
   - `window: *Window`, `device: *Device` - heap-allocated, stable
@@ -83,7 +83,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `GlobalUbo` - re-exported alias of [`FrameInfo.GlobalUbo`](#frameinfozig--per-frame-render-context)
     (the real definition moved into `FrameInfo.zig` so render
     systems can mutate the UBO from their `update()` calls without
-    depending on `FirstApp`). The `extern struct` layout —
+    depending on `TutorialApp`). The `extern struct` layout —
     `projection: Mat4`, `view: Mat4`, `ambientLightColor: Vec4`,
     `pointLights: [MAX_LIGHTS]PointLight`, `numLights: i32` —
     mirrors the std140 block the shaders expect at
@@ -427,7 +427,7 @@ big-picture data flow see [architecture.md](./architecture.md).
     `vkCmdBindDescriptorSets` once with `frameInfo.globalDescriptorSet`
     (set = 0), then iterates `frameInfo.gameObjects.valueIterator()`
     and, for each `GameObject` with a non-null `model`, binds the
-    object's `textureDescriptorSet` (set = 1; `FirstApp.run`
+    object's `textureDescriptorSet` (set = 1; `TutorialApp.run`
     guarantees it is non-null for every renderable object — assert
     enforced), uploads `obj.transform.mat4()` and
     `obj.transform.normalMatrix()` as push constants and issues a
@@ -494,7 +494,7 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Purpose:** A small custom 2D overlay render system that draws
   axis-aligned colored rectangles in screen space with an
   immediate-mode API. Independent of Dear ImGui (`DebugUi`). Used by
-  `SecondApp`; `FirstApp` does not wire it in.
+  `CustomUiApp`; `TutorialApp` does not wire it in.
 - **No vertex buffers, per-rect push constants:** like
   `PointLightSystem`, the pipeline binds no vertex buffers — the
   vertex shader (`ui.vert`) emits a unit quad from `gl_VertexIndex`
@@ -539,7 +539,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   `VK_DESCRIPTOR_TYPE_SAMPLER` /
   `VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE` /
   `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` allocations the Vulkan
-  backend issues (the engine's `FirstApp.globalPool` only holds
+  backend issues (the engine's `TutorialApp.globalPool` only holds
   `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` slots, so a dedicated pool
   here keeps the two concerns cleanly separated).
 - **Fields:** `device: *Device`,
@@ -569,7 +569,7 @@ big-picture data flow see [architecture.md](./architecture.md).
     and would otherwise reference freed Vulkan objects on the next
     `render(commandBuffer)` call. Mirrors the
     `SimpleRenderSystem` / `PointLightSystem` rebuild paths in
-    `FirstApp.run`. The ImGui context and the GLFW backend are
+    `TutorialApp.run`. The ImGui context and the GLFW backend are
     preserved across the recreate so user-facing state (open
     windows, scroll positions, input focus) survives the rebuild.
   - `deinit()` - Calls `vkDeviceWaitIdle`, then shuts the two
@@ -583,13 +583,13 @@ big-picture data flow see [architecture.md](./architecture.md).
     to record the resulting commands into `commandBuffer`. Must be
     called inside an active render pass that targets the swap-chain
     image (i.e. between `Renderer.beginSwapChainRenderPass` and
-    `Renderer.endSwapChainRenderPass`). `FirstApp.run` does this
+    `Renderer.endSwapChainRenderPass`). `TutorialApp.run` does this
     last in the render pass so the overlay composites on top of the
     scene (including the alpha-blended point-light billboards).
   - `text(buf, fmt, args)` - Convenience wrapper around
     `igTextUnformatted` that lets callers use Zig-style formatting.
     The formatted string is written into the caller-supplied stack
-    buffer; on overflow the line is truncated silently. `FirstApp.run`
+    buffer; on overflow the line is truncated silently. `TutorialApp.run`
     reuses a single 256-byte buffer across the whole frame.
 
 ## `Texture.zig` — VkImage + View + Sampler Wrapper
@@ -608,7 +608,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `initFromPixels(device, pixels, width, height)` - Upload an
     already-decoded RGBA8 buffer. `pixels.len` must equal
     `width * height * 4`. Used for the 1×1 white fallback texture
-    that `FirstApp` registers under `"__default_white__"`.
+    that `TutorialApp` registers under `"__default_white__"`.
   - `initFromKtxBytes(device, bytes)` - Strict KTX1 parser. Rejects
     anything outside the exact asset shape the project ships:
     little-endian (`endianness == 0x04030201`), 2D, single layer +
@@ -740,7 +740,7 @@ big-picture data flow see [architecture.md](./architecture.md).
       `writeBuffer(binding, *VkDescriptorBufferInfo)`,
       `writeImage(binding, *VkDescriptorImageInfo)`,
       `build(&set) -> bool`, `overwrite(set)`.
-- None of these own a `*Device`; the caller (typically `FirstApp`)
+- None of these own a `*Device`; the caller (typically `TutorialApp`)
   manages that lifetime.
 
 ## `Model.zig` — Vertex + Index Buffer Wrapper
@@ -811,7 +811,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   normal map — `null` falls back to a 1×1 flat-normal texture
   decoding to the unperturbed surface normal),
   `textureDescriptorSet: c.VkDescriptorSet` (stamped onto the
-  object by `FirstApp.run` after the per-material descriptor sets
+  object by `TutorialApp.run` after the per-material descriptor sets
   are built; bound at `set = 1` by `SimpleRenderSystem`, with
   binding 0 = diffuse and binding 1 = normal map).
 - **TransformComponent:** `translation`, `scale`, `rotation` (all
@@ -840,14 +840,14 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `getId()` - Returns the object's id.
 - **Map alias:** `GameObject.Map = std.AutoHashMapUnmanaged(u64, GameObject)`
   mirrors the upstream `LveGameObject::Map`
-  (`std::unordered_map<id_t, LveGameObject>`). `FirstApp` owns the
+  (`std::unordered_map<id_t, LveGameObject>`). `TutorialApp` owns the
   scene's `Map`, and renders by passing a `*GameObject.Map` into
   `FrameInfo`.
 
 ## `KeyboardMovementController.zig` — Camera Input
 
 - **Purpose:** Translate keyboard and mouse input into transform
-  changes on a `GameObject`. Used by `FirstApp` to drive the camera's
+  changes on a `GameObject`. Used by `TutorialApp` to drive the camera's
   view object.
 - **Default key mappings** (overridable via `keys: KeyMappings`):
   - Movement: `W` / `S` (forward / back), `A` / `D` (strafe left /
@@ -901,7 +901,7 @@ big-picture data flow see [architecture.md](./architecture.md).
     `GameObject.TransformComponent.mat4`, so the viewer object's
     transform feeds directly into it.
   - `getProjection()` / `getView()` / `getInverseView()` —
-    read-only accessors used by `FirstApp.run` when seeding the
+    read-only accessors used by `TutorialApp.run` when seeding the
     per-frame `GlobalUbo`.
   - `getPosition()` — convenience accessor returning the camera's
     world-space position (`inverseViewMatrix[3].xyz`). Used by

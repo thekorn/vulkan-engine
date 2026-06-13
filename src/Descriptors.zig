@@ -12,7 +12,7 @@
 //!     an existing one (`overwrite`).
 //!
 //! None of these own a `*Device` — that lifetime is managed by the
-//! caller (typically `FirstApp`).
+//! caller (typically `TutorialApp`).
 
 const std = @import("std");
 
