@@ -515,10 +515,13 @@ big-picture data flow see [architecture.md](./architecture.md).
     `vkCmdDraw(cb, 6, 1, 0, 0)`. Must be called inside an active
     swapchain render pass. No-op when no rects are queued.
 - **Types:**
-  - `UiPushConstants` - `extern struct { offset: Vec2, extent: Vec2,
-    color: Vec4 }` mirroring the GLSL `Push` block in `ui.vert`
-    (`offset` / `extent` in NDC). Field offsets are
-    `offset = 0, extent = 8, color = 16`.
+  - `UiPushConstants` - `extern struct { bounds: Vec4, color: Vec4 }`
+    mirroring the GLSL `Push` block in `ui.vert`. `bounds.xy` is the
+    rect offset and `bounds.zw` its extent, both in NDC. Offset and
+    extent are packed into one `Vec4` (rather than two `Vec2`s) so the
+    std430 layout — `bounds = 0, color = 16` — holds on every platform;
+    `@Vector(2, f32)` is 16-byte aligned/sized on some targets (e.g.
+    x86-64 Linux), leaving the fields misaligned otherwise.
 - **Pipeline configuration:** built via `Pipeline.enableAlphaBlending`
   (standard "source over" blend) with depth test **and** depth write
   disabled, so UI rects always composite on top regardless of scene

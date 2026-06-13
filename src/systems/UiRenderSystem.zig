@@ -29,11 +29,18 @@ const Self = @This();
 pub const max_rects = 256;
 
 /// Per-rect push constants. Layout mirrors the GLSL `Push` block in
-/// `ui.vert` (std430): `{ vec2 offset; vec2 extent; vec4 color; }`.
-/// `offset` / `extent` are in NDC ([-1, 1], +Y down).
+/// `ui.vert` (std430): `{ vec4 bounds; vec4 color; }`.
+///
+/// `bounds.xy` is the rect offset and `bounds.zw` its extent, both in
+/// NDC ([-1, 1], +Y down). The offset/extent pair is packed into one
+/// `math.Vec4` on purpose: a `@Vector(2, f32)` is 16-byte aligned
+/// (and 16 bytes wide) on some targets (e.g. x86-64 Linux), so two
+/// `Vec2` fields would land at offsets 0/16 with `color` at 32 and
+/// break the std430 layout the shader expects. A single `Vec4` is
+/// reliably 16 bytes on every platform, keeping `bounds = 0,
+/// color = 16`.
 pub const UiPushConstants = extern struct {
-    offset: math.Vec2 = @splat(0),
-    extent: math.Vec2 = @splat(0),
+    bounds: math.Vec4 = @splat(0),
     color: math.Vec4 = @splat(0),
 };
 
@@ -160,8 +167,12 @@ pub fn render(self: *Self, commandBuffer: c.VkCommandBuffer, extent: c.VkExtent2
         // Pixel space (origin top-left, +Y down) -> Vulkan NDC
         // ([-1, 1], +Y down). A pixel x maps to x/W*2 - 1.
         const push: UiPushConstants = .{
-            .offset = .{ r.x / fw * 2.0 - 1.0, r.y / fh * 2.0 - 1.0 },
-            .extent = .{ r.w / fw * 2.0, r.h / fh * 2.0 },
+            .bounds = .{
+                r.x / fw * 2.0 - 1.0,
+                r.y / fh * 2.0 - 1.0,
+                r.w / fw * 2.0,
+                r.h / fh * 2.0,
+            },
             .color = r.color,
         };
 
@@ -188,8 +199,7 @@ test "UiRenderSystem has expected fields and types" {
 }
 
 test "UiPushConstants matches the GLSL push-constant layout" {
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(UiPushConstants, "offset"));
-    try std.testing.expectEqual(@as(usize, 8), @offsetOf(UiPushConstants, "extent"));
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(UiPushConstants, "bounds"));
     try std.testing.expectEqual(@as(usize, 16), @offsetOf(UiPushConstants, "color"));
     try std.testing.expect(@sizeOf(UiPushConstants) <= 128);
 }

@@ -99,10 +99,10 @@ graphics pipeline model:
   - `ui.vert` - Vertex shader for `UiRenderSystem`. Takes no vertex
     input and reads no UBO; emits a 6-vertex unit quad from
     `OFFSETS[gl_VertexIndex]` (corners in [0, 1]) scaled by
-    `push.extent` and offset by `push.offset` — both already in
-    Vulkan NDC ([-1, 1], +Y down), pre-computed on the CPU from the
-    rectangle's pixel coordinates and the current swapchain extent.
-    Forwards `push.color` to the fragment shader.
+    `push.bounds.zw` (extent) and offset by `push.bounds.xy` (offset)
+    — both already in Vulkan NDC ([-1, 1], +Y down), pre-computed on
+    the CPU from the rectangle's pixel coordinates and the current
+    swapchain extent. Forwards `push.color` to the fragment shader.
   - `ui.frag` - Fragment shader for `UiRenderSystem`. Writes the
     interpolated `fragColor` straight to `outColor` (flat fill).
 
@@ -123,8 +123,9 @@ graphics pipeline model:
   with no vertex buffers bound.
 - `UiRenderSystem` (used by `CustomUiApp`) owns its own
   `VkPipelineLayout` with **no descriptor sets** and a single
-  `UiPushConstants` range (`{ vec2 offset; vec2 extent; vec4 color }`,
-  vertex stage only). Its `Pipeline` is built with empty binding /
+  `UiPushConstants` range (`{ vec4 bounds; vec4 color }`, where
+  `bounds.xy` is the offset and `bounds.zw` the extent; vertex stage
+  only). Its `Pipeline` is built with empty binding /
   attribute descriptions, `Pipeline.enableAlphaBlending` and depth
   test + write disabled, so the screen-space rectangles always draw on
   top. The system keeps an immediate-mode rect queue (`beginFrame` /
@@ -367,8 +368,8 @@ void main() {
 ### UI Vertex Shader (`ui.vert`)
 
 The UI shaders do **not** use the `GlobalUbo`; they read everything
-from push constants. `offset` / `extent` are pre-computed in NDC on the
-CPU (`UiRenderSystem.render`).
+from push constants. `bounds.xy` (offset) / `bounds.zw` (extent) are
+pre-computed in NDC on the CPU (`UiRenderSystem.render`).
 
 ```glsl
 #version 450
@@ -385,13 +386,12 @@ const vec2 OFFSETS[6] = vec2[](
 layout(location = 0) out vec4 fragColor;
 
 layout(push_constant) uniform Push {
-    vec2 offset;  // NDC top-left
-    vec2 extent;  // NDC size
+    vec4 bounds;  // xy = offset (NDC top-left), zw = extent (NDC size)
     vec4 color;
 } push;
 
 void main() {
-    vec2 pos = push.offset + OFFSETS[gl_VertexIndex] * push.extent;
+    vec2 pos = push.bounds.xy + OFFSETS[gl_VertexIndex] * push.bounds.zw;
     gl_Position = vec4(pos, 0.0, 1.0);
     fragColor = push.color;
 }
