@@ -43,10 +43,12 @@ big-picture data flow see [architecture.md](./architecture.md).
     2. Each frame: compute `frameTime` from `glfwGetTime()`, build the
        ImGui "Debug" window (frame time + FPS), then
        `renderer.beginFrame()`.
-    3. On a valid command buffer: `uiRenderSystem.beginFrame()`, queue
-       four colored squares (red/green/blue/yellow, 80 px each, 20 px
-       gap, 50 px margin from the top-left) via `rect(...)`, then
-       inside the swapchain render pass call
+    3. On a valid command buffer: query the cursor position via
+       `getCursorInFramebufferSpace()`, then `uiRenderSystem.beginFrame()`
+       and queue four colored squares (red/green/blue/yellow, 80 px
+       each, 20 px gap, 50 px margin from the top-left) via `rect(...)`
+       — each square swaps to a lighter hover tint when the cursor is
+       inside its bounds — then inside the swapchain render pass call
        `uiRenderSystem.render(commandBuffer, swapChainExtent)` followed
        by `debugUi.render(commandBuffer)` so the overlay composites on
        top.

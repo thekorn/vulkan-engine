@@ -132,9 +132,17 @@ pub fn run(self: *Self) !void {
         };
 
         if (beginResult) |commandBuffer| {
+            // Current cursor position in framebuffer-pixel space (the
+            // same space the UI rects live in). GLFW reports the cursor
+            // in logical window coordinates, so scale it by the
+            // framebuffer/window ratio (≠ 1 on HiDPI/retina displays).
+            const mouse = self.getCursorInFramebufferSpace();
+
             // Build this frame's immediate-mode UI: four colored
             // squares in a row, each `square` px wide with a `gap` px
-            // gap, starting `margin` px from the top-left corner.
+            // gap, starting `margin` px from the top-left corner. When
+            // the cursor hovers a square it brightens to a lighter
+            // tint.
             uiRenderSystem.beginFrame();
             {
                 const square: f32 = 80.0;
@@ -146,9 +154,17 @@ pub fn run(self: *Self) !void {
                     .{ 0.20, 0.45, 0.90, 1.0 }, // blue
                     .{ 0.95, 0.80, 0.20, 1.0 }, // yellow
                 };
-                for (colors, 0..) |col, i| {
+                const hoverColors = [_][4]f32{
+                    .{ 1.00, 0.55, 0.55, 1.0 }, // light red
+                    .{ 0.55, 1.00, 0.65, 1.0 }, // light green
+                    .{ 0.55, 0.75, 1.00, 1.0 }, // light blue
+                    .{ 1.00, 0.95, 0.55, 1.0 }, // light yellow
+                };
+                for (colors, hoverColors, 0..) |col, hoverCol, i| {
                     const x = margin + @as(f32, @floatFromInt(i)) * (square + gap);
-                    uiRenderSystem.rect(x, margin, square, square, col);
+                    const hovered = mouse.x >= x and mouse.x < x + square and
+                        mouse.y >= margin and mouse.y < margin + square;
+                    uiRenderSystem.rect(x, margin, square, square, if (hovered) hoverCol else col);
                 }
             }
 
@@ -181,6 +197,36 @@ pub fn run(self: *Self) !void {
 
     // Wait for the GPU to finish before any resources are torn down.
     _ = c.vkDeviceWaitIdle(self.device.globalDevice);
+}
+
+/// Current cursor position converted into framebuffer-pixel space —
+/// the same coordinate system the UI rects use. GLFW reports the
+/// cursor in logical window coordinates; on HiDPI / retina displays
+/// the framebuffer is larger than the window, so scale by the
+/// framebuffer/window ratio. Returns `(0, 0)` when the window size is
+/// degenerate.
+fn getCursorInFramebufferSpace(self: *Self) struct { x: f32, y: f32 } {
+    var cx: f64 = 0;
+    var cy: f64 = 0;
+    c.glfwGetCursorPos(self.window.instance, &cx, &cy);
+
+    var winW: c_int = 0;
+    var winH: c_int = 0;
+    c.glfwGetWindowSize(self.window.instance, &winW, &winH);
+
+    var fbW: c_int = 0;
+    var fbH: c_int = 0;
+    c.glfwGetFramebufferSize(self.window.instance, &fbW, &fbH);
+
+    if (winW <= 0 or winH <= 0) return .{ .x = 0, .y = 0 };
+
+    const scaleX = @as(f32, @floatFromInt(fbW)) / @as(f32, @floatFromInt(winW));
+    const scaleY = @as(f32, @floatFromInt(fbH)) / @as(f32, @floatFromInt(winH));
+
+    return .{
+        .x = @as(f32, @floatCast(cx)) * scaleX,
+        .y = @as(f32, @floatCast(cy)) * scaleY,
+    };
 }
 
 test "CustomUiApp default window dimensions are 800x600" {
