@@ -6,7 +6,8 @@ systems) that transparently handles window resizes and swapchain
 recreation.
 
 The project ships **two interchangeable application roots**;
-[`src/main.zig`](src/main.zig) picks which one to run by importing it:
+[`src/main.zig`](src/main.zig) picks which one to run at build time via
+the `-Dapp=` build option (see [`build.zig`](build.zig)):
 
 - **`CustomUiApp`** (current default) — a minimal app demonstrating a
   custom **immediate-mode UI**: four colored squares laid out in a row
@@ -25,9 +26,9 @@ The project ships **two interchangeable application roots**;
   directory's [`README.md`](src/wrapper/tinyobj/README.md) for the
   C↔C++ boundary rationale.
 
-To switch between them, change the `@import` in
-[`src/main.zig`](src/main.zig) from `CustomUiApp.zig` to `TutorialApp.zig`
-(or vice-versa).
+To switch between them, pass the `-Dapp=` build option:
+`-Dapp=custom` (the default) runs `CustomUiApp`, `-Dapp=tutorial` runs
+`TutorialApp` — e.g. `zig build run -Dapp=tutorial`.
 
 ## immediate-mode UI
 

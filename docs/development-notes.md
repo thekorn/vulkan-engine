@@ -20,7 +20,8 @@ keep in context for orientation.
 ## Application Roots
 
 The project ships two interchangeable application roots; `main.zig`
-selects one by `@import`:
+selects one at compile time via `build_options.app` (generated from
+`build.zig`'s `-Dapp=` option):
 
 - **`CustomUiApp`** (current default) — a minimal app demonstrating the
   custom immediate-mode UI. It owns only window / device / loop /
@@ -30,8 +31,8 @@ selects one by `@import`:
   global UBO, descriptor pool or `GameObject`s.
 - **`TutorialApp`** — the full 3D scene (vases + floor + spinning point
   lights). Both roots stay compiled and tested (registered in
-  `main.zig`'s test block); to run `TutorialApp` instead, swap the import
-  in `main.zig`.
+  `main.zig`'s test block); to run `TutorialApp` instead, build with
+  `-Dapp=tutorial` (the default is `-Dapp=custom`).
 
 The custom immediate-mode UI (`systems/UiRenderSystem.zig` +
 `shaders/ui.{vert,frag}`) is intentionally minimal: filled colored

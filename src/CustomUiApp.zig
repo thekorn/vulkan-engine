@@ -57,7 +57,7 @@ pub fn init(alloc: std.mem.Allocator) !Self {
 }
 
 pub fn deinit(self: *Self) void {
-    std.log.scoped(.secondApp).info("deinit second app", .{});
+    std.log.scoped(.customUiApp).info("deinit custom UI app", .{});
     self.renderer.deinit();
     self.loop.deinit();
     self.device.deinit();

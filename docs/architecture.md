@@ -40,7 +40,9 @@ interchangeable application roots:
   via a `SimpleRenderSystem` + `PointLightSystem` inside its `run()`
   loop.
 
-Switch which one runs by changing the `@import` in `main.zig`. The
+Switch which one runs via the `-Dapp=` build option (`zig build run
+-Dapp=tutorial` / `-Dapp=custom`), which `main.zig` reads through
+`build_options.app`. The
 component graph below describes `TutorialApp` (the richer of the two);
 `CustomUiApp` is the same minus the 3D-scene branches, keeping only
 `Window` / `Device` / `Loop` / `Renderer` / `UiRenderSystem` /
@@ -378,7 +380,8 @@ vulkan-engine/
 │       └── ci.yaml        # GitHub Actions CI/CD
 ├── src/                   # Core application source
 │   ├── main.zig             # Entry point (delegates to CustomUiApp by
-│   │                        #   default; swap the import for TutorialApp)
+│   │                        #   default; select with -Dapp=tutorial via
+│   │                        #   build_options.app)
 │   ├── CustomUiApp.zig        # Minimal app root: owns window, device,
 │   │                        #   loop, renderer. run() drives only the
 │   │                        #   UiRenderSystem (four colored squares)
