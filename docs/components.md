@@ -13,9 +13,11 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Purpose:** Construct the top-level application and run it.
 - **Key Functions:**
   - `main()` - Creates a page allocator, initializes the active
-    application root (currently `CustomUiApp`), runs it and `defer`s
-    `deinit`. Switch the single `@import` between `CustomUiApp.zig` and
-    `TutorialApp.zig` to choose which app runs.
+    application root, runs it and `defer`s `deinit`. The root is
+    selected at compile time via the `build_options.app` enum
+    (imported from the `build_options` module that `build.zig`
+    generates from the `-Dapp=` option): `.custom` →
+    `CustomUiApp.zig` (default), `.tutorial` → `TutorialApp.zig`.
 - All test imports for the test runner are also registered here
   (including both `TutorialApp` and `CustomUiApp` so both stay compiled and
   tested regardless of which one `main` runs).

@@ -194,6 +194,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Select which application root `main.zig` runs. Use
+    // `zig build run -Dapp=tutorial` for the full 3D scene or
+    // `-Dapp=custom` (the default) for the minimal immediate-mode UI.
+    const App = enum { custom, tutorial };
+    const app = b.option(
+        App,
+        "app",
+        "Which application to run: custom (immediate-mode UI, default) or tutorial (full 3D scene)",
+    ) orelse .custom;
+    const build_options = b.addOptions();
+    build_options.addOption(App, "app", app);
+
     const exe = b.addExecutable(.{
         .name = "vulkan_engine",
         .root_module = b.createModule(.{
@@ -202,6 +214,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
+    exe.root_module.addOptions("build_options", build_options);
 
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});

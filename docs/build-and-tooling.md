@@ -83,6 +83,7 @@ quick commands live in the top-level `AGENTS.md`.
 ```bash
 zig build              # Build executable
 zig build run          # Build and run
+zig build run -Dapp=tutorial   # Run the full 3D scene instead of the custom UI
 zig build test         # Run tests
 zig build coverage     # Run tests under kcov, write report to zig-out/cover (Linux only)
 zig build test -Dcover -Dopen   # Run tests under kcov and open the HTML report

@@ -1,11 +1,18 @@
 const std = @import("std");
+const build_options = @import("build_options");
 
-const CustomUiApp = @import("CustomUiApp.zig");
+/// The active application root, selected at build time via the
+/// `-Dapp=` option (see `build.zig`). Both roots share the same
+/// `init` / `deinit` / `run` interface.
+const App = switch (build_options.app) {
+    .custom => @import("CustomUiApp.zig"),
+    .tutorial => @import("TutorialApp.zig"),
+};
 
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
-    var app = try CustomUiApp.init(alloc);
+    var app = try App.init(alloc);
     defer app.deinit();
 
     try app.run();

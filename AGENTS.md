@@ -2,14 +2,15 @@
 
 A small Vulkan rendering engine written in Zig 0.16, built on GLFW +
 Vulkan + a C-ABI shim over `tinyobjloader`. Entry point is
-[`src/main.zig`](src/main.zig), which currently hands off to
+[`src/main.zig`](src/main.zig), which by default hands off to
 [`src/CustomUiApp.zig`](src/CustomUiApp.zig) — a minimal app that shows a
 custom immediate-mode UI (four colored squares via
 [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig))
 plus the Dear ImGui debug overlay. The full 3D scene (vases, floor,
 spinning point lights) lives in
-[`src/TutorialApp.zig`](src/TutorialApp.zig); switch the import in
-`main.zig` to run it instead.
+[`src/TutorialApp.zig`](src/TutorialApp.zig); select which one runs with
+the `-Dapp=` build option (`-Dapp=custom`, the default, or
+`-Dapp=tutorial`), e.g. `zig build run -Dapp=tutorial`.
 
 Detailed guidance is split into focused docs under `docs/`:
 
