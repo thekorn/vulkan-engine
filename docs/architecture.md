@@ -11,10 +11,12 @@ Layered, component-based.
 
 **Tier Structure:**
 
-1. **Application Layer** (`main.zig`, `FirstApp.zig`, `Loop.zig`)
+1. **Application Layer** (`main.zig`, `SecondApp.zig`, `FirstApp.zig`,
+   `Loop.zig`)
 2. **Frame / Scene Layer** (`Renderer.zig`,
    `systems/SimpleRenderSystem.zig`,
-   `systems/PointLightSystem.zig`, `GameObject.zig`, `Model.zig`)
+   `systems/PointLightSystem.zig`, `systems/UiRenderSystem.zig`,
+   `GameObject.zig`, `Model.zig`)
 3. **High-Level Abstractions** (`Window.zig`, `Device.zig`,
    `Swapchain.zig`, `Pipeline.zig`)
 4. **Vulkan Core Layer** (`Vulkan.zig`)
@@ -25,10 +27,24 @@ Layered, component-based.
 ## Component Overview
 
 The engine follows a layered architecture with clear separation of
-concerns. `main.zig` is just a thin entry point; the real application
-lives in `FirstApp.zig`, which composes a window, device, loop,
-renderer and a list of `GameObject`s, and drives them via a
-`SimpleRenderSystem` inside its `run()` loop.
+concerns. `main.zig` is just a thin entry point that picks one of two
+interchangeable application roots:
+
+- `SecondApp.zig` (**current default**) — a minimal app that composes
+  a window, device, loop and renderer and, in its `run()` loop, drives
+  only a `UiRenderSystem` (a custom immediate-mode UI drawing four
+  colored squares) plus the Dear ImGui `DebugUi` overlay. No 3D scene,
+  camera, lighting, global UBO, descriptor pool or `GameObject`s.
+- `FirstApp.zig` — the full 3D application: it composes a window,
+  device, loop, renderer and a list of `GameObject`s and drives them
+  via a `SimpleRenderSystem` + `PointLightSystem` inside its `run()`
+  loop.
+
+Switch which one runs by changing the `@import` in `main.zig`. The
+component graph below describes `FirstApp` (the richer of the two);
+`SecondApp` is the same minus the 3D-scene branches, keeping only
+`Window` / `Device` / `Loop` / `Renderer` / `UiRenderSystem` /
+`DebugUi`.
 
 ```
 main.zig (Entry Point)
@@ -51,6 +67,14 @@ FirstApp.zig (Application root)
     │                                 draw per point-light GameObject;
     │                                 no vertex buffers, per-light
     │                                 push constants)
+    │     └── Pipeline.zig
+    ├── systems/UiRenderSystem.zig (custom immediate-mode UI:
+    │                               beginFrame + rect + render per
+    │                               frame; draws colored screen-space
+    │                               quads with no vertex buffers and
+    │                               per-rect push constants. Used by
+    │                               SecondApp; FirstApp does not wire
+    │                               it in.)
     │     └── Pipeline.zig
     ├── DebugUi.zig (Dear ImGui debug overlay via cimgui:
     │                owns the ImGuiContext, GLFW + Vulkan
@@ -241,8 +265,21 @@ defer extensions.deinit(alloc);
 
 ## Current Stage
 
-End-to-end rendering pipeline working — `FirstApp` drives a
-`Renderer` plus two render systems each frame:
+Two application roots ship side by side; `main.zig` selects one by
+import (currently `SecondApp`).
+
+**`SecondApp` (current default)** — a minimal immediate-mode UI demo.
+Its `run()` loop drives only a `UiRenderSystem` and the Dear ImGui
+`DebugUi` overlay each frame: it queues four colored squares
+(`uiRenderSystem.beginFrame()` + four `rect(...)` calls) and records
+them with `uiRenderSystem.render(commandBuffer, extent)` inside the
+swapchain render pass, just before `debugUi.render(commandBuffer)`.
+There is no global UBO, descriptor pool, camera, lighting, texture or
+`GameObject` map — `SecondApp` only owns `window` / `device` / `loop`
+/ `renderer`.
+
+**`FirstApp`** — the full end-to-end rendering pipeline. `FirstApp`
+drives a `Renderer` plus two render systems each frame:
 
 1. `SimpleRenderSystem` draws two embedded Wavefront `.obj` vases on
    top of a quad "floor" with multi-point-light + ambient lighting.
@@ -340,9 +377,16 @@ vulkan-engine/
 │   └── workflows/
 │       └── ci.yaml        # GitHub Actions CI/CD
 ├── src/                   # Core application source
-│   ├── main.zig             # Entry point (delegates to FirstApp)
-│   ├── FirstApp.zig         # Top-level application: owns window, device,
-│   │                        #   loop, renderer and game objects
+│   ├── main.zig             # Entry point (delegates to SecondApp by
+│   │                        #   default; swap the import for FirstApp)
+│   ├── SecondApp.zig        # Minimal app root: owns window, device,
+│   │                        #   loop, renderer. run() drives only the
+│   │                        #   UiRenderSystem (four colored squares)
+│   │                        #   + Dear ImGui debug overlay. No 3D
+│   │                        #   scene/camera/lighting/textures.
+│   ├── FirstApp.zig         # Full 3D application root: owns window,
+│   │                        #   device, loop, renderer, descriptor
+│   │                        #   pool, textures and game objects
 │   ├── Vulkan.zig           # Vulkan instance & initialization
 │   ├── Device.zig           # Physical/logical device management,
 │   │                        #   cached `properties` (incl. limits),
@@ -364,14 +408,22 @@ vulkan-engine/
 │   │   ├── SimpleRenderSystem.zig # Pipeline + push-constant based renderer
 │   │   │                          # that draws a list of GameObjects from
 │   │   │                          # a FrameInfo bundle
-│   │   └── PointLightSystem.zig # update(): walks point-light GameObjects,
-│   │                            #   rotates them around (0,-1,0) and fills
-│   │                            #   ubo.pointLights[0..numLights].
-│   │                            # render(): one 6-vertex camera-facing
-│   │                            #   billboard draw per point light;
-│   │                            #   vertices generated from gl_VertexIndex,
-│   │                            #   per-draw push constants carry
-│   │                            #   {position, color, radius}.
+│   │   ├── PointLightSystem.zig # update(): walks point-light GameObjects,
+│   │   │                        #   rotates them around (0,-1,0) and fills
+│   │   │                        #   ubo.pointLights[0..numLights].
+│   │   │                        # render(): one 6-vertex camera-facing
+│   │   │                        #   billboard draw per point light;
+│   │   │                        #   vertices generated from gl_VertexIndex,
+│   │   │                        #   per-draw push constants carry
+│   │   │                        #   {position, color, radius}.
+│   │   └── UiRenderSystem.zig # Custom immediate-mode UI: beginFrame()
+│   │                          #   resets the queue, rect(x,y,w,h,color)
+│   │                          #   queues a pixel-space rectangle, and
+│   │                          #   render(cb, extent) converts to NDC and
+│   │                          #   draws one 6-vertex quad per rect (no
+│   │                          #   vertex buffers, per-rect push constants,
+│   │                          #   alpha blending, depth test off). Used
+│   │                          #   by SecondApp.
 │   ├── DebugUi.zig          # Dear ImGui integration (via the
 │   │                        #   `cimgui` C-ABI wrapper + ImGui's
 │   │                        #   GLFW & Vulkan backends): owns the
@@ -485,9 +537,16 @@ vulkan-engine/
 │   │                      #   camera-facing quad from
 │   │                      #   gl_VertexIndex / OFFSETS lookup +
 │   │                      #   push.position and push.radius)
-│   └── point_light.frag   # Fragment shader for PointLightSystem
-│                          #   (discards pixels outside the unit
-│                          #   disc, writes push.color.xyz)
+│   ├── point_light.frag   # Fragment shader for PointLightSystem
+│   │                      #   (discards pixels outside the unit
+│   │                      #   disc, writes push.color.xyz)
+│   ├── ui.vert            # Vertex shader for UiRenderSystem
+│   │                      #   (no vertex input; emits a 6-vertex unit
+│   │                      #   quad from gl_VertexIndex scaled/offset
+│   │                      #   by push.offset/push.extent in NDC,
+│   │                      #   forwards push.color)
+│   └── ui.frag            # Fragment shader for UiRenderSystem
+│                          #   (writes the interpolated fragColor)
 ├── models/                # Wavefront .obj model assets (embedded at
 │   │                      #   build time via embedAllModels())
 │   ├── flat_vase.obj      # Default scene model (flat-shaded normals)

@@ -17,13 +17,37 @@ keep in context for orientation.
 - Includes GL library linking
 - Tested in CI pipeline
 
+## Application Roots
+
+The project ships two interchangeable application roots; `main.zig`
+selects one by `@import`:
+
+- **`SecondApp`** (current default) — a minimal app demonstrating the
+  custom immediate-mode UI. It owns only window / device / loop /
+  renderer and, each frame, draws four colored screen-space squares via
+  `UiRenderSystem` (`beginFrame` + four `rect(...)` + `render`) plus the
+  Dear ImGui debug overlay. No 3D scene, camera, lighting, textures,
+  global UBO, descriptor pool or `GameObject`s.
+- **`FirstApp`** — the full 3D scene (vases + floor + spinning point
+  lights). Both roots stay compiled and tested (registered in
+  `main.zig`'s test block); to run `FirstApp` instead, swap the import
+  in `main.zig`.
+
+The custom immediate-mode UI (`systems/UiRenderSystem.zig` +
+`shaders/ui.{vert,frag}`) is intentionally minimal: filled colored
+rectangles only, no text / input / layout / widgets, and no retained
+state between frames. It is independent of the Dear ImGui overlay
+(which remains the richer debug UI). Currently only `SecondApp` wires
+it in.
+
 ## Known Limitations & TODOs
 
 - Validation layer cleanup incomplete — debug messenger destruction is
   TODO (see `Device.deinit`).
 - Only a small hardcoded scene (two `.obj`-loaded vases sitting on a
   flat quad "floor" plus six colored point lights arranged in a
-  circle, all wired up in `FirstApp.loadGameObjects`).
+  circle, all wired up in `FirstApp.loadGameObjects`) — and only when
+  running `FirstApp`. `SecondApp` has no 3D scene at all.
 - Lighting is a fixed set of up to `MAX_LIGHTS = 10` point lights
   plus a constant ambient term. The point lights live in the scene
   as `GameObject`s carrying an optional `PointLightComponent`;
@@ -67,9 +91,10 @@ keep in context for orientation.
   details). [`src/DebugUi.zig`](../src/DebugUi.zig) owns the
   `ImGuiContext` and the GLFW + Vulkan backends and exposes a
   `beginFrame` / `render` pair the main loop calls each frame.
-  `FirstApp.run` currently builds a single "Debug" window showing
-  frame time, FPS, current frame-in-flight index, object / point-light
-  counts and the camera world-space position. There is no
+  `FirstApp.run` builds a single "Debug" window showing frame time,
+  FPS, current frame-in-flight index, object / point-light counts and
+  the camera world-space position; `SecondApp.run` builds a smaller
+  "Debug" window with just frame time + FPS. There is no
   `imgui.ini` persistence yet (window positions reset on every run)
   and the overlay is unconditionally enabled — there is no
   release-mode / runtime toggle to disable it.

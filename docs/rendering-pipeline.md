@@ -42,8 +42,8 @@ graphics pipeline model:
 - Location: `build.zig` + `shaders/`
 - Build-time: `glslc` compiles every file under `shaders/` to SPIR-V.
 - Runtime: SPIR-V is added as anonymous module imports and embedded via
-  `@embedFile` in `systems/SimpleRenderSystem.zig` and
-  `systems/PointLightSystem.zig`.
+  `@embedFile` in `systems/SimpleRenderSystem.zig`,
+  `systems/PointLightSystem.zig` and `systems/UiRenderSystem.zig`.
 - Files:
   - `shader.vert` - Vertex shader for `SimpleRenderSystem`. Reads
     `ubo.projection` and `ubo.view` (stored separately) from the
@@ -96,10 +96,19 @@ graphics pipeline model:
     Discards pixels with `length(fragOffset) >= 1.0` (so the quad is
     rasterized as a disc) and writes `vec4(push.color.xyz, 1.0)`
     everywhere else.
+  - `ui.vert` - Vertex shader for `UiRenderSystem`. Takes no vertex
+    input and reads no UBO; emits a 6-vertex unit quad from
+    `OFFSETS[gl_VertexIndex]` (corners in [0, 1]) scaled by
+    `push.extent` and offset by `push.offset` — both already in
+    Vulkan NDC ([-1, 1], +Y down), pre-computed on the CPU from the
+    rectangle's pixel coordinates and the current swapchain extent.
+    Forwards `push.color` to the fragment shader.
+  - `ui.frag` - Fragment shader for `UiRenderSystem`. Writes the
+    interpolated `fragColor` straight to `outColor` (flat fill).
 
 ### 4. Graphics Pipeline & Render Systems
 
-- Location: `Pipeline.zig` + `systems/SimpleRenderSystem.zig` + `systems/PointLightSystem.zig`
+- Location: `Pipeline.zig` + `systems/SimpleRenderSystem.zig` + `systems/PointLightSystem.zig` + `systems/UiRenderSystem.zig`
 - `Pipeline` owns the shader modules and the `VkPipeline`.
 - `PipelineConfigInfo` now carries the vertex
   binding / attribute description slices so render systems can
@@ -112,8 +121,22 @@ graphics pipeline model:
   covering vertex + fragment stages) and a `Pipeline` built with
   empty binding / attribute descriptions so Vulkan accepts a draw
   with no vertex buffers bound.
+- `UiRenderSystem` (used by `SecondApp`) owns its own
+  `VkPipelineLayout` with **no descriptor sets** and a single
+  `UiPushConstants` range (`{ vec2 offset; vec2 extent; vec4 color }`,
+  vertex stage only). Its `Pipeline` is built with empty binding /
+  attribute descriptions, `Pipeline.enableAlphaBlending` and depth
+  test + write disabled, so the screen-space rectangles always draw on
+  top. The system keeps an immediate-mode rect queue (`beginFrame` /
+  `rect` / `render`) rather than reading a scene.
 
 ### 5. Frame Rendering
+
+This section describes `FirstApp`'s frame. `SecondApp`'s frame is much
+simpler: it records only `uiRenderSystem.render(commandBuffer,
+swapChainExtent)` (after queuing rects with `beginFrame` + `rect`)
+followed by `debugUi.render(commandBuffer)` inside the swapchain render
+pass — there is no UBO seeding, point-light update or `SimpleRenderSystem`.
 
 - Location: `Renderer.zig` + `FirstApp.zig`
 - `Renderer.beginFrame` acquires a swapchain image and starts recording
@@ -341,9 +364,63 @@ void main() {
 }
 ```
 
+### UI Vertex Shader (`ui.vert`)
+
+The UI shaders do **not** use the `GlobalUbo`; they read everything
+from push constants. `offset` / `extent` are pre-computed in NDC on the
+CPU (`UiRenderSystem.render`).
+
+```glsl
+#version 450
+
+const vec2 OFFSETS[6] = vec2[](
+  vec2(0.0, 0.0),
+  vec2(0.0, 1.0),
+  vec2(1.0, 0.0),
+  vec2(1.0, 0.0),
+  vec2(0.0, 1.0),
+  vec2(1.0, 1.0)
+);
+
+layout(location = 0) out vec4 fragColor;
+
+layout(push_constant) uniform Push {
+    vec2 offset;  // NDC top-left
+    vec2 extent;  // NDC size
+    vec4 color;
+} push;
+
+void main() {
+    vec2 pos = push.offset + OFFSETS[gl_VertexIndex] * push.extent;
+    gl_Position = vec4(pos, 0.0, 1.0);
+    fragColor = push.color;
+}
+```
+
+### UI Fragment Shader (`ui.frag`)
+
+```glsl
+#version 450
+
+layout(location = 0) in vec4 fragColor;
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    outColor = fragColor;
+}
+```
+
 ### Current State
 
-Renders the two vase models (`flat_vase.obj` and `smooth_vase.obj`)
+`main.zig` runs one of two app roots (currently `SecondApp`).
+
+`SecondApp` renders no 3D scene: each frame it draws four colored
+screen-space squares via `UiRenderSystem` (immediate-mode `beginFrame`
++ `rect` + `render`) and the Dear ImGui debug overlay on top. The
+description below covers `FirstApp`, the full 3D pipeline.
+
+`FirstApp` renders the two vase models (`flat_vase.obj` and
+`smooth_vase.obj`)
 side-by-side on top of a `quad.obj` floor as `GameObject`s — stored
 in a `GameObject.Map` keyed by id and iterated by
 `SimpleRenderSystem` via `frameInfo.gameObjects.valueIterator()` —

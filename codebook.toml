@@ -1,5 +1,7 @@
 words = [
     "accessors",
+    "ndc",
+    "rects",
     "alignas",
     "ang",
     "anyopaque",

@@ -12,9 +12,46 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 - **Purpose:** Construct the top-level application and run it.
 - **Key Functions:**
-  - `main()` - Creates a page allocator, initializes `FirstApp`, runs it
-    and `defer`s `deinit`.
-- All test imports for the test runner are also registered here.
+  - `main()` - Creates a page allocator, initializes the active
+    application root (currently `SecondApp`), runs it and `defer`s
+    `deinit`. Switch the single `@import` between `SecondApp.zig` and
+    `FirstApp.zig` to choose which app runs.
+- All test imports for the test runner are also registered here
+  (including both `FirstApp` and `SecondApp` so both stay compiled and
+  tested regardless of which one `main` runs).
+
+## `SecondApp.zig` — Minimal Immediate-Mode UI App Root
+
+- **Purpose:** A pared-down application root that shows *only* the
+  custom immediate-mode UI plus the Dear ImGui debug overlay — no 3D
+  scene, camera, lighting, textures, global UBO, descriptor pool or
+  `GameObject` map. Demonstrates `UiRenderSystem` in isolation.
+- **Window Size:** 800x600 (`SecondApp.width` / `SecondApp.height`)
+- **Fields:** `alloc`, `window: *Window`, `device: *Device`,
+  `loop: Loop`, `renderer: Renderer` (the same heap-allocated /
+  stable-pointer conventions as `FirstApp`, minus everything the 3D
+  pipeline needs).
+- **Key Functions:**
+  - `init(alloc)` - Wires up window → device → loop → renderer and
+    returns the struct by value (no texture/descriptor setup).
+  - `deinit()` - Tears down renderer → loop → device → window.
+  - `run()` - Main loop:
+    1. Build a `UiRenderSystem` (against the swapchain render pass)
+       and a `DebugUi` overlay.
+    2. Each frame: compute `frameTime` from `glfwGetTime()`, build the
+       ImGui "Debug" window (frame time + FPS), then
+       `renderer.beginFrame()`.
+    3. On a valid command buffer: `uiRenderSystem.beginFrame()`, queue
+       four colored squares (red/green/blue/yellow, 80 px each, 20 px
+       gap, 50 px margin from the top-left) via `rect(...)`, then
+       inside the swapchain render pass call
+       `uiRenderSystem.render(commandBuffer, swapChainExtent)` followed
+       by `debugUi.render(commandBuffer)` so the overlay composites on
+       top.
+    4. On `error.SwapChainFormatChanged` (from `beginFrame` /
+       `endFrame`), rebuild the `UiRenderSystem` and `debugUi.recreate`
+       against the new render pass and skip the frame.
+    5. `vkDeviceWaitIdle` before returning.
 
 ## `FirstApp.zig` — Application Root
 
@@ -451,6 +488,44 @@ big-picture data flow see [architecture.md](./architecture.md).
     `point_light.frag` blends softly into the scene.
 - Embeds `point_light.vert.spv` / `point_light.frag.spv` via
   `@embedFile`.
+
+## `systems/UiRenderSystem.zig` — Custom Immediate-Mode UI Renderer
+
+- **Purpose:** A small custom 2D overlay render system that draws
+  axis-aligned colored rectangles in screen space with an
+  immediate-mode API. Independent of Dear ImGui (`DebugUi`). Used by
+  `SecondApp`; `FirstApp` does not wire it in.
+- **No vertex buffers, per-rect push constants:** like
+  `PointLightSystem`, the pipeline binds no vertex buffers — the
+  vertex shader (`ui.vert`) emits a unit quad from `gl_VertexIndex`
+  and the per-rect position / size / color travel as push constants.
+- **Immediate-mode API:** no retained widget state between frames. Each
+  frame the caller resets the queue, pushes rects, and records draws:
+  - `beginFrame()` - Resets the accumulated rect count to 0.
+  - `rect(x, y, w, h, color)` - Queues a filled rectangle in pixel
+    coordinates (origin = top-left of the window), `color` RGBA in
+    [0, 1]. Asserts the per-frame `max_rects = 256` cap.
+  - `render(commandBuffer, extent)` - Binds the pipeline and, for each
+    queued rect, converts pixel coords to Vulkan NDC ([-1, 1], +Y down)
+    using `extent`, uploads a `UiPushConstants` and issues
+    `vkCmdDraw(cb, 6, 1, 0, 0)`. Must be called inside an active
+    swapchain render pass. No-op when no rects are queued.
+- **Types:**
+  - `UiPushConstants` - `extern struct { offset: Vec2, extent: Vec2,
+    color: Vec4 }` mirroring the GLSL `Push` block in `ui.vert`
+    (`offset` / `extent` in NDC). Field offsets are
+    `offset = 0, extent = 8, color = 16`.
+- **Pipeline configuration:** built via `Pipeline.enableAlphaBlending`
+  (standard "source over" blend) with depth test **and** depth write
+  disabled, so UI rects always composite on top regardless of scene
+  depth, and empty binding / attribute descriptions.
+- **Key Functions:**
+  - `init(alloc, device, renderPass)` - Creates the pipeline layout
+    (no descriptor sets, one push-constant range covering
+    `UiPushConstants` in the vertex stage) and the graphics pipeline
+    against `renderPass`.
+  - `deinit()` - Destroys the pipeline and layout.
+- Embeds `ui.vert.spv` / `ui.frag.spv` via `@embedFile`.
 
 ## `DebugUi.zig` — Dear ImGui Debug Overlay (via cimgui)
 

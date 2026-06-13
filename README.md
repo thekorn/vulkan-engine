@@ -1,19 +1,47 @@
 # Vulkan Engine
 
-A small Vulkan rendering engine written in Zig. It renders 3D
-`GameObject`s (currently two ceramic vases on a flat quad "floor", lit
-by six colored point lights spinning around the scene and rendered as
-camera-facing billboards) through a layered architecture built around
-a swapchain, renderer and pluggable render systems. The renderer
-transparently handles window resizes and swapchain recreation, and
-the camera is driven by a WASD + QE + arrow-key keyboard controller.
-Model assets are loaded from Wavefront `.obj` files embedded at build
-time from the `models/` directory and parsed by the C++
-[tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
-library through a small C-ABI shim under
-[`src/wrapper/tinyobj/`](src/wrapper/tinyobj/) — see that
-directory's [`README.md`](src/wrapper/tinyobj/README.md) for the
-C↔C++ boundary rationale.
+A small Vulkan rendering engine written in Zig, built around a
+layered architecture (swapchain, renderer and pluggable render
+systems) that transparently handles window resizes and swapchain
+recreation.
+
+The project ships **two interchangeable application roots**;
+[`src/main.zig`](src/main.zig) picks which one to run by importing it:
+
+- **`SecondApp`** (current default) — a minimal app demonstrating a
+  custom **immediate-mode UI**: four colored squares laid out in a row
+  drawn by [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig),
+  plus the Dear ImGui debug overlay. No 3D scene, camera or lighting.
+- **`FirstApp`** — the full 3D scene: it renders `GameObject`s (two
+  ceramic vases on a flat quad "floor", lit by six colored point
+  lights spinning around the scene and rendered as camera-facing
+  billboards), with the camera driven by a WASD + QE + arrow-key
+  keyboard controller. Model assets are loaded from Wavefront `.obj`
+  files embedded at build time from the `models/` directory and parsed
+  by the C++
+  [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
+  library through a small C-ABI shim under
+  [`src/wrapper/tinyobj/`](src/wrapper/tinyobj/) — see that
+  directory's [`README.md`](src/wrapper/tinyobj/README.md) for the
+  C↔C++ boundary rationale.
+
+To switch between them, change the `@import` in
+[`src/main.zig`](src/main.zig) from `SecondApp.zig` to `FirstApp.zig`
+(or vice-versa).
+
+## immediate-mode UI
+
+[`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig) is a
+small custom 2D overlay render system with an immediate-mode API: each
+frame the caller resets the queue with `beginFrame()`, pushes filled
+rectangles in pixel coordinates with `rect(x, y, w, h, color)`, and
+records the draws with `render(commandBuffer, extent)`. No retained
+widget state is kept between frames. The pipeline binds no vertex
+buffers — the quad is generated procedurally in
+[`shaders/ui.vert`](shaders/ui.vert) from `gl_VertexIndex`, with the
+per-rect position/size/color delivered as push constants — and uses
+alpha blending with depth testing disabled so the UI always draws on
+top.
 
 ## local development
 
