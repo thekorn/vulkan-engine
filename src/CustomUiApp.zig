@@ -148,6 +148,7 @@ pub fn run(self: *Self) !void {
                 const square: f32 = 80.0;
                 const gap: f32 = 20.0;
                 const margin: f32 = 50.0;
+                const radius: f32 = 16.0;
                 const colors = [_][4]f32{
                     .{ 0.90, 0.20, 0.20, 1.0 }, // red
                     .{ 0.20, 0.80, 0.30, 1.0 }, // green
@@ -164,7 +165,7 @@ pub fn run(self: *Self) !void {
                     const x = margin + @as(f32, @floatFromInt(i)) * (square + gap);
                     const hovered = mouse.x >= x and mouse.x < x + square and
                         mouse.y >= margin and mouse.y < margin + square;
-                    uiRenderSystem.rect(x, margin, square, square, if (hovered) hoverCol else col);
+                    uiRenderSystem.rect(x, margin, square, square, if (hovered) hoverCol else col, radius);
                 }
             }
 

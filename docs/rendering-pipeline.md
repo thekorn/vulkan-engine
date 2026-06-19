@@ -102,9 +102,16 @@ graphics pipeline model:
     `push.bounds.zw` (extent) and offset by `push.bounds.xy` (offset)
     — both already in Vulkan NDC ([-1, 1], +Y down), pre-computed on
     the CPU from the rectangle's pixel coordinates and the current
-    swapchain extent. Forwards `push.color` to the fragment shader.
-  - `ui.frag` - Fragment shader for `UiRenderSystem`. Writes the
-    interpolated `fragColor` straight to `outColor` (flat fill).
+    swapchain extent. Forwards `push.color` to the fragment shader,
+    plus the per-pixel position relative to the rect center and the
+    (flat) half-size + corner radius (`push.params.xy` / `push.params.z`)
+    in pixels for the rounded-corner SDF.
+  - `ui.frag` - Fragment shader for `UiRenderSystem`. Evaluates a
+    rounded-box signed-distance field from the interpolated local
+    position, half-size and corner radius, anti-aliases the edge over
+    ~1 pixel via `fwidth`, and writes `fragColor` with its alpha
+    multiplied by the resulting coverage so the corners fade out
+    smoothly.
 
 ### 4. Graphics Pipeline & Render Systems
 
@@ -123,9 +130,10 @@ graphics pipeline model:
   with no vertex buffers bound.
 - `UiRenderSystem` (used by `CustomUiApp`) owns its own
   `VkPipelineLayout` with **no descriptor sets** and a single
-  `UiPushConstants` range (`{ vec4 bounds; vec4 color }`, where
-  `bounds.xy` is the offset and `bounds.zw` the extent; vertex stage
-  only). Its `Pipeline` is built with empty binding /
+  `UiPushConstants` range (`{ vec4 bounds; vec4 color; vec4 params }`,
+  where `bounds.xy` is the offset, `bounds.zw` the extent, `params.xy`
+  the rect size in pixels and `params.z` the corner radius in pixels;
+  vertex stage only). Its `Pipeline` is built with empty binding /
   attribute descriptions, `Pipeline.enableAlphaBlending` and depth
   test + write disabled, so the screen-space rectangles always draw on
   top. The system keeps an immediate-mode rect queue (`beginFrame` /
@@ -369,7 +377,8 @@ void main() {
 
 The UI shaders do **not** use the `GlobalUbo`; they read everything
 from push constants. `bounds.xy` (offset) / `bounds.zw` (extent) are
-pre-computed in NDC on the CPU (`UiRenderSystem.render`).
+pre-computed in NDC on the CPU (`UiRenderSystem.render`); `params.xy`
+is the rect size in pixels and `params.z` the corner radius in pixels.
 
 ```glsl
 #version 450
@@ -384,16 +393,26 @@ const vec2 OFFSETS[6] = vec2[](
 );
 
 layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec2 fragLocalPos;        // px, relative to center
+layout(location = 2) flat out vec2 fragHalfSize;   // px
+layout(location = 3) flat out float fragRadius;    // px
 
 layout(push_constant) uniform Push {
     vec4 bounds;  // xy = offset (NDC top-left), zw = extent (NDC size)
     vec4 color;
+    vec4 params;  // xy = rect size (px), z = corner radius (px)
 } push;
 
 void main() {
-    vec2 pos = push.bounds.xy + OFFSETS[gl_VertexIndex] * push.bounds.zw;
+    vec2 corner = OFFSETS[gl_VertexIndex];
+    vec2 pos = push.bounds.xy + corner * push.bounds.zw;
     gl_Position = vec4(pos, 0.0, 1.0);
     fragColor = push.color;
+
+    vec2 size = push.params.xy;
+    fragLocalPos = (corner - 0.5) * size;
+    fragHalfSize = size * 0.5;
+    fragRadius = push.params.z;
 }
 ```
 
@@ -403,10 +422,25 @@ void main() {
 #version 450
 
 layout(location = 0) in vec4 fragColor;
+layout(location = 1) in vec2 fragLocalPos;
+layout(location = 2) flat in vec2 fragHalfSize;
+layout(location = 3) flat in float fragRadius;
+
 layout(location = 0) out vec4 outColor;
 
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
 void main() {
-    outColor = fragColor;
+    // Clamp the radius to at most half the shortest side, then
+    // anti-alias the SDF edge over ~1 pixel via fwidth.
+    float r = min(fragRadius, min(fragHalfSize.x, fragHalfSize.y));
+    float d = sdRoundedBox(fragLocalPos, fragHalfSize, r);
+    float aa = max(fwidth(d), 1e-4);
+    float coverage = 1.0 - smoothstep(-aa, aa, d);
+    outColor = vec4(fragColor.rgb, fragColor.a * coverage);
 }
 ```
 

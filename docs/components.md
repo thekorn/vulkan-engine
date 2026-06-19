@@ -46,7 +46,8 @@ big-picture data flow see [architecture.md](./architecture.md).
     3. On a valid command buffer: query the cursor position via
        `getCursorInFramebufferSpace()`, then `uiRenderSystem.beginFrame()`
        and queue four colored squares (red/green/blue/yellow, 80 px
-       each, 20 px gap, 50 px margin from the top-left) via `rect(...)`
+       each, 20 px gap, 50 px margin from the top-left, 16 px corner
+       radius) via `rect(...)`
        — each square swaps to a lighter hover tint when the cursor is
        inside its bounds — then inside the swapchain render pass call
        `uiRenderSystem.render(commandBuffer, swapChainExtent)` followed
@@ -506,20 +507,25 @@ big-picture data flow see [architecture.md](./architecture.md).
 - **Immediate-mode API:** no retained widget state between frames. Each
   frame the caller resets the queue, pushes rects, and records draws:
   - `beginFrame()` - Resets the accumulated rect count to 0.
-  - `rect(x, y, w, h, color)` - Queues a filled rectangle in pixel
-    coordinates (origin = top-left of the window), `color` RGBA in
-    [0, 1]. Asserts the per-frame `max_rects = 256` cap.
+  - `rect(x, y, w, h, color, radius)` - Queues a filled rectangle in
+    pixel coordinates (origin = top-left of the window), `color` RGBA in
+    [0, 1]. `radius` is the corner radius in pixels (0 = sharp corners),
+    clamped in the fragment shader to at most half the shortest side.
+    Asserts the per-frame `max_rects = 256` cap.
   - `render(commandBuffer, extent)` - Binds the pipeline and, for each
     queued rect, converts pixel coords to Vulkan NDC ([-1, 1], +Y down)
     using `extent`, uploads a `UiPushConstants` and issues
     `vkCmdDraw(cb, 6, 1, 0, 0)`. Must be called inside an active
     swapchain render pass. No-op when no rects are queued.
 - **Types:**
-  - `UiPushConstants` - `extern struct { bounds: Vec4, color: Vec4 }`
-    mirroring the GLSL `Push` block in `ui.vert`. `bounds.xy` is the
-    rect offset and `bounds.zw` its extent, both in NDC. Offset and
-    extent are packed into one `Vec4` (rather than two `Vec2`s) so the
-    std430 layout — `bounds = 0, color = 16` — holds on every platform;
+  - `UiPushConstants` - `extern struct { bounds: Vec4, color: Vec4,
+    params: Vec4 }` mirroring the GLSL `Push` block in `ui.vert`.
+    `bounds.xy` is the rect offset and `bounds.zw` its extent, both in
+    NDC; `params.xy` is the rect size in pixels and `params.z` the
+    corner radius in pixels (consumed by the rounded-box SDF in the
+    fragment shader). Offset and extent are packed into one `Vec4`
+    (rather than two `Vec2`s) so the std430 layout — `bounds = 0,
+    color = 16, params = 32` — holds on every platform;
     `@Vector(2, f32)` is 16-byte aligned/sized on some targets (e.g.
     x86-64 Linux), leaving the fields misaligned otherwise.
 - **Pipeline configuration:** built via `Pipeline.enableAlphaBlending`

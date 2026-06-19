@@ -29,7 +29,7 @@ const Self = @This();
 pub const max_rects = 256;
 
 /// Per-rect push constants. Layout mirrors the GLSL `Push` block in
-/// `ui.vert` (std430): `{ vec4 bounds; vec4 color; }`.
+/// `ui.vert` (std430): `{ vec4 bounds; vec4 color; vec4 params; }`.
 ///
 /// `bounds.xy` is the rect offset and `bounds.zw` its extent, both in
 /// NDC ([-1, 1], +Y down). The offset/extent pair is packed into one
@@ -38,20 +38,27 @@ pub const max_rects = 256;
 /// `Vec2` fields would land at offsets 0/16 with `color` at 32 and
 /// break the std430 layout the shader expects. A single `Vec4` is
 /// reliably 16 bytes on every platform, keeping `bounds = 0,
-/// color = 16`.
+/// color = 16, params = 32`.
+///
+/// `params.xy` is the rect size in pixels and `params.z` the corner
+/// radius in pixels; the fragment shader uses these to anti-alias the
+/// rounded corners.
 pub const UiPushConstants = extern struct {
     bounds: math.Vec4 = @splat(0),
     color: math.Vec4 = @splat(0),
+    params: math.Vec4 = @splat(0),
 };
 
 /// A rectangle queued for drawing this frame, in pixel coordinates
-/// (origin = top-left of the window).
+/// (origin = top-left of the window). `radius` is the corner radius in
+/// pixels (0 = sharp corners).
 const Rect = struct {
     x: f32,
     y: f32,
     w: f32,
     h: f32,
     color: math.Vec4,
+    radius: f32,
 };
 
 alloc: std.mem.Allocator,
@@ -144,10 +151,12 @@ pub fn beginFrame(self: *Self) void {
 
 /// Queue a filled rectangle for this frame. `x` / `y` are the
 /// top-left corner and `w` / `h` the size, all in pixels (origin =
-/// top-left of the window). `color` is RGBA in [0, 1].
-pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4) void {
+/// top-left of the window). `color` is RGBA in [0, 1]. `radius` is the
+/// corner radius in pixels (0 = sharp corners); it is clamped in the
+/// shader to at most half the shortest side.
+pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4, radius: f32) void {
     std.debug.assert(self.rectCount < max_rects);
-    self.rects[self.rectCount] = .{ .x = x, .y = y, .w = w, .h = h, .color = color };
+    self.rects[self.rectCount] = .{ .x = x, .y = y, .w = w, .h = h, .color = color, .radius = radius };
     self.rectCount += 1;
 }
 
@@ -174,6 +183,9 @@ pub fn render(self: *Self, commandBuffer: c.VkCommandBuffer, extent: c.VkExtent2
                 r.h / fh * 2.0,
             },
             .color = r.color,
+            // Rect size + corner radius in pixels for the rounded-box
+            // SDF in the fragment shader.
+            .params = .{ r.w, r.h, r.radius, 0 },
         };
 
         c.vkCmdPushConstants(
@@ -201,6 +213,7 @@ test "UiRenderSystem has expected fields and types" {
 test "UiPushConstants matches the GLSL push-constant layout" {
     try std.testing.expectEqual(@as(usize, 0), @offsetOf(UiPushConstants, "bounds"));
     try std.testing.expectEqual(@as(usize, 16), @offsetOf(UiPushConstants, "color"));
+    try std.testing.expectEqual(@as(usize, 32), @offsetOf(UiPushConstants, "params"));
     try std.testing.expect(@sizeOf(UiPushConstants) <= 128);
 }
 
@@ -212,8 +225,8 @@ test "beginFrame resets the queued rect count" {
         .pipeline = null,
         .pipelineLayout = null,
     };
-    sys.rect(0, 0, 10, 10, .{ 1, 0, 0, 1 });
-    sys.rect(20, 0, 10, 10, .{ 0, 1, 0, 1 });
+    sys.rect(0, 0, 10, 10, .{ 1, 0, 0, 1 }, 0);
+    sys.rect(20, 0, 10, 10, .{ 0, 1, 0, 1 }, 4);
     try std.testing.expectEqual(@as(usize, 2), sys.rectCount);
     sys.beginFrame();
     try std.testing.expectEqual(@as(usize, 0), sys.rectCount);
