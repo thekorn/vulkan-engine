@@ -1,6 +1,7 @@
 pub const c = @cImport({
     // See https://github.com/ziglang/zig/issues/515
     @cDefine("GLFW_INCLUDE_VULKAN", {});
+    @cDefine("GLFW_INCLUDE_NONE", {});
     @cInclude("GLFW/glfw3.h");
     @cInclude("vulkan/vulkan_beta.h");
     @cInclude("tinyobj_wrapper.h");
@@ -14,6 +15,7 @@ pub const c = @cImport({
     @cDefine("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", {});
     @cDefine("CIMGUI_USE_GLFW", {});
     @cDefine("CIMGUI_USE_VULKAN", {});
+    @cDefine("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", {});
     @cInclude("cimgui.h");
     @cInclude("cimgui_impl.h");
 

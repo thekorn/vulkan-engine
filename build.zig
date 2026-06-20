@@ -220,6 +220,14 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("glfw3", .{});
     exe.root_module.linkSystemLibrary("vulkan", .{});
 
+    if (target.result.os.tag == .macos) {
+        if (std.c.getenv("SDKROOT")) |sdkroot| {
+            exe.root_module.addSystemFrameworkPath(.{
+                .cwd_relative = b.pathJoin(&.{ std.mem.span(sdkroot), "System/Library/Frameworks" }),
+            });
+        }
+    }
+
     // The OBJ loader is a thin C-ABI wrapper around the C++
     // tinyobjloader library. Compiling the wrapper requires libc++ and
     // libc; pulling in tinyobjloader via `linkSystemLibrary` lets
@@ -270,6 +278,8 @@ pub fn build(b: *std.Build) void {
             "-fno-rtti",
             "-DCIMGUI_USE_GLFW",
             "-DCIMGUI_USE_VULKAN",
+            "-DGLFW_INCLUDE_NONE",
+            "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS",
         },
     });
 
@@ -289,7 +299,6 @@ pub fn build(b: *std.Build) void {
             "imgui/imgui_widgets.cpp",
             // Platform / renderer backends. Their C declarations come
             // out of `cimgui_impl.h` (which we read from Zig).
-            "imgui/backends/imgui_impl_glfw.cpp",
             "imgui/backends/imgui_impl_vulkan.cpp",
         },
         .flags = &.{
@@ -298,6 +307,7 @@ pub fn build(b: *std.Build) void {
             "-fno-rtti",
             "-DCIMGUI_USE_GLFW",
             "-DCIMGUI_USE_VULKAN",
+            "-DGLFW_INCLUDE_NONE",
             // Force the Dear ImGui backend functions
             // (`imgui_impl_glfw.cpp`, `imgui_impl_vulkan.cpp`) to be
             // declared and defined with C linkage so they match the
@@ -315,6 +325,21 @@ pub fn build(b: *std.Build) void {
             // block hides that second declaration entirely. The
             // current `ImGui_ImplVulkan_AddTexture(VkImageView,
             // VkImageLayout)` is still available.
+            "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS",
+        },
+    });
+
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/wrapper/imgui/imgui_impl_glfw_nix.cpp"),
+        .flags = &.{
+            "-std=c++17",
+            "-fno-exceptions",
+            "-fno-rtti",
+            "-DCIMGUI_USE_GLFW",
+            "-DCIMGUI_USE_VULKAN",
+            "-DGLFW_INCLUDE_NONE",
+            "-DGLFW_NATIVE_INCLUDE_NONE",
+            "-DIMGUI_IMPL_API=extern \"C\"",
             "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS",
         },
     });
