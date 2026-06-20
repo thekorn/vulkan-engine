@@ -8,3 +8,5 @@ zig-pkg
 # Dear ImGui writes per-user UI state (window positions, sizes, …)
 # to `imgui.ini` next to the binary at runtime.
 imgui.ini
+# nix reuslt
+result
