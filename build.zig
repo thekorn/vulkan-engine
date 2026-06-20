@@ -221,9 +221,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("vulkan", .{});
 
     if (target.result.os.tag == .macos) {
-        if (std.c.getenv("SDKROOT")) |sdkroot| {
+        if (b.graph.environ_map.get("SDKROOT")) |sdkroot| {
             exe.root_module.addSystemFrameworkPath(.{
-                .cwd_relative = b.pathJoin(&.{ std.mem.span(sdkroot), "System/Library/Frameworks" }),
+                .cwd_relative = b.pathJoin(&.{ sdkroot, "System/Library/Frameworks" }),
             });
         }
     }
