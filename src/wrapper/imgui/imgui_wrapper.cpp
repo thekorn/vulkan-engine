@@ -17,3 +17,11 @@ extern "C" bool imgui_want_capture_mouse(void) {
     if (igGetCurrentContext() == nullptr) return false;
     return igGetIO_Nil()->WantCaptureMouse;
 }
+
+extern "C" void imgui_disable_ini_file(void) {
+    // Dear ImGui defaults `IniFilename` to "imgui.ini" and writes it in
+    // the process working directory. The field lives on `ImGuiIO`, which
+    // Zig can't dereference directly through cimgui, so set it here.
+    if (igGetCurrentContext() == nullptr) return;
+    igGetIO_Nil()->IniFilename = nullptr;
+}

@@ -100,6 +100,7 @@ pub fn init(
 
     const context = c.igCreateContext(null) orelse return error.ImGuiCreateContextFailed;
     errdefer c.igDestroyContext(context);
+    c.imgui_disable_ini_file();
     c.igStyleColorsDark(null);
 
     // GLFW backend. `install_callbacks = true` chains the ImGui

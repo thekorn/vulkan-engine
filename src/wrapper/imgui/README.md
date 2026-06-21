@@ -1,10 +1,11 @@
 # `imgui_wrapper` — why this directory exists
 
 A tiny **C-ABI shim** over a few Dear ImGui / cimgui APIs that the
-Zig `@cImport` can't materialize cleanly. Right now it just exposes
+Zig `@cImport` can't materialize cleanly. Right now it exposes
 `ImGui::GetIO().WantCaptureMouse` as `imgui_want_capture_mouse()` so
 the engine's input controller can ignore the mouse while ImGui is
-using it.
+using it, and `imgui_disable_ini_file()` so the debug UI does not
+write the default Dear ImGui `imgui.ini` state file next to the binary.
 
 ## Why we can't just call `igGetIO_Nil()` from Zig directly
 
@@ -31,20 +32,24 @@ return io.*.WantCaptureMouse;    // error: indexable pointer to opaque type
 ```
 
 There's no `igWantCaptureMouse()` C helper in cimgui to sidestep
-this, so we add one ourselves.
+this. The Dear ImGui `IniFilename` setting also lives on `ImGuiIO`, so
+disabling the automatic `imgui.ini` file needs the same bridge.
 
 ## What the shim does
 
 `imgui_wrapper.cpp` is a single-translation-unit C++ file that
 includes `cimgui.h` (where the IO struct is fully defined for C++
-consumers) and exposes a plain `bool imgui_want_capture_mouse(void)`
-function:
+consumers) and exposes plain C helpers:
 
 ```cpp
 extern "C" bool imgui_want_capture_mouse(void) {
-    ImGuiIO *io = igGetIO_Nil();
-    if (io == nullptr) return false;
-    return io->WantCaptureMouse;
+    if (igGetCurrentContext() == nullptr) return false;
+    return igGetIO_Nil()->WantCaptureMouse;
+}
+
+extern "C" void imgui_disable_ini_file(void) {
+    if (igGetCurrentContext() == nullptr) return;
+    igGetIO_Nil()->IniFilename = nullptr;
 }
 ```
 

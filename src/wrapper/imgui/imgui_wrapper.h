@@ -8,8 +8,7 @@
 // makes it impossible to dereference the `[*c]ImGuiIO` returned by
 // `igGetIO_Nil()` from Zig (the language correctly rejects an
 // "indexable pointer to opaque type"). This wrapper does the IO struct
-// access on the C++ side and returns just the bool the engine actually
-// needs.
+// access on the C++ side and exposes small C helpers for the engine.
 
 #ifndef IMGUI_WRAPPER_H
 #define IMGUI_WRAPPER_H
@@ -25,6 +24,10 @@ extern "C" {
 /// mouse drag). Mirrors `ImGui::GetIO().WantCaptureMouse`. Safe to call
 /// before any context exists — returns `false` in that case.
 bool imgui_want_capture_mouse(void);
+
+/// Disable the default Dear ImGui `imgui.ini` persistence file. Safe to
+/// call before any context exists — no-ops in that case.
+void imgui_disable_ini_file(void);
 
 #ifdef __cplusplus
 }
