@@ -2,9 +2,9 @@
 //!
 //! Draws axis-aligned colored rectangles in screen space. The API is
 //! intentionally immediate-mode: each frame the caller resets the
-//! accumulated rect list with `beginFrame`, pushes rectangles with
-//! `rect`, and finally records the draws with `render`. No retained
-//! widget state is kept between frames.
+//! accumulated element list with `beginFrame`, pushes rectangles or a
+//! small nested flex tree, and finally records the draws with
+//! `render`. No retained widget state is kept between frames.
 //!
 //! Like `PointLightSystem`, the pipeline binds no vertex buffers: the
 //! vertex shader (`ui.vert`) emits a unit quad from `gl_VertexIndex`
@@ -23,10 +23,38 @@ const checkSuccess = @import("../utils.zig").checkSuccess;
 
 const Self = @This();
 
-/// Upper bound on the number of rectangles drawable in a single frame.
-/// Sized generously for a debug/immediate-mode UI; pushing past this
-/// is a programming error (asserted in `rect`).
-pub const max_rects = 256;
+/// Upper bound on the number of UI elements drawable in a single
+/// frame. Sized generously for a debug/immediate-mode UI; pushing past
+/// this is a programming error.
+pub const max_elements = 256;
+pub const max_rects = max_elements;
+
+/// Maximum nesting depth for `beginContainer` / `endContainer` pairs.
+pub const max_layout_depth = 32;
+
+/// Main-axis direction for a container's children.
+pub const FlexDirection = enum { row, column };
+
+/// Container styling. `direction` controls child layout, `padding` is
+/// applied on all sides, `gap` separates adjacent children, and
+/// `background` optionally draws the container's own rectangle before
+/// its descendants.
+pub const ContainerStyle = struct {
+    direction: FlexDirection = .row,
+    padding: f32 = 0,
+    gap: f32 = 0,
+    background: ?math.Vec4 = null,
+};
+
+/// Layout request for a child inside the current container. Along the
+/// parent container's main axis, a fixed `width` / `height` wins; any
+/// remaining space is distributed proportionally by `flex_grow`. Along
+/// the cross axis, omitting the size fills the container's inner size.
+pub const Layout = struct {
+    width: ?f32 = null,
+    height: ?f32 = null,
+    flex_grow: f32 = 0,
+};
 
 /// Per-rect push constants. Layout mirrors the GLSL `Push` block in
 /// `ui.vert` (std430): `{ vec4 bounds; vec4 color; }`.
@@ -44,21 +72,93 @@ pub const UiPushConstants = extern struct {
     color: math.Vec4 = @splat(0),
 };
 
-/// A rectangle queued for drawing this frame, in pixel coordinates
-/// (origin = top-left of the window).
-const Rect = struct {
+const ElementKind = enum { rect, container };
+
+/// Bounds in pixel coordinates (origin = top-left).
+pub const Bounds = struct {
     x: f32,
     y: f32,
     w: f32,
     h: f32,
-    color: math.Vec4,
 };
+
+const Size = struct {
+    main: f32,
+    cross: f32,
+};
+
+const Cursor = struct {
+    x: f32,
+    y: f32,
+};
+
+/// A queued element. `x` / `y` / `w` / `h` are pixel coordinates.
+/// Root elements are supplied directly by the caller; children are
+/// resolved by `layoutElements` before rendering.
+const Element = struct {
+    kind: ElementKind,
+    parent: ?usize,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    layout: Layout = .{},
+    style: ContainerStyle = .{},
+    color: math.Vec4 = @splat(0),
+    draws: bool = false,
+};
+
+fn mainSize(layout: Layout, direction: FlexDirection) ?f32 {
+    return switch (direction) {
+        .row => layout.width,
+        .column => layout.height,
+    };
+}
+
+fn crossSize(layout: Layout, direction: FlexDirection) ?f32 {
+    return switch (direction) {
+        .row => layout.height,
+        .column => layout.width,
+    };
+}
+
+fn clampNonNegative(value: f32) f32 {
+    return if (value > 0) value else 0;
+}
+
+fn childBounds(parent: Element, cursor: Cursor, size: Size) Bounds {
+    return switch (parent.style.direction) {
+        .row => .{ .x = cursor.x, .y = cursor.y, .w = size.main, .h = size.cross },
+        .column => .{ .x = cursor.x, .y = cursor.y, .w = size.cross, .h = size.main },
+    };
+}
+
+fn advanceCursor(cursor: *Cursor, direction: FlexDirection, main: f32, gap: f32) void {
+    switch (direction) {
+        .row => cursor.x += main + gap,
+        .column => cursor.y += main + gap,
+    }
+}
+
+fn isDirectChild(child: Element, parent_idx: usize) bool {
+    return child.parent != null and child.parent.? == parent_idx;
+}
+
+/// Pure helper for callers that want hover logic for manually-known
+/// bounds without duplicating the half-open edge convention.
+pub fn pointInside(x: f32, y: f32, bounds: Bounds) bool {
+    return x >= bounds.x and x < bounds.x + bounds.w and
+        y >= bounds.y and y < bounds.y + bounds.h;
+}
 
 alloc: std.mem.Allocator,
 device: *Device,
 pipeline: ?*Pipeline,
 pipelineLayout: c.VkPipelineLayout,
-rects: [max_rects]Rect = undefined,
+elements: [max_elements]Element = undefined,
+elementCount: usize = 0,
+layoutStack: [max_layout_depth]usize = undefined,
+layoutDepth: usize = 0,
 rectCount: usize = 0,
 
 pub fn init(
@@ -136,19 +236,180 @@ fn createPipeline(self: *Self, renderPass: c.VkRenderPass) !void {
     );
 }
 
-/// Reset the accumulated rect list. Call once per frame before any
-/// `rect` calls.
+/// Reset the accumulated element list. Call once per frame before any
+/// `rect` / flex-tree calls.
 pub fn beginFrame(self: *Self) void {
+    self.elementCount = 0;
+    self.layoutDepth = 0;
     self.rectCount = 0;
 }
 
 /// Queue a filled rectangle for this frame. `x` / `y` are the
 /// top-left corner and `w` / `h` the size, all in pixels (origin =
-/// top-left of the window). `color` is RGBA in [0, 1].
+/// top-left of the window). `color` is RGBA in [0, 1]. This preserves
+/// the original absolute-positioned API.
 pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4) void {
-    std.debug.assert(self.rectCount < max_rects);
-    self.rects[self.rectCount] = .{ .x = x, .y = y, .w = w, .h = h, .color = color };
-    self.rectCount += 1;
+    _ = self.addElement(.{
+        .kind = .rect,
+        .parent = null,
+        .x = x,
+        .y = y,
+        .w = w,
+        .h = h,
+        .color = color,
+        .draws = true,
+    });
+}
+
+/// Begin a root container with explicit pixel bounds. Children pushed
+/// until the matching `endContainer` are laid out according to
+/// `style.direction`, `style.padding`, `style.gap`, and each child's
+/// `Layout`.
+pub fn beginContainer(self: *Self, x: f32, y: f32, w: f32, h: f32, style: ContainerStyle) void {
+    const idx = self.addElement(.{
+        .kind = .container,
+        .parent = null,
+        .x = x,
+        .y = y,
+        .w = w,
+        .h = h,
+        .style = style,
+        .color = style.background orelse @as(math.Vec4, @splat(0)),
+        .draws = style.background != null,
+    });
+    self.pushContainer(idx);
+}
+
+/// Begin a nested container as a child of the current container. Its
+/// final bounds are resolved from `layout` during the flex pass.
+pub fn beginChildContainer(self: *Self, layout: Layout, style: ContainerStyle) void {
+    std.debug.assert(self.layoutDepth > 0);
+    const idx = self.addElement(.{
+        .kind = .container,
+        .parent = self.layoutStack[self.layoutDepth - 1],
+        .x = 0,
+        .y = 0,
+        .w = layout.width orelse 0,
+        .h = layout.height orelse 0,
+        .layout = layout,
+        .style = style,
+        .color = style.background orelse @as(math.Vec4, @splat(0)),
+        .draws = style.background != null,
+    });
+    self.pushContainer(idx);
+}
+
+/// End the current container. Every begin call must have a matching
+/// end call before `render`.
+pub fn endContainer(self: *Self) void {
+    std.debug.assert(self.layoutDepth > 0);
+    self.layoutDepth -= 1;
+}
+
+/// Queue a rectangle inside the current container. The rectangle's
+/// pixel bounds are resolved from `layout` during the flex pass.
+pub fn flexRect(self: *Self, layout: Layout, color: math.Vec4) void {
+    std.debug.assert(self.layoutDepth > 0);
+    _ = self.addElement(.{
+        .kind = .rect,
+        .parent = self.layoutStack[self.layoutDepth - 1],
+        .x = 0,
+        .y = 0,
+        .w = layout.width orelse 0,
+        .h = layout.height orelse 0,
+        .layout = layout,
+        .color = color,
+        .draws = true,
+    });
+}
+
+fn addElement(self: *Self, element: Element) usize {
+    std.debug.assert(self.elementCount < max_elements);
+    const idx = self.elementCount;
+    self.elements[idx] = element;
+    self.elementCount += 1;
+    if (element.draws) self.rectCount += 1;
+    return idx;
+}
+
+fn pushContainer(self: *Self, idx: usize) void {
+    std.debug.assert(self.layoutDepth < max_layout_depth);
+    self.layoutStack[self.layoutDepth] = idx;
+    self.layoutDepth += 1;
+}
+
+fn layoutElements(self: *Self) void {
+    std.debug.assert(self.layoutDepth == 0);
+
+    var idx: usize = 0;
+    while (idx < self.elementCount) : (idx += 1) {
+        if (self.elements[idx].kind == .container) {
+            self.layoutChildren(idx);
+        }
+    }
+}
+
+fn layoutChildren(self: *Self, parent_idx: usize) void {
+    const parent = self.elements[parent_idx];
+    const direction = parent.style.direction;
+    const padding = parent.style.padding;
+    const gap = parent.style.gap;
+
+    const inner_x = parent.x + padding;
+    const inner_y = parent.y + padding;
+    const inner_w = clampNonNegative(parent.w - padding * 2.0);
+    const inner_h = clampNonNegative(parent.h - padding * 2.0);
+    const inner_main = switch (direction) {
+        .row => inner_w,
+        .column => inner_h,
+    };
+    const inner_cross = switch (direction) {
+        .row => inner_h,
+        .column => inner_w,
+    };
+
+    var child_count: usize = 0;
+    var fixed_main: f32 = 0;
+    var total_flex: f32 = 0;
+
+    for (self.elements[0..self.elementCount]) |child| {
+        if (!isDirectChild(child, parent_idx)) continue;
+        child_count += 1;
+        if (mainSize(child.layout, direction)) |size| {
+            fixed_main += size;
+        } else {
+            total_flex += clampNonNegative(child.layout.flex_grow);
+        }
+    }
+
+    if (child_count == 0) return;
+
+    const total_gap = gap * @as(f32, @floatFromInt(child_count - 1));
+    const remaining = clampNonNegative(inner_main - fixed_main - total_gap);
+    var cursor: Cursor = .{ .x = inner_x, .y = inner_y };
+
+    for (self.elements[0..self.elementCount]) |*child| {
+        if (!isDirectChild(child.*, parent_idx)) continue;
+
+        const flex = clampNonNegative(child.layout.flex_grow);
+        const main = mainSize(child.layout, direction) orelse
+            if (total_flex > 0) remaining * (flex / total_flex) else 0;
+        const cross = crossSize(child.layout, direction) orelse inner_cross;
+        const bounds = childBounds(parent, cursor, .{
+            .main = clampNonNegative(main),
+            .cross = clampNonNegative(cross),
+        });
+
+        child.x = bounds.x;
+        child.y = bounds.y;
+        child.w = bounds.w;
+        child.h = bounds.h;
+
+        advanceCursor(&cursor, direction, switch (direction) {
+            .row => bounds.w,
+            .column => bounds.h,
+        }, gap);
+    }
 }
 
 /// Record draw commands for every queued rectangle into
@@ -158,12 +419,16 @@ pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4) void 
 pub fn render(self: *Self, commandBuffer: c.VkCommandBuffer, extent: c.VkExtent2D) void {
     if (self.rectCount == 0) return;
 
+    self.layoutElements();
+
     self.pipeline.?.bind(commandBuffer);
 
     const fw: f32 = @floatFromInt(extent.width);
     const fh: f32 = @floatFromInt(extent.height);
 
-    for (self.rects[0..self.rectCount]) |r| {
+    for (self.elements[0..self.elementCount]) |r| {
+        if (!r.draws) continue;
+
         // Pixel space (origin top-left, +Y down) -> Vulkan NDC
         // ([-1, 1], +Y down). A pixel x maps to x/W*2 - 1.
         const push: UiPushConstants = .{
@@ -217,4 +482,67 @@ test "beginFrame resets the queued rect count" {
     try std.testing.expectEqual(@as(usize, 2), sys.rectCount);
     sys.beginFrame();
     try std.testing.expectEqual(@as(usize, 0), sys.rectCount);
+    try std.testing.expectEqual(@as(usize, 0), sys.elementCount);
+}
+
+test "column container lays out fixed and flex children" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.beginContainer(10, 20, 200, 120, .{ .direction = .column, .padding = 10, .gap = 5 });
+    sys.flexRect(.{ .height = 20 }, .{ 1, 0, 0, 1 });
+    sys.flexRect(.{ .flex_grow = 1 }, .{ 0, 1, 0, 1 });
+    sys.endContainer();
+
+    sys.layoutElements();
+
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[1].x);
+    try std.testing.expectEqual(@as(f32, 30), sys.elements[1].y);
+    try std.testing.expectEqual(@as(f32, 180), sys.elements[1].w);
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[1].h);
+
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[2].x);
+    try std.testing.expectEqual(@as(f32, 55), sys.elements[2].y);
+    try std.testing.expectEqual(@as(f32, 180), sys.elements[2].w);
+    try std.testing.expectEqual(@as(f32, 75), sys.elements[2].h);
+}
+
+test "row container distributes remaining space by flex grow" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.beginContainer(0, 0, 100, 20, .{ .direction = .row, .gap = 10 });
+    sys.flexRect(.{ .width = 20 }, .{ 1, 0, 0, 1 });
+    sys.flexRect(.{ .flex_grow = 1 }, .{ 0, 1, 0, 1 });
+    sys.flexRect(.{ .flex_grow = 2 }, .{ 0, 0, 1, 1 });
+    sys.endContainer();
+
+    sys.layoutElements();
+
+    try std.testing.expectEqual(@as(f32, 0), sys.elements[1].x);
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[1].w);
+    try std.testing.expectApproxEqAbs(@as(f32, 30), sys.elements[2].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 20), sys.elements[2].w, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 60), sys.elements[3].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), sys.elements[3].w, 0.001);
+}
+
+test "pointInside uses half-open rectangle bounds" {
+    const bounds: Bounds = .{ .x = 10, .y = 20, .w = 30, .h = 40 };
+    try std.testing.expect(pointInside(10, 20, bounds));
+    try std.testing.expect(pointInside(39.99, 59.99, bounds));
+    try std.testing.expect(!pointInside(40, 20, bounds));
+    try std.testing.expect(!pointInside(10, 60, bounds));
 }

@@ -414,10 +414,11 @@ void main() {
 
 `main.zig` runs one of two app roots (currently `CustomUiApp`).
 
-`CustomUiApp` renders no 3D scene: each frame it draws four colored
-screen-space squares via `UiRenderSystem` (immediate-mode `beginFrame`
-+ `rect` + `render`) and the Dear ImGui debug overlay on top. The
-description below covers `TutorialApp`, the full 3D pipeline.
+`CustomUiApp` renders no 3D scene: each frame it draws a nested
+flex-style screen-space panel via `UiRenderSystem` (immediate-mode
+`beginFrame` + container / flex rect calls + `render`) and the Dear
+ImGui debug overlay on top. The description below covers `TutorialApp`,
+the full 3D pipeline.
 
 `TutorialApp` renders the two vase models (`flat_vase.obj` and
 `smooth_vase.obj`)

@@ -6,8 +6,8 @@
 //! and device are heap-allocated so sub-components can hold stable
 //! back-pointers) but drops everything the 3D pipeline needs: there
 //! is no global UBO, no descriptor pool and no `GameObject` map. The
-//! main loop just queues a few colored squares each frame and draws
-//! them under the debug overlay.
+//! main loop just queues a small nested flex-style panel each frame
+//! and draws it under the debug overlay.
 
 const std = @import("std");
 
@@ -78,7 +78,7 @@ pub fn run(self: *Self) !void {
 
     // Dear ImGui debug overlay, built against the same swapchain
     // render pass so its draws slot into the existing render-pass
-    // scope after the UI squares.
+    // scope after the custom UI panel.
     var debugUi = try DebugUi.init(
         self.alloc,
         self.device,
@@ -138,34 +138,59 @@ pub fn run(self: *Self) !void {
             // framebuffer/window ratio (≠ 1 on HiDPI/retina displays).
             const mouse = self.getCursorInFramebufferSpace();
 
-            // Build this frame's immediate-mode UI: four colored
-            // squares in a row, each `square` px wide with a `gap` px
-            // gap, starting `margin` px from the top-left corner. When
-            // the cursor hovers a square it brightens to a lighter
-            // tint.
+            // Build this frame's immediate-mode UI as a small nested
+            // flex tree. The outer panel stacks header / body / footer
+            // vertically; the body lays out a fixed sidebar next to a
+            // flexible content column; the content column nests a row
+            // of equal-width cards.
             uiRenderSystem.beginFrame();
             {
-                const square: f32 = 80.0;
-                const gap: f32 = 20.0;
-                const margin: f32 = 50.0;
-                const colors = [_][4]f32{
-                    .{ 0.90, 0.20, 0.20, 1.0 }, // red
-                    .{ 0.20, 0.80, 0.30, 1.0 }, // green
-                    .{ 0.20, 0.45, 0.90, 1.0 }, // blue
-                    .{ 0.95, 0.80, 0.20, 1.0 }, // yellow
+                const panel: UiRenderSystem.Bounds = .{ .x = 50, .y = 50, .w = 520, .h = 300 };
+                const hovered = UiRenderSystem.pointInside(mouse.x, mouse.y, panel);
+                uiRenderSystem.beginContainer(panel.x, panel.y, panel.w, panel.h, .{
+                    .direction = .column,
+                    .padding = 16,
+                    .gap = 12,
+                    .background = if (hovered)
+                        .{ 0.16, 0.18, 0.24, 0.92 }
+                    else
+                        .{ 0.10, 0.12, 0.18, 0.92 },
+                });
+
+                uiRenderSystem.flexRect(.{ .height = 44 }, .{ 0.20, 0.45, 0.90, 1.0 });
+
+                uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
+                    .direction = .row,
+                    .gap = 12,
+                    .background = .{ 0.06, 0.07, 0.10, 0.80 },
+                });
+                uiRenderSystem.flexRect(.{ .width = 110 }, .{ 0.20, 0.80, 0.30, 1.0 });
+
+                uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
+                    .direction = .column,
+                    .gap = 12,
+                });
+                uiRenderSystem.flexRect(.{ .height = 58 }, .{ 0.95, 0.80, 0.20, 1.0 });
+
+                uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
+                    .direction = .row,
+                    .gap = 12,
+                });
+                const card_colors = [_][4]f32{
+                    .{ 0.90, 0.20, 0.20, 1.0 },
+                    .{ 0.55, 0.30, 0.90, 1.0 },
+                    .{ 0.20, 0.70, 0.90, 1.0 },
                 };
-                const hoverColors = [_][4]f32{
-                    .{ 1.00, 0.55, 0.55, 1.0 }, // light red
-                    .{ 0.55, 1.00, 0.65, 1.0 }, // light green
-                    .{ 0.55, 0.75, 1.00, 1.0 }, // light blue
-                    .{ 1.00, 0.95, 0.55, 1.0 }, // light yellow
-                };
-                for (colors, hoverColors, 0..) |col, hoverCol, i| {
-                    const x = margin + @as(f32, @floatFromInt(i)) * (square + gap);
-                    const hovered = mouse.x >= x and mouse.x < x + square and
-                        mouse.y >= margin and mouse.y < margin + square;
-                    uiRenderSystem.rect(x, margin, square, square, if (hovered) hoverCol else col);
+                for (card_colors) |col| {
+                    uiRenderSystem.flexRect(.{ .flex_grow = 1 }, col);
                 }
+                uiRenderSystem.endContainer();
+
+                uiRenderSystem.endContainer();
+                uiRenderSystem.endContainer();
+
+                uiRenderSystem.flexRect(.{ .height = 28 }, .{ 0.55, 0.60, 0.70, 1.0 });
+                uiRenderSystem.endContainer();
             }
 
             // render
@@ -176,7 +201,7 @@ pub fn run(self: *Self) !void {
             );
             // ImGui must be the *last* thing recorded inside the
             // swapchain render pass so its draw commands composite on
-            // top of the UI squares.
+            // top of the custom UI panel.
             debugUi.render(commandBuffer);
             self.renderer.endSwapChainRenderPass(commandBuffer);
             self.renderer.endFrame() catch |err| switch (err) {

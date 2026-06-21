@@ -10,7 +10,7 @@ The project ships **two interchangeable application roots**;
 the `-Dapp=` build option (see [`build.zig`](build.zig)):
 
 - **`CustomUiApp`** (current default) — a minimal app demonstrating a
-  custom **immediate-mode UI**: four colored squares laid out in a row
+  custom **immediate-mode UI**: a nested flex-style screen-space panel
   drawn by [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig),
   plus the Dear ImGui debug overlay. No 3D scene, camera or lighting.
 - **`TutorialApp`** — the full 3D scene: it renders `GameObject`s (two
@@ -35,10 +35,12 @@ To switch between them, pass the `-Dapp=` build option:
 [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig) is a
 small custom 2D overlay render system with an immediate-mode API: each
 frame the caller resets the queue with `beginFrame()`, pushes filled
-rectangles in pixel coordinates with `rect(x, y, w, h, color)`, and
-records the draws with `render(commandBuffer, extent)`. No retained
-widget state is kept between frames. The pipeline binds no vertex
-buffers — the quad is generated procedurally in
+rectangles in pixel coordinates with `rect(x, y, w, h, color)` or builds
+a per-frame nested row/column flex tree with container calls and
+`flexRect(...)`, then records the draws with
+`render(commandBuffer, extent)`. No retained widget state is kept
+between frames. The pipeline binds no vertex buffers — the quad is
+generated procedurally in
 [`shaders/ui.vert`](shaders/ui.vert) from `gl_VertexIndex`, with the
 per-rect position/size/color delivered as push constants — and uses
 alpha blending with depth testing disabled so the UI always draws on

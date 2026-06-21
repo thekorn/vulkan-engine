@@ -45,10 +45,11 @@ big-picture data flow see [architecture.md](./architecture.md).
        `renderer.beginFrame()`.
     3. On a valid command buffer: query the cursor position via
        `getCursorInFramebufferSpace()`, then `uiRenderSystem.beginFrame()`
-       and queue four colored squares (red/green/blue/yellow, 80 px
-       each, 20 px gap, 50 px margin from the top-left) via `rect(...)`
-       — each square swaps to a lighter hover tint when the cursor is
-       inside its bounds — then inside the swapchain render pass call
+       and queue a small nested flex demo (panel → header/body/footer,
+       body → sidebar/content, content → equal-width cards) via
+       `beginContainer(...)`, `beginChildContainer(...)`, `flexRect(...)`
+       and `endContainer()` — the panel background brightens when the
+       cursor is inside its bounds — then inside the swapchain render pass call
        `uiRenderSystem.render(commandBuffer, swapChainExtent)` followed
        by `debugUi.render(commandBuffer)` so the overlay composites on
        top.
@@ -497,23 +498,42 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 - **Purpose:** A small custom 2D overlay render system that draws
   axis-aligned colored rectangles in screen space with an
-  immediate-mode API. Independent of Dear ImGui (`DebugUi`). Used by
-  `CustomUiApp`; `TutorialApp` does not wire it in.
+  immediate-mode API, including a small per-frame nested flex layout
+  tree. Independent of Dear ImGui (`DebugUi`). Used by `CustomUiApp`;
+  `TutorialApp` does not wire it in.
 - **No vertex buffers, per-rect push constants:** like
   `PointLightSystem`, the pipeline binds no vertex buffers — the
   vertex shader (`ui.vert`) emits a unit quad from `gl_VertexIndex`
   and the per-rect position / size / color travel as push constants.
 - **Immediate-mode API:** no retained widget state between frames. Each
-  frame the caller resets the queue, pushes rects, and records draws:
-  - `beginFrame()` - Resets the accumulated rect count to 0.
-  - `rect(x, y, w, h, color)` - Queues a filled rectangle in pixel
-    coordinates (origin = top-left of the window), `color` RGBA in
-    [0, 1]. Asserts the per-frame `max_rects = 256` cap.
-  - `render(commandBuffer, extent)` - Binds the pipeline and, for each
-    queued rect, converts pixel coords to Vulkan NDC ([-1, 1], +Y down)
-    using `extent`, uploads a `UiPushConstants` and issues
-    `vkCmdDraw(cb, 6, 1, 0, 0)`. Must be called inside an active
-    swapchain render pass. No-op when no rects are queued.
+  frame the caller resets the queue, pushes absolute rects or a nested
+  flex tree, and records draws:
+  - `beginFrame()` - Resets the accumulated element count and layout
+    stack to 0.
+  - `rect(x, y, w, h, color)` - Queues a filled absolute rectangle in
+    pixel coordinates (origin = top-left of the window), `color` RGBA
+    in [0, 1]. Preserves the original simple API.
+  - `beginContainer(x, y, w, h, style)` - Starts a root container with
+    explicit pixel bounds. `ContainerStyle` provides `.direction`
+    (`.row` / `.column`), all-sides `padding`, child `gap`, and an
+    optional background color drawn behind its descendants.
+  - `beginChildContainer(layout, style)` - Starts a nested container
+    under the current container. Its bounds are resolved from `Layout`
+    during the flex pass.
+  - `flexRect(layout, color)` - Queues a rectangle as a child of the
+    current container. `Layout.width` / `height` provide fixed sizes;
+    omitted main-axis size participates in `flex_grow`; omitted
+    cross-axis size fills the parent container's inner cross size.
+  - `endContainer()` - Pops the current container; all begin calls must
+    be balanced before `render`.
+  - `pointInside(x, y, bounds)` - Small half-open hit-test helper for
+    hover logic in caller-known bounds.
+  - `render(commandBuffer, extent)` - Resolves the per-frame flex tree,
+    binds the pipeline and, for each drawable element, converts pixel
+    coords to Vulkan NDC ([-1, 1], +Y down) using `extent`, uploads a
+    `UiPushConstants` and issues `vkCmdDraw(cb, 6, 1, 0, 0)`. Must be
+    called inside an active swapchain render pass. No-op when no rects
+    are queued.
 - **Types:**
   - `UiPushConstants` - `extern struct { bounds: Vec4, color: Vec4 }`
     mirroring the GLSL `Push` block in `ui.vert`. `bounds.xy` is the

@@ -25,21 +25,22 @@ selects one at compile time via `build_options.app` (generated from
 
 - **`CustomUiApp`** (current default) — a minimal app demonstrating the
   custom immediate-mode UI. It owns only window / device / loop /
-  renderer and, each frame, draws four colored screen-space squares via
-  `UiRenderSystem` (`beginFrame` + four `rect(...)` + `render`) plus the
-  Dear ImGui debug overlay. No 3D scene, camera, lighting, textures,
-  global UBO, descriptor pool or `GameObject`s.
+  renderer and, each frame, draws a nested flex-style screen-space panel
+  via `UiRenderSystem` (`beginFrame` + container / flex rect calls +
+  `render`) plus the Dear ImGui debug overlay. No 3D scene, camera,
+  lighting, textures, global UBO, descriptor pool or `GameObject`s.
 - **`TutorialApp`** — the full 3D scene (vases + floor + spinning point
   lights). Both roots stay compiled and tested (registered in
   `main.zig`'s test block); to run `TutorialApp` instead, build with
   `-Dapp=tutorial` (the default is `-Dapp=custom`).
 
 The custom immediate-mode UI (`systems/UiRenderSystem.zig` +
-`shaders/ui.{vert,frag}`) is intentionally minimal: filled colored
-rectangles only, no text / input / layout / widgets, and no retained
-state between frames. It is independent of the Dear ImGui overlay
-(which remains the richer debug UI). Currently only `CustomUiApp` wires
-it in.
+`shaders/ui.{vert,frag}`) is intentionally small: filled colored
+rectangles, optional container backgrounds and a per-frame nested
+row/column flex layout pass (`padding`, `gap`, fixed width/height and
+`flex_grow`). It still has no text widgets and no retained state between
+frames. It is independent of the Dear ImGui overlay (which remains the
+richer debug UI). Currently only `CustomUiApp` wires it in.
 
 ## Known Limitations & TODOs
 

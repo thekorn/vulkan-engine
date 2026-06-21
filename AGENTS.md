@@ -4,7 +4,7 @@ A small Vulkan rendering engine written in Zig 0.16, built on GLFW +
 Vulkan + a C-ABI shim over `tinyobjloader`. Entry point is
 [`src/main.zig`](src/main.zig), which by default hands off to
 [`src/CustomUiApp.zig`](src/CustomUiApp.zig) — a minimal app that shows a
-custom immediate-mode UI (four colored squares via
+custom immediate-mode UI (a nested flex-style panel via
 [`src/systems/UiRenderSystem.zig`](src/systems/UiRenderSystem.zig))
 plus the Dear ImGui debug overlay. The full 3D scene (vases, floor,
 spinning point lights) lives in

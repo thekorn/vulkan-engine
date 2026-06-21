@@ -32,8 +32,8 @@ interchangeable application roots:
 
 - `CustomUiApp.zig` (**current default**) — a minimal app that composes
   a window, device, loop and renderer and, in its `run()` loop, drives
-  only a `UiRenderSystem` (a custom immediate-mode UI drawing four
-  colored squares) plus the Dear ImGui `DebugUi` overlay. No 3D scene,
+  only a `UiRenderSystem` (a custom immediate-mode UI drawing a nested
+  flex-style panel) plus the Dear ImGui `DebugUi` overlay. No 3D scene,
   camera, lighting, global UBO, descriptor pool or `GameObject`s.
 - `TutorialApp.zig` — the full 3D application: it composes a window,
   device, loop, renderer and a list of `GameObject`s and drives them
@@ -272,9 +272,9 @@ import (currently `CustomUiApp`).
 
 **`CustomUiApp` (current default)** — a minimal immediate-mode UI demo.
 Its `run()` loop drives only a `UiRenderSystem` and the Dear ImGui
-`DebugUi` overlay each frame: it queues four colored squares
-(`uiRenderSystem.beginFrame()` + four `rect(...)` calls) and records
-them with `uiRenderSystem.render(commandBuffer, extent)` inside the
+`DebugUi` overlay each frame: it queues a nested flex-style panel
+(`uiRenderSystem.beginFrame()` + container / flex rect calls) and records
+it with `uiRenderSystem.render(commandBuffer, extent)` inside the
 swapchain render pass, just before `debugUi.render(commandBuffer)`.
 There is no global UBO, descriptor pool, camera, lighting, texture or
 `GameObject` map — `CustomUiApp` only owns `window` / `device` / `loop`
@@ -384,7 +384,7 @@ vulkan-engine/
 │   │                        #   build_options.app)
 │   ├── CustomUiApp.zig        # Minimal app root: owns window, device,
 │   │                        #   loop, renderer. run() drives only the
-│   │                        #   UiRenderSystem (four colored squares)
+│   │                        #   UiRenderSystem (nested flex-style panel)
 │   │                        #   + Dear ImGui debug overlay. No 3D
 │   │                        #   scene/camera/lighting/textures.
 │   ├── TutorialApp.zig         # Full 3D application root: owns window,
@@ -421,9 +421,10 @@ vulkan-engine/
 │   │   │                        #   {position, color, radius}.
 │   │   └── UiRenderSystem.zig # Custom immediate-mode UI: beginFrame()
 │   │                          #   resets the queue, rect(x,y,w,h,color)
-│   │                          #   queues a pixel-space rectangle, and
-│   │                          #   render(cb, extent) converts to NDC and
-│   │                          #   draws one 6-vertex quad per rect (no
+│   │                          #   queues an absolute rectangle, container
+│   │                          #   calls build a nested row/column flex tree,
+│   │                          #   and render(cb, extent) resolves layout,
+│   │                          #   converts to NDC and draws one 6-vertex quad
 │   │                          #   vertex buffers, per-rect push constants,
 │   │                          #   alpha blending, depth test off). Used
 │   │                          #   by CustomUiApp.
