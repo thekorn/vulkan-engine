@@ -38,12 +38,15 @@ pub const FlexDirection = enum { row, column };
 /// Container styling. `direction` controls child layout, `padding` is
 /// applied on all sides, `gap` separates adjacent children, and
 /// `background` optionally draws the container's own rectangle before
-/// its descendants.
+/// its descendants. `hover_background`, when set, replaces the
+/// background color while the mouse is inside the resolved container
+/// bounds.
 pub const ContainerStyle = struct {
     direction: FlexDirection = .row,
     padding: f32 = 0,
     gap: f32 = 0,
     background: ?math.Vec4 = null,
+    hover_background: ?math.Vec4 = null,
 };
 
 /// Layout request for a child inside the current container. Along the
@@ -105,6 +108,8 @@ const Element = struct {
     layout: Layout = .{},
     style: ContainerStyle = .{},
     color: math.Vec4 = @splat(0),
+    hover_color: ?math.Vec4 = null,
+    hovered: bool = false,
     draws: bool = false,
 };
 
@@ -160,6 +165,7 @@ elementCount: usize = 0,
 layoutStack: [max_layout_depth]usize = undefined,
 layoutDepth: usize = 0,
 rectCount: usize = 0,
+mouse_position: ?Cursor = null,
 
 pub fn init(
     alloc: std.mem.Allocator,
@@ -242,6 +248,15 @@ pub fn beginFrame(self: *Self) void {
     self.elementCount = 0;
     self.layoutDepth = 0;
     self.rectCount = 0;
+    self.mouse_position = null;
+}
+
+/// Set the current mouse position in the same framebuffer-pixel space
+/// as UI bounds. When set before `render`, every queued element's
+/// hover state is resolved after flex layout, so nested elements can
+/// react to their final computed bounds.
+pub fn setMousePosition(self: *Self, x: f32, y: f32) void {
+    self.mouse_position = .{ .x = x, .y = y };
 }
 
 /// Queue a filled rectangle for this frame. `x` / `y` are the
@@ -249,6 +264,13 @@ pub fn beginFrame(self: *Self) void {
 /// top-left of the window). `color` is RGBA in [0, 1]. This preserves
 /// the original absolute-positioned API.
 pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4) void {
+    self.rectWithHover(x, y, w, h, color, null);
+}
+
+/// Queue a filled rectangle with an optional hover color. The hover
+/// color is applied during `render` when the current mouse position is
+/// inside the rectangle bounds.
+pub fn rectWithHover(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4, hover_color: ?math.Vec4) void {
     _ = self.addElement(.{
         .kind = .rect,
         .parent = null,
@@ -257,6 +279,7 @@ pub fn rect(self: *Self, x: f32, y: f32, w: f32, h: f32, color: math.Vec4) void 
         .w = w,
         .h = h,
         .color = color,
+        .hover_color = hover_color,
         .draws = true,
     });
 }
@@ -275,7 +298,8 @@ pub fn beginContainer(self: *Self, x: f32, y: f32, w: f32, h: f32, style: Contai
         .h = h,
         .style = style,
         .color = style.background orelse @as(math.Vec4, @splat(0)),
-        .draws = style.background != null,
+        .hover_color = style.hover_background,
+        .draws = style.background != null or style.hover_background != null,
     });
     self.pushContainer(idx);
 }
@@ -294,7 +318,8 @@ pub fn beginChildContainer(self: *Self, layout: Layout, style: ContainerStyle) v
         .layout = layout,
         .style = style,
         .color = style.background orelse @as(math.Vec4, @splat(0)),
-        .draws = style.background != null,
+        .hover_color = style.hover_background,
+        .draws = style.background != null or style.hover_background != null,
     });
     self.pushContainer(idx);
 }
@@ -309,6 +334,13 @@ pub fn endContainer(self: *Self) void {
 /// Queue a rectangle inside the current container. The rectangle's
 /// pixel bounds are resolved from `layout` during the flex pass.
 pub fn flexRect(self: *Self, layout: Layout, color: math.Vec4) void {
+    self.flexRectWithHover(layout, color, null);
+}
+
+/// Queue a rectangle inside the current container with an optional
+/// hover color. Its hover state is resolved from the final flex-layout
+/// bounds, not from the placeholder bounds available when queued.
+pub fn flexRectWithHover(self: *Self, layout: Layout, color: math.Vec4, hover_color: ?math.Vec4) void {
     std.debug.assert(self.layoutDepth > 0);
     _ = self.addElement(.{
         .kind = .rect,
@@ -319,6 +351,7 @@ pub fn flexRect(self: *Self, layout: Layout, color: math.Vec4) void {
         .h = layout.height orelse 0,
         .layout = layout,
         .color = color,
+        .hover_color = hover_color,
         .draws = true,
     });
 }
@@ -412,6 +445,27 @@ fn layoutChildren(self: *Self, parent_idx: usize) void {
     }
 }
 
+fn updateHoverState(self: *Self) void {
+    for (self.elements[0..self.elementCount]) |*element| {
+        element.hovered = if (self.mouse_position) |mouse|
+            pointInside(mouse.x, mouse.y, .{
+                .x = element.x,
+                .y = element.y,
+                .w = element.w,
+                .h = element.h,
+            })
+        else
+            false;
+    }
+}
+
+fn elementColor(element: Element) math.Vec4 {
+    if (element.hovered) {
+        if (element.hover_color) |hover_color| return hover_color;
+    }
+    return element.color;
+}
+
 /// Record draw commands for every queued rectangle into
 /// `commandBuffer`. Must be called inside an active render pass that
 /// targets the swapchain image. `extent` is the current swapchain
@@ -420,6 +474,7 @@ pub fn render(self: *Self, commandBuffer: c.VkCommandBuffer, extent: c.VkExtent2
     if (self.rectCount == 0) return;
 
     self.layoutElements();
+    self.updateHoverState();
 
     self.pipeline.?.bind(commandBuffer);
 
@@ -438,7 +493,7 @@ pub fn render(self: *Self, commandBuffer: c.VkCommandBuffer, extent: c.VkExtent2
                 r.w / fw * 2.0,
                 r.h / fh * 2.0,
             },
-            .color = r.color,
+            .color = elementColor(r),
         };
 
         c.vkCmdPushConstants(
@@ -664,4 +719,68 @@ test "pointInside uses half-open rectangle bounds" {
     try std.testing.expect(pointInside(39.99, 59.99, bounds));
     try std.testing.expect(!pointInside(40, 20, bounds));
     try std.testing.expect(!pointInside(10, 60, bounds));
+}
+
+test "hover state is resolved after nested flex layout" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.setMousePosition(115, 75);
+    sys.beginContainer(0, 0, 200, 100, .{
+        .direction = .row,
+        .padding = 10,
+        .background = .{ 0.1, 0.1, 0.1, 1.0 },
+        .hover_background = .{ 0.2, 0.2, 0.2, 1.0 },
+    });
+    sys.flexRectWithHover(.{ .width = 80 }, .{ 1, 0, 0, 1 }, .{ 0, 1, 0, 1 });
+    sys.beginChildContainer(.{ .flex_grow = 1 }, .{
+        .direction = .column,
+        .background = .{ 0.0, 0.0, 0.1, 1.0 },
+        .hover_background = .{ 0.0, 0.0, 0.3, 1.0 },
+    });
+    sys.flexRectWithHover(.{ .flex_grow = 1 }, .{ 0, 0, 1, 1 }, .{ 1, 1, 0, 1 });
+    sys.endContainer();
+    sys.endContainer();
+
+    sys.layoutElements();
+    sys.updateHoverState();
+
+    try std.testing.expect(sys.elements[0].hovered);
+    try std.testing.expect(!sys.elements[1].hovered);
+    try std.testing.expect(sys.elements[2].hovered);
+    try std.testing.expect(sys.elements[3].hovered);
+    try std.testing.expectEqual(@as(math.Vec4, .{ 0.2, 0.2, 0.2, 1.0 }), elementColor(sys.elements[0]));
+    try std.testing.expectEqual(@as(math.Vec4, .{ 1, 0, 0, 1 }), elementColor(sys.elements[1]));
+    try std.testing.expectEqual(@as(math.Vec4, .{ 0.0, 0.0, 0.3, 1.0 }), elementColor(sys.elements[2]));
+    try std.testing.expectEqual(@as(math.Vec4, .{ 1, 1, 0, 1 }), elementColor(sys.elements[3]));
+}
+
+test "beginFrame clears mouse hover state for the next frame" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.setMousePosition(5, 5);
+    sys.rectWithHover(0, 0, 10, 10, .{ 1, 0, 0, 1 }, .{ 0, 1, 0, 1 });
+    sys.layoutElements();
+    sys.updateHoverState();
+    try std.testing.expect(sys.elements[0].hovered);
+
+    sys.beginFrame();
+    sys.rectWithHover(0, 0, 10, 10, .{ 1, 0, 0, 1 }, .{ 0, 1, 0, 1 });
+    sys.layoutElements();
+    sys.updateHoverState();
+    try std.testing.expect(!sys.elements[0].hovered);
+    try std.testing.expectEqual(@as(math.Vec4, .{ 1, 0, 0, 1 }), elementColor(sys.elements[0]));
 }

@@ -144,33 +144,44 @@ pub fn run(self: *Self) !void {
             // flexible content column; the content column nests a row
             // of equal-width cards.
             uiRenderSystem.beginFrame();
+            uiRenderSystem.setMousePosition(mouse.x, mouse.y);
             {
                 const panel: UiRenderSystem.Bounds = .{ .x = 50, .y = 50, .w = 520, .h = 300 };
-                const hovered = UiRenderSystem.pointInside(mouse.x, mouse.y, panel);
                 uiRenderSystem.beginContainer(panel.x, panel.y, panel.w, panel.h, .{
                     .direction = .column,
                     .padding = 16,
                     .gap = 12,
-                    .background = if (hovered)
-                        .{ 0.16, 0.18, 0.24, 0.92 }
-                    else
-                        .{ 0.10, 0.12, 0.18, 0.92 },
+                    .background = .{ 0.10, 0.12, 0.18, 0.92 },
+                    .hover_background = .{ 0.16, 0.18, 0.24, 0.92 },
                 });
 
-                uiRenderSystem.flexRect(.{ .height = 44 }, .{ 0.20, 0.45, 0.90, 1.0 });
+                uiRenderSystem.flexRectWithHover(
+                    .{ .height = 44 },
+                    .{ 0.20, 0.45, 0.90, 1.0 },
+                    .{ 0.28, 0.55, 1.00, 1.0 },
+                );
 
                 uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
                     .direction = .row,
                     .gap = 12,
                     .background = .{ 0.06, 0.07, 0.10, 0.80 },
+                    .hover_background = .{ 0.10, 0.12, 0.18, 0.88 },
                 });
-                uiRenderSystem.flexRect(.{ .width = 110 }, .{ 0.20, 0.80, 0.30, 1.0 });
+                uiRenderSystem.flexRectWithHover(
+                    .{ .width = 110 },
+                    .{ 0.20, 0.80, 0.30, 1.0 },
+                    .{ 0.30, 0.95, 0.42, 1.0 },
+                );
 
                 uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
                     .direction = .column,
                     .gap = 12,
                 });
-                uiRenderSystem.flexRect(.{ .height = 58 }, .{ 0.95, 0.80, 0.20, 1.0 });
+                uiRenderSystem.flexRectWithHover(
+                    .{ .height = 58 },
+                    .{ 0.95, 0.80, 0.20, 1.0 },
+                    .{ 1.00, 0.92, 0.34, 1.0 },
+                );
 
                 uiRenderSystem.beginChildContainer(.{ .flex_grow = 1 }, .{
                     .direction = .row,
@@ -181,15 +192,24 @@ pub fn run(self: *Self) !void {
                     .{ 0.55, 0.30, 0.90, 1.0 },
                     .{ 0.20, 0.70, 0.90, 1.0 },
                 };
-                for (card_colors) |col| {
-                    uiRenderSystem.flexRect(.{ .flex_grow = 1 }, col);
+                const card_hover_colors = [_][4]f32{
+                    .{ 1.00, 0.30, 0.30, 1.0 },
+                    .{ 0.68, 0.42, 1.00, 1.0 },
+                    .{ 0.32, 0.82, 1.00, 1.0 },
+                };
+                for (card_colors, card_hover_colors) |col, hover_col| {
+                    uiRenderSystem.flexRectWithHover(.{ .flex_grow = 1 }, col, hover_col);
                 }
                 uiRenderSystem.endContainer();
 
                 uiRenderSystem.endContainer();
                 uiRenderSystem.endContainer();
 
-                uiRenderSystem.flexRect(.{ .height = 28 }, .{ 0.55, 0.60, 0.70, 1.0 });
+                uiRenderSystem.flexRectWithHover(
+                    .{ .height = 28 },
+                    .{ 0.55, 0.60, 0.70, 1.0 },
+                    .{ 0.66, 0.72, 0.86, 1.0 },
+                );
                 uiRenderSystem.endContainer();
             }
 

@@ -48,11 +48,11 @@ big-picture data flow see [architecture.md](./architecture.md).
        and queue a small nested flex demo (panel → header/body/footer,
        body → sidebar/content, content → equal-width cards) via
        `beginContainer(...)`, `beginChildContainer(...)`, `flexRect(...)`
-       and `endContainer()` — the panel background brightens when the
-       cursor is inside its bounds — then inside the swapchain render pass call
-       `uiRenderSystem.render(commandBuffer, swapChainExtent)` followed
-       by `debugUi.render(commandBuffer)` so the overlay composites on
-       top.
+       and `endContainer()` — passing the cursor to `UiRenderSystem`
+       so each resolved nested element can use its hover color — then
+       inside the swapchain render pass call `uiRenderSystem.render(commandBuffer,
+       swapChainExtent)` followed by `debugUi.render(commandBuffer)` so the overlay
+       composites on top.
     4. On `error.SwapChainFormatChanged` (from `beginFrame` /
        `endFrame`), rebuild the `UiRenderSystem` and `debugUi.recreate`
        against the new render pass and skip the frame.
@@ -510,13 +510,20 @@ big-picture data flow see [architecture.md](./architecture.md).
   flex tree, and records draws:
   - `beginFrame()` - Resets the accumulated element count and layout
     stack to 0.
+  - `setMousePosition(x, y)` - Supplies the current cursor position in
+    framebuffer-pixel space. Hover state is resolved after flex layout,
+    so nested children are tested against their final computed bounds.
   - `rect(x, y, w, h, color)` - Queues a filled absolute rectangle in
     pixel coordinates (origin = top-left of the window), `color` RGBA
     in [0, 1]. Preserves the original simple API.
+  - `rectWithHover(x, y, w, h, color, hover_color)` - Absolute rect
+    variant that swaps to `hover_color` when hovered.
   - `beginContainer(x, y, w, h, style)` - Starts a root container with
     explicit pixel bounds. `ContainerStyle` provides `.direction`
     (`.row` / `.column`), all-sides `padding`, child `gap`, and an
-    optional background color drawn behind its descendants.
+    optional background color drawn behind its descendants. Set
+    `hover_background` to draw a different container background while
+    the cursor is inside its resolved bounds.
   - `beginChildContainer(layout, style)` - Starts a nested container
     under the current container. Its bounds are resolved from `Layout`
     during the flex pass.
@@ -524,6 +531,9 @@ big-picture data flow see [architecture.md](./architecture.md).
     current container. `Layout.width` / `height` provide fixed sizes;
     omitted main-axis size participates in `flex_grow`; omitted
     cross-axis size fills the parent container's inner cross size.
+  - `flexRectWithHover(layout, color, hover_color)` - Flex child rect
+    variant that swaps to `hover_color` when the cursor is inside the
+    rectangle's final flex-resolved bounds.
   - `endContainer()` - Pops the current container; all begin calls must
     be balanced before `render`.
   - `pointInside(x, y, bounds)` - Small half-open hit-test helper for
