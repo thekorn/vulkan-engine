@@ -539,6 +539,125 @@ test "row container distributes remaining space by flex grow" {
     try std.testing.expectApproxEqAbs(@as(f32, 40), sys.elements[3].w, 0.001);
 }
 
+test "nested containers resolve parent bounds before laying out descendants" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.beginContainer(10, 20, 300, 200, .{ .direction = .column, .padding = 10, .gap = 5 });
+    sys.flexRect(.{ .height = 30 }, .{ 1, 0, 0, 1 });
+    sys.beginChildContainer(.{ .flex_grow = 1 }, .{ .direction = .row, .padding = 8, .gap = 4 });
+    sys.flexRect(.{ .width = 80 }, .{ 0, 1, 0, 1 });
+    sys.flexRect(.{ .flex_grow = 1 }, .{ 0, 0, 1, 1 });
+    sys.endContainer();
+    sys.endContainer();
+
+    sys.layoutElements();
+
+    // Root container index 0: inner area is (20, 30, 280, 180).
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[1].x);
+    try std.testing.expectEqual(@as(f32, 30), sys.elements[1].y);
+    try std.testing.expectEqual(@as(f32, 280), sys.elements[1].w);
+    try std.testing.expectEqual(@as(f32, 30), sys.elements[1].h);
+
+    // Nested row container index 2 consumes the remaining column space.
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[2].x);
+    try std.testing.expectEqual(@as(f32, 65), sys.elements[2].y);
+    try std.testing.expectEqual(@as(f32, 280), sys.elements[2].w);
+    try std.testing.expectEqual(@as(f32, 145), sys.elements[2].h);
+
+    // Nested children are then laid out inside index 2's padded content box.
+    try std.testing.expectEqual(@as(f32, 28), sys.elements[3].x);
+    try std.testing.expectEqual(@as(f32, 73), sys.elements[3].y);
+    try std.testing.expectEqual(@as(f32, 80), sys.elements[3].w);
+    try std.testing.expectEqual(@as(f32, 129), sys.elements[3].h);
+
+    try std.testing.expectEqual(@as(f32, 112), sys.elements[4].x);
+    try std.testing.expectEqual(@as(f32, 73), sys.elements[4].y);
+    try std.testing.expectEqual(@as(f32, 180), sys.elements[4].w);
+    try std.testing.expectEqual(@as(f32, 129), sys.elements[4].h);
+}
+
+test "container backgrounds queue drawable elements before child rects" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    const root_bg: math.Vec4 = .{ 0.1, 0.2, 0.3, 0.4 };
+    const child_bg: math.Vec4 = .{ 0.2, 0.3, 0.4, 0.5 };
+    const rect_color: math.Vec4 = .{ 0.8, 0.7, 0.6, 1.0 };
+
+    sys.beginFrame();
+    sys.beginContainer(0, 0, 100, 40, .{ .direction = .row, .background = root_bg });
+    sys.beginChildContainer(.{ .width = 50 }, .{ .direction = .column, .background = child_bg });
+    sys.flexRect(.{ .flex_grow = 1 }, rect_color);
+    sys.endContainer();
+    sys.endContainer();
+
+    try std.testing.expectEqual(@as(usize, 3), sys.rectCount);
+    try std.testing.expect(sys.elements[0].draws);
+    try std.testing.expect(sys.elements[1].draws);
+    try std.testing.expect(sys.elements[2].draws);
+    try std.testing.expectEqual(root_bg, sys.elements[0].color);
+    try std.testing.expectEqual(child_bg, sys.elements[1].color);
+    try std.testing.expectEqual(rect_color, sys.elements[2].color);
+}
+
+test "children without fixed main size or flex grow take zero main space" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.beginContainer(0, 0, 100, 50, .{ .direction = .row, .gap = 5 });
+    sys.flexRect(.{}, .{ 1, 0, 0, 1 });
+    sys.flexRect(.{ .width = 20 }, .{ 0, 1, 0, 1 });
+    sys.endContainer();
+
+    sys.layoutElements();
+
+    try std.testing.expectEqual(@as(f32, 0), sys.elements[1].x);
+    try std.testing.expectEqual(@as(f32, 0), sys.elements[1].w);
+    try std.testing.expectEqual(@as(f32, 50), sys.elements[1].h);
+    try std.testing.expectEqual(@as(f32, 5), sys.elements[2].x);
+    try std.testing.expectEqual(@as(f32, 20), sys.elements[2].w);
+}
+
+test "padding larger than container clamps inner child sizes to zero" {
+    var sys: Self = .{
+        .alloc = std.testing.allocator,
+        // SAFETY: device/pipeline are not touched by the code under test.
+        .device = undefined,
+        .pipeline = null,
+        .pipelineLayout = null,
+    };
+
+    sys.beginFrame();
+    sys.beginContainer(10, 15, 20, 10, .{ .direction = .column, .padding = 12 });
+    sys.flexRect(.{ .flex_grow = 1 }, .{ 1, 0, 0, 1 });
+    sys.endContainer();
+
+    sys.layoutElements();
+
+    try std.testing.expectEqual(@as(f32, 22), sys.elements[1].x);
+    try std.testing.expectEqual(@as(f32, 27), sys.elements[1].y);
+    try std.testing.expectEqual(@as(f32, 0), sys.elements[1].w);
+    try std.testing.expectEqual(@as(f32, 0), sys.elements[1].h);
+}
+
 test "pointInside uses half-open rectangle bounds" {
     const bounds: Bounds = .{ .x = 10, .y = 20, .w = 30, .h = 40 };
     try std.testing.expect(pointInside(10, 20, bounds));
