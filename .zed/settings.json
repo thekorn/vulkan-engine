@@ -5,5 +5,12 @@
   "format_on_save": "on",
   "languages": {},
   "language_servers": ["zls", "codebook", "nixd", "glsl"],
-  "lsp": {},
+  "lsp": {
+    "zls": {
+      "binary": {
+        "path": "nix",
+        "arguments": ["develop", "--command", "zls"],
+      },
+    },
+  },
 }
