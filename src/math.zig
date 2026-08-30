@@ -18,12 +18,32 @@ pub const Vec4 = @Vector(4, f32);
 /// Column-major 4x4 matrix.
 pub const Mat4 = [4]Vec4;
 
+/// Array-backed representations for values copied across Vulkan ABI
+/// boundaries. Zig vectors are computation types and cannot be fields of
+/// `extern struct`s, so vertex, uniform, and push-constant data use these
+/// storage types instead.
+pub const Vec2Storage = [2]f32;
+pub const Vec3Storage = [3]f32;
+pub const Vec4Storage = [4]f32;
+pub const Mat4Storage = [4]Vec4Storage;
+
 pub const identity_mat4: Mat4 = .{
     .{ 1.0, 0.0, 0.0, 0.0 },
     .{ 0.0, 1.0, 0.0, 0.0 },
     .{ 0.0, 0.0, 1.0, 0.0 },
     .{ 0.0, 0.0, 0.0, 1.0 },
 };
+
+pub const identity_mat4_storage: Mat4Storage = .{
+    .{ 1.0, 0.0, 0.0, 0.0 },
+    .{ 0.0, 1.0, 0.0, 0.0 },
+    .{ 0.0, 0.0, 1.0, 0.0 },
+    .{ 0.0, 0.0, 0.0, 1.0 },
+};
+
+pub inline fn mat4ToStorage(matrix: Mat4) Mat4Storage {
+    return .{ matrix[0], matrix[1], matrix[2], matrix[3] };
+}
 
 // ---------------------------------------------------------------------------
 // Vec3 helpers

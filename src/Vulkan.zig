@@ -4,10 +4,17 @@ const builtin = @import("builtin");
 const c = @import("c.zig").c;
 const checkSuccess = @import("utils.zig").checkSuccess;
 
-const deviceExtensions = [_][*:0]const u8{
-    c.VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    c.VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+const requires_portability = switch (builtin.os.tag) {
+    .ios, .macos, .tvos, .watchos => true,
+    else => false,
 };
+const deviceExtensions: []const [*:0]const u8 = if (requires_portability)
+    &.{
+        c.VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        c.VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+    }
+else
+    &.{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 const validationLayers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_validation",
 };
@@ -31,15 +38,15 @@ fn getExtensionNames(
         try extensions.append(alloc, ext);
     }
 
-    const extra_extensions = switch (builtin.os.tag) {
+    const extra_extensions: []const [*]const u8 = if (requires_portability)
         // see: https://vulkan.lunarg.com/doc/sdk/1.3.283.0/mac/getting_started.html
         // section `Common Problems - Encountered VK_ERROR_INCOMPATIBLE_DRIVER`
-        .ios, .macos, .tvos, .watchos => &[_][*]const u8{
+        &.{
             c.VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
             c.VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-        },
-        else => &.{},
-    };
+        }
+    else
+        &.{};
 
     try extensions.appendSlice(alloc, extra_extensions);
 
@@ -142,7 +149,7 @@ pub fn init(alloc: std.mem.Allocator, enable_validation_layers: bool) !Self {
 
     const info = c.VkInstanceCreateInfo{
         .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .flags = c.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+        .flags = if (requires_portability) c.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR else 0,
         .enabledExtensionCount = @intCast(extensions.len),
         .ppEnabledExtensionNames = extensions.ptr,
         .pApplicationInfo = &appInfo,
@@ -213,7 +220,7 @@ pub fn createLogicalDevice(
         .pEnabledFeatures = &deviceFeatures,
 
         .enabledExtensionCount = @intCast(deviceExtensions.len),
-        .ppEnabledExtensionNames = &deviceExtensions,
+        .ppEnabledExtensionNames = deviceExtensions.ptr,
         .enabledLayerCount = if (enableValidationLayers) @intCast(validationLayers.len) else 0,
         .ppEnabledLayerNames = if (enableValidationLayers) &validationLayers else null,
 
@@ -393,6 +400,22 @@ pub const SwapChainSupportDetails = struct {
         //self.presentModes.deinit(self.alloc);
     }
 };
+
+test "portability device extensions match the target platform" {
+    try std.testing.expectEqualStrings(
+        "VK_KHR_swapchain",
+        std.mem.span(deviceExtensions[0]),
+    );
+    if (requires_portability) {
+        try std.testing.expectEqual(@as(usize, 2), deviceExtensions.len);
+        try std.testing.expectEqualStrings(
+            "VK_KHR_portability_subset",
+            std.mem.span(deviceExtensions[1]),
+        );
+    } else {
+        try std.testing.expectEqual(@as(usize, 1), deviceExtensions.len);
+    }
+}
 
 test "QueueFamilyIndices.init returns null fields" {
     const indices = QueueFamilyIndices.init();

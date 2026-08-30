@@ -1,7 +1,7 @@
 // C-ABI wrapper around the C++ tinyobjloader library.
 //
 // The public tinyobjloader API is C++ (std::vector, std::string, ...)
-// so it can't be consumed directly from Zig via `@cImport`. This header
+// so it can't be consumed directly from Zig's C translator. This header
 // exposes a tiny C interface that lets Zig pass a chunk of OBJ bytes
 // in and receive flat arrays of interleaved vertices and 32-bit
 // indices back. The wrapper performs the same per-vertex

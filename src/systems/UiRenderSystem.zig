@@ -64,15 +64,11 @@ pub const Layout = struct {
 ///
 /// `bounds.xy` is the rect offset and `bounds.zw` its extent, both in
 /// NDC ([-1, 1], +Y down). The offset/extent pair is packed into one
-/// `math.Vec4` on purpose: a `@Vector(2, f32)` is 16-byte aligned
-/// (and 16 bytes wide) on some targets (e.g. x86-64 Linux), so two
-/// `Vec2` fields would land at offsets 0/16 with `color` at 32 and
-/// break the std430 layout the shader expects. A single `Vec4` is
-/// reliably 16 bytes on every platform, keeping `bounds = 0,
-/// color = 16`.
+/// 16-byte-aligned storage field so `color` begins at offset 16, matching
+/// the shader's std430 layout.
 pub const UiPushConstants = extern struct {
-    bounds: math.Vec4 = @splat(0),
-    color: math.Vec4 = @splat(0),
+    bounds: math.Vec4Storage align(16) = @splat(0),
+    color: math.Vec4Storage align(16) = @splat(0),
 };
 
 const ElementKind = enum { rect, container };

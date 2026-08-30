@@ -352,8 +352,8 @@ binding 1. `SimpleRenderSystem` binds `set = 1` per draw from
 `obj.textureDescriptorSet`; `shader.frag` samples them as
 `diffuseMap` and `normalMap`, builds a TBN basis from the
 interpolated normal + tangent + handedness sign and perturbs the
-surface normal before the lighting loop. Tangents come from a
-fifth `Vec4` vertex attribute computed by
+surface normal before the lighting loop. Tangents come from a fifth
+four-float, array-backed vertex attribute computed by
 `Model.Builder.computeTangents`.
 
 Next up: a scene-level light list (lights still defaulted in
@@ -508,10 +508,11 @@ vulkan-engine/
 │   │                        #   setViewDirection / setViewTarget /
 │   │                        #   setViewYXZ)
 │   ├── Loop.zig             # Main event loop & POSIX signal handling
-│   ├── c.zig                # C interop: GLFW + Vulkan @cImport
+│   ├── c.zig                # Re-export of build-time translated C bindings
 │   ├── math.zig             # Linear-algebra helpers (Vec2/3/4, Mat4,
 │   │                        #   dot/cross/normalize/length/mul4) built
-│   │                        #   on Zig's `@Vector` SIMD types
+│   │                        #   on Zig's `@Vector` SIMD types, plus
+│   │                        #   array storage aliases for ABI boundaries
 │   ├── wrapper/
 │   │   ├── tinyobj/         # C-ABI shim over the C++ tinyobjloader
 │   │   │   ├── README.md    #   library, used by Model.zig's
@@ -519,7 +520,7 @@ vulkan-engine/
 │   │   │   └── tinyobj_wrapper.cpp  #   See the directory README for
 │   │   │                            #   the C++/C boundary rationale.
 │   │   └── imgui/           # C-ABI shim over Dear ImGui APIs the
-│   │       ├── README.md    #   Zig @cImport can't materialize (the
+│   │       ├── README.md    #   Zig C translator can't materialize (the
 │   │       ├── imgui_wrapper.h    #   ImGuiIO struct contains [*c]
 │   │       └── imgui_wrapper.cpp  #   opaque fields). Currently
 │   │                              #   exposes `imgui_want_capture_mouse`

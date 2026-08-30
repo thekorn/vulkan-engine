@@ -30,8 +30,8 @@ pub const MAX_LIGHTS: usize = 10;
 /// `position.w` is ignored, `color.w` carries the per-light
 /// intensity.
 pub const PointLight = extern struct {
-    position: math.Vec4 = @splat(0),
-    color: math.Vec4 = @splat(0),
+    position: math.Vec4Storage align(16) = @splat(0),
+    color: math.Vec4Storage align(16) = @splat(0),
 };
 
 /// Per-frame uniform data uploaded to the global UBO. Mirrors
@@ -45,14 +45,14 @@ pub const GlobalUbo = extern struct {
     /// Projection and view are stored separately so the point-light
     /// vertex shader can extract the camera basis from `view` to
     /// build a camera-facing billboard.
-    projection: math.Mat4 = math.identity_mat4,
-    view: math.Mat4 = math.identity_mat4,
+    projection: math.Mat4Storage align(16) = math.identity_mat4_storage,
+    view: math.Mat4Storage align(16) = math.identity_mat4_storage,
     /// Camera-to-world transform (inverse of `view`). The fragment
     /// shader reads `inverseView[3].xyz` to recover the camera's
     /// world-space position for the specular lighting calculation.
-    inverseView: math.Mat4 = math.identity_mat4,
+    inverseView: math.Mat4Storage align(16) = math.identity_mat4_storage,
     /// `xyz` = ambient color, `w` = intensity.
-    ambientLightColor: math.Vec4 = .{ 1.0, 1.0, 1.0, 0.02 },
+    ambientLightColor: math.Vec4Storage align(16) = .{ 1.0, 1.0, 1.0, 0.02 },
     /// Up to `MAX_LIGHTS` point lights. Only the first
     /// `numLights` entries are read by the fragment shader.
     /// `PointLightSystem.update` fills these in each frame from
@@ -78,8 +78,8 @@ globalDescriptorSet: c.VkDescriptorSet,
 gameObjects: *GameObject.Map,
 
 test "FrameInfo has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 6), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 6), info.field_names.len);
     try std.testing.expectEqual(usize, @FieldType(Self, "frameIndex"));
     try std.testing.expectEqual(f32, @FieldType(Self, "frameTime"));
     try std.testing.expectEqual(c.VkCommandBuffer, @FieldType(Self, "commandBuffer"));

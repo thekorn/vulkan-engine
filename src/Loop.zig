@@ -75,7 +75,7 @@ test "resetShutdownForTesting clears the shutdown flag" {
 
 test "Loop has expected fields and types" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 1), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 1), info.field_names.len);
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
 }
 

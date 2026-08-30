@@ -229,7 +229,7 @@ pub fn render(_: *Self, commandBuffer: c.VkCommandBuffer) void {
 /// caller-supplied stack buffer; on overflow the line is truncated
 /// silently (the buffer is sized for typical debug lines, ~256 bytes).
 pub fn text(_: *Self, buf: []u8, comptime fmt: []const u8, args: anytype) void {
-    const s = std.fmt.bufPrintZ(buf, fmt, args) catch blk: {
+    const s = std.mem.printSentinel(buf, fmt, args, 0) catch blk: {
         // Truncated: reserve room for the NUL terminator and emit
         // whatever did fit.
         if (buf.len == 0) return;
@@ -237,6 +237,6 @@ pub fn text(_: *Self, buf: []u8, comptime fmt: []const u8, args: anytype) void {
         break :blk buf[0 .. buf.len - 1 :0];
     };
     // Passing `null` for `text_end` tells ImGui to scan for the NUL
-    // terminator, which `bufPrintZ` guarantees is present.
+    // terminator, which `printSentinel` guarantees is present.
     c.igTextUnformatted(s.ptr, null);
 }

@@ -235,7 +235,7 @@ test "TransformComponent.mat4 places translation in the last column" {
 
 test "GameObject has expected fields" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 8), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 8), info.field_names.len);
     try std.testing.expectEqual(u64, @FieldType(Self, "id_t"));
     try std.testing.expectEqual(?Model, @FieldType(Self, "model"));
     try std.testing.expectEqual(Vec3, @FieldType(Self, "color"));

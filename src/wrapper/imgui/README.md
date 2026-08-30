@@ -1,7 +1,7 @@
 # `imgui_wrapper` — why this directory exists
 
 A tiny **C-ABI shim** over a few Dear ImGui / cimgui APIs that the
-Zig `@cImport` can't materialize cleanly. Right now it exposes
+Zig C translator can't materialize cleanly. Right now it exposes
 `ImGui::GetIO().WantCaptureMouse` as `imgui_want_capture_mouse()` so
 the engine's input controller can ignore the mouse while ImGui is
 using it, and `imgui_disable_ini_file()` so the debug UI does not
@@ -11,7 +11,7 @@ write the default Dear ImGui `imgui.ini` state file next to the binary.
 
 `cimgui` already exposes the entire Dear ImGui surface as plain C
 functions — `igGetIO_Nil` returns `[*c]ImGuiIO`, and `ImGuiIO` is a
-real `extern struct` in the cimport.
+real `extern struct` in the translated module.
 
 The catch: `ImGuiIO` contains a `Ctx: [*c]ImGuiContext` field, and
 `ImGuiContext` is only **forward-declared** in the cimgui public
@@ -53,15 +53,15 @@ extern "C" void imgui_disable_ini_file(void) {
 }
 ```
 
-The matching header (`imgui_wrapper.h`) is pure C and gets pulled
-into Zig via `@cInclude("imgui_wrapper.h")` in
-[`src/c.zig`](../../c.zig).
+The matching header (`imgui_wrapper.h`) is pure C and is included by
+the umbrella header passed to `addTranslateC` in `build.zig`.
+[`src/c.zig`](../../c.zig) re-exports the generated module.
 
 ## Wiring it up
 
 `build.zig` does two things:
 
-1. Adds this directory to the include path so `@cInclude` finds
+1. Adds this directory to the translation include path so it finds
    the header:
 
    ```zig
@@ -77,6 +77,7 @@ into Zig via `@cInclude("imgui_wrapper.h")` in
        .file = b.path("src/wrapper/imgui/imgui_wrapper.cpp"),
        .flags = &.{
            "-std=c++17", "-fno-exceptions", "-fno-rtti",
+           "-fno-sanitize-coverage=trace-cmp,inline-8bit-counters,pc-table",
            "-DCIMGUI_USE_GLFW", "-DCIMGUI_USE_VULKAN",
        },
    });

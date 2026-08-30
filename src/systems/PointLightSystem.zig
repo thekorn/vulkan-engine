@@ -22,7 +22,6 @@ const c = @import("../c.zig").c;
 const math = @import("../math.zig");
 const Device = @import("../Device.zig");
 const FrameInfo = @import("../FrameInfo.zig");
-const GameObject = @import("../GameObject.zig");
 const Pipeline = @import("../Pipeline.zig");
 const checkSuccess = @import("../utils.zig").checkSuccess;
 
@@ -32,8 +31,8 @@ const Self = @This();
 /// fragment shaders. Layout mirrors the GLSL `Push` block (std430):
 /// `{ vec4 position; vec4 color; float radius; }`.
 pub const PointLightPushConstants = extern struct {
-    position: math.Vec4 = @splat(0),
-    color: math.Vec4 = @splat(0),
+    position: math.Vec4Storage align(16) = @splat(0),
+    color: math.Vec4Storage align(16) = @splat(0),
     radius: f32 = 0,
 };
 
@@ -255,8 +254,8 @@ pub fn render(self: *Self, frameInfo: *FrameInfo) void {
 }
 
 test "PointLightSystem has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 4), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 4), info.field_names.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Device, @FieldType(Self, "device"));
     try std.testing.expectEqual(?*Pipeline, @FieldType(Self, "pipeline"));

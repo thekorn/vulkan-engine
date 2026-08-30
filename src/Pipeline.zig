@@ -155,7 +155,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn bind(self: *Self, commandBuffer: c.VkCommandBuffer) void {
-    c.vkCmdBindPipeline(commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipeline orelse unreachable);
+    c.vkCmdBindPipeline(commandBuffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.graphicsPipeline.?);
 }
 
 pub fn defaultPipelineConfigInfo() PipelineConfigInfo {
@@ -262,82 +262,6 @@ pub fn enableAlphaBlending(configInfo: *PipelineConfigInfo) void {
 
 fn createShaderModule(device: *Device, shaderCode: []const u8) !c.VkShaderModule {
     return device.createShaderModule(shaderCode);
-}
-
-fn createPipelineLayout(device: *Device) !c.VkPipelineLayout {
-    const pipelineLayoutInfo: c.VkPipelineLayoutCreateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 0,
-        .pSetLayouts = null,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = null,
-        .pNext = null,
-        .flags = 0,
-    };
-
-    // SAFETY: written by vkCreatePipelineLayout below before any read.
-    var pipelineLayout: c.VkPipelineLayout = undefined;
-    try checkSuccess(c.vkCreatePipelineLayout(device.globalDevice, &pipelineLayoutInfo, null, &pipelineLayout));
-    return pipelineLayout;
-}
-
-fn createRenderPass(device: *Device) !c.VkRenderPass {
-    // Color attachment
-    const colorAttachment: c.VkAttachmentDescription = .{
-        .format = c.VK_FORMAT_B8G8R8A8_UNORM, // Common format for macOS/MoltenVK
-        .samples = c.VK_SAMPLE_COUNT_1_BIT,
-        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .flags = 0,
-    };
-
-    const colorAttachmentRef: c.VkAttachmentReference = .{
-        .attachment = 0,
-        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-
-    const subpass: c.VkSubpassDescription = .{
-        .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &colorAttachmentRef,
-        .pInputAttachments = null,
-        .pResolveAttachments = null,
-        .pDepthStencilAttachment = null,
-        .preserveAttachmentCount = 0,
-        .pPreserveAttachments = null,
-        .flags = 0,
-    };
-
-    const dependency: c.VkSubpassDependency = .{
-        .srcSubpass = c.VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = 0,
-        .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dependencyFlags = 0,
-    };
-
-    const renderPassInfo: c.VkRenderPassCreateInfo = .{
-        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &colorAttachment,
-        .subpassCount = 1,
-        .pSubpasses = &subpass,
-        .dependencyCount = 1,
-        .pDependencies = &dependency,
-        .pNext = null,
-        .flags = 0,
-    };
-
-    // SAFETY: written by vkCreateRenderPass below before any read.
-    var renderPass: c.VkRenderPass = undefined;
-    try checkSuccess(c.vkCreateRenderPass(device.globalDevice, &renderPassInfo, null, &renderPass));
-    return renderPass;
 }
 
 test "defaultPipelineConfigInfo input assembly uses triangle list without restart" {
@@ -512,19 +436,19 @@ test "defaultPipelineConfigInfo color blend attachment factors and ops match def
 }
 
 test "Pipeline struct has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
+    const info = @typeInfo(Self).@"struct";
 
-    try std.testing.expectEqual(@as(usize, 5), fields.len);
-    try std.testing.expectEqualStrings("alloc", fields[0].name);
-    try std.testing.expectEqual(std.mem.Allocator, fields[0].type);
-    try std.testing.expectEqualStrings("device", fields[1].name);
-    try std.testing.expectEqual(*Device, fields[1].type);
-    try std.testing.expectEqualStrings("graphicsPipeline", fields[2].name);
-    try std.testing.expectEqual(?c.VkPipeline, fields[2].type);
-    try std.testing.expectEqualStrings("vertShaderModule", fields[3].name);
-    try std.testing.expectEqual(c.VkShaderModule, fields[3].type);
-    try std.testing.expectEqualStrings("fragShaderModule", fields[4].name);
-    try std.testing.expectEqual(c.VkShaderModule, fields[4].type);
+    try std.testing.expectEqual(@as(usize, 5), info.field_names.len);
+    try std.testing.expectEqualStrings("alloc", info.field_names[0]);
+    try std.testing.expectEqual(std.mem.Allocator, info.field_types[0]);
+    try std.testing.expectEqualStrings("device", info.field_names[1]);
+    try std.testing.expectEqual(*Device, info.field_types[1]);
+    try std.testing.expectEqualStrings("graphicsPipeline", info.field_names[2]);
+    try std.testing.expectEqual(?c.VkPipeline, info.field_types[2]);
+    try std.testing.expectEqualStrings("vertShaderModule", info.field_names[3]);
+    try std.testing.expectEqual(c.VkShaderModule, info.field_types[3]);
+    try std.testing.expectEqualStrings("fragShaderModule", info.field_names[4]);
+    try std.testing.expectEqual(c.VkShaderModule, info.field_types[4]);
 }
 
 test "default_dynamic_state_enables is stable across calls (no dangling pointer)" {

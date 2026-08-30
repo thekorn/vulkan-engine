@@ -89,7 +89,8 @@ big-picture data flow see [architecture.md](./architecture.md).
     (the real definition moved into `FrameInfo.zig` so render
     systems can mutate the UBO from their `update()` calls without
     depending on `TutorialApp`). The `extern struct` layout —
-    `projection: Mat4`, `view: Mat4`, `ambientLightColor: Vec4`,
+    `projection: Mat4Storage`, `view: Mat4Storage`,
+    `ambientLightColor: Vec4Storage`,
     `pointLights: [MAX_LIGHTS]PointLight`, `numLights: i32` —
     mirrors the std140 block the shaders expect at
     `set = 0, binding = 0`.
@@ -415,9 +416,9 @@ big-picture data flow see [architecture.md](./architecture.md).
   of `GameObject`s using a per-frame global descriptor set plus
   per-object push constants.
 - **Push Constants:**
-  - `SimplePushConstantData { modelMatrix: math.Mat4, normalMatrix: math.Mat4 }`
+  - `SimplePushConstantData { modelMatrix: math.Mat4Storage, normalMatrix: math.Mat4Storage }`
     (used by both vertex and fragment stages). `normalMatrix` is
-    stored as a `Mat4` to satisfy std140 alignment; the shader
+    stored as an array-backed matrix to satisfy std140 alignment; the shader
     extracts it as `mat3(push.normalMatrix)`. The CPU no longer
     multiplies by `projection * view` — that lives in the global UBO
     and the shader does the final multiplication.
@@ -453,7 +454,7 @@ big-picture data flow see [architecture.md](./architecture.md).
   generates the 6 corners of a screen-aligned quad from
   `gl_VertexIndex` indexing a constant `OFFSETS[6]` table. The
   vertex and fragment shaders share a push-constant block —
-  `PointLightPushConstants { position: Vec4, color: Vec4, radius:
+  `PointLightPushConstants { position: Vec4Storage, color: Vec4Storage, radius:
   f32 }` (vertex + fragment stages) — so each draw can supply the
   light's world-space position, color (with intensity in `w`) and
   billboard radius without re-indexing into the UBO array. The
@@ -545,13 +546,11 @@ big-picture data flow see [architecture.md](./architecture.md).
     called inside an active swapchain render pass. No-op when no rects
     are queued.
 - **Types:**
-  - `UiPushConstants` - `extern struct { bounds: Vec4, color: Vec4 }`
+  - `UiPushConstants` - `extern struct { bounds: Vec4Storage, color: Vec4Storage }`
     mirroring the GLSL `Push` block in `ui.vert`. `bounds.xy` is the
     rect offset and `bounds.zw` its extent, both in NDC. Offset and
-    extent are packed into one `Vec4` (rather than two `Vec2`s) so the
-    std430 layout — `bounds = 0, color = 16` — holds on every platform;
-    `@Vector(2, f32)` is 16-byte aligned/sized on some targets (e.g.
-    x86-64 Linux), leaving the fields misaligned otherwise.
+    extent are packed into one four-float storage field so the std430
+    layout — `bounds = 0, color = 16` — holds on every platform.
 - **Pipeline configuration:** built via `Pipeline.enableAlphaBlending`
   (standard "source over" blend) with depth test **and** depth write
   disabled, so UI rects always composite on top regardless of scene
@@ -722,19 +721,19 @@ big-picture data flow see [architecture.md](./architecture.md).
     pointLights[10]` array size in every GLSL `GlobalUbo`
     declaration.
 - **Types:**
-  - `PointLight` - `extern struct { position: Vec4, color: Vec4 }`
+  - `PointLight` - `extern struct { position: Vec4Storage, color: Vec4Storage }`
     (std140, 32 bytes, 16-byte aligned). `position.w` is ignored;
     `color.w` carries per-light intensity.
   - `GlobalUbo` - `extern struct` mirroring the std140 block the
     shaders read at `set = 0, binding = 0`:
-    - `projection: Mat4` (default identity)
-    - `view: Mat4` (default identity) — stored separately so the
+    - `projection: Mat4Storage` (default identity)
+    - `view: Mat4Storage` (default identity) — stored separately so the
       point-light vertex shader can extract the camera basis from
       `view`
-    - `inverseView: Mat4` (default identity) — camera-to-world
+    - `inverseView: Mat4Storage` (default identity) — camera-to-world
       transform, used by the fragment shader to recover the camera
       world-space position (`invView[3].xyz`) for specular lighting
-    - `ambientLightColor: Vec4` (default `{1, 1, 1, 0.02}`,
+    - `ambientLightColor: Vec4Storage` (default `{1, 1, 1, 0.02}`,
       `xyz`=color, `w`=intensity)
     - `pointLights: [MAX_LIGHTS]PointLight` (all-zero defaults;
       only the first `numLights` slots are read by the fragment
@@ -790,11 +789,11 @@ big-picture data flow see [architecture.md](./architecture.md).
   small C-ABI wrapper (`src/wrapper/tinyobj/`; see that directory's
   `README.md` for why the wrapper exists).
 - **Vertex Layout:**
-  - `position: math.Vec3` at location 0 (`R32G32B32_SFLOAT`)
-  - `color: math.Vec3` at location 1 (`R32G32B32_SFLOAT`)
-  - `normal: math.Vec3` at location 2 (`R32G32B32_SFLOAT`)
-  - `uv: math.Vec2` at location 3 (`R32G32_SFLOAT`)
-  - `tangent: math.Vec4` at location 4 (`R32G32B32A32_SFLOAT`) —
+  - `position: math.Vec3Storage` at location 0 (`R32G32B32_SFLOAT`)
+  - `color: math.Vec3Storage` at location 1 (`R32G32B32_SFLOAT`)
+  - `normal: math.Vec3Storage` at location 2 (`R32G32B32_SFLOAT`)
+  - `uv: math.Vec2Storage` at location 3 (`R32G32_SFLOAT`)
+  - `tangent: math.Vec4Storage` at location 4 (`R32G32B32A32_SFLOAT`) —
     object-space tangent in `xyz`, bitangent handedness sign
     (`+1` / `-1`) in `w`. Computed by `Builder.computeTangents`
     after the OBJ load + dedup pass; the fragment shader uses it
@@ -817,8 +816,9 @@ big-picture data flow see [architecture.md](./architecture.md).
     deduplicates exactly-matching vertices via `std::unordered_map`
     (mirroring `lve_model.cpp` in the C++ tutorial). The Zig side then
     copies the returned flat arrays into the `Builder`'s
-    `ArrayList`s, converting the C struct layout into the
-    `@Vector`-backed `Vertex` used by Zig.
+    `ArrayList`s. Vertex fields use fixed-size array storage for a
+    stable C/Vulkan ABI; calculations convert them to the module's
+    SIMD vector types as needed.
   - `createModelFromFile(device, alloc, obj_bytes)` - Convenience
     factory that builds a `Builder`, calls `loadModel` and returns a
     fully-constructed `Model`. Mirrors `LveModel::createModelFromFile`
@@ -977,9 +977,10 @@ big-picture data flow see [architecture.md](./architecture.md).
 
 - **Purpose:** C interoperability bindings.
 - **Content:**
-  - `c` - `@cImport` of `GLFW/glfw3.h`, `vulkan/vulkan_beta.h` (with
-    `GLFW_INCLUDE_VULKAN` defined), the in-tree `tinyobj_wrapper.h`,
-    the cimgui `cimgui.h` + `cimgui_impl.h` headers (with
+  - `c` - re-exports the generated `c` module produced by
+    `build.zig`'s `addTranslateC` step. Its synthetic umbrella header
+    includes `GLFW/glfw3.h`, `vulkan/vulkan_beta.h`, the in-tree
+    `tinyobj_wrapper.h`, cimgui's `cimgui.h` + `cimgui_impl.h` (with
     `CIMGUI_DEFINE_ENUMS_AND_STRUCTS` /
     `CIMGUI_USE_GLFW` / `CIMGUI_USE_VULKAN` defined to emit the C
     struct + enum bodies and gate the GLFW + Vulkan backend
@@ -1001,6 +1002,10 @@ big-picture data flow see [architecture.md](./architecture.md).
   - `Vec4 = @Vector(4, f32)`
   - `Mat4 = [4]Vec4` (column-major)
   - `identity_mat4: Mat4`
+  - `Vec2Storage`, `Vec3Storage`, `Vec4Storage` and `Mat4Storage` —
+    fixed-size array equivalents used at C and Vulkan ABI boundaries.
+  - `identity_mat4_storage` and `mat4ToStorage()` — bridge SIMD
+    matrices into GPU-facing storage.
 - **Functions:**
   - `dot3(a, b)`, `length3(v)`, `normalize3(v)`, `cross3(a, b)`
   - `mul4(a, b)` — column-major 4x4 matrix multiplication.
@@ -1026,8 +1031,8 @@ platform.
 
 ## `wrapper/imgui/` — Dear ImGui C-ABI Shim
 
-A second C-ABI shim, this one covering the Dear ImGui APIs the Zig
-`@cImport` can't materialize cleanly. The cimgui-generated
+A second C-ABI shim, this one covering the Dear ImGui APIs Zig's C
+translator can't materialize cleanly. The cimgui-generated
 `ImGuiIO` struct contains `[*c]ImGuiContext` fields where
 `ImGuiContext` is forward-declared (and therefore demoted to
 `opaque` by Zig); dereferencing the `[*c]ImGuiIO` returned by

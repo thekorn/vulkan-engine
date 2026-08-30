@@ -391,8 +391,8 @@ test "deinit on an empty (uninitialized) Buffer is a safe no-op" {
 }
 
 test "Buffer has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 10), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 10), info.field_names.len);
     try std.testing.expectEqual(*Device, @FieldType(Self, "device"));
     try std.testing.expectEqual(?*anyopaque, @FieldType(Self, "mapped"));
     try std.testing.expectEqual(c.VkBuffer, @FieldType(Self, "buffer"));

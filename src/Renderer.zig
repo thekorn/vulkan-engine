@@ -204,7 +204,7 @@ fn recreateSwapChain(self: *Self) !void {
         self.swapChain = null;
         self.swapChain = try Swapchain.init(self.alloc, self.device, extent, null);
 
-        const new = self.swapChain orelse unreachable;
+        const new = self.swapChain.?;
         if (oldImageFormat != new.swapChainImageFormat or
             oldDepthFormat != new.swapChainDepthFormat)
         {

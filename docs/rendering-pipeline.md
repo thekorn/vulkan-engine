@@ -113,6 +113,9 @@ graphics pipeline model:
 - `PipelineConfigInfo` now carries the vertex
   binding / attribute description slices so render systems can
   override them. Defaults point at `Model.Vertex`'s single binding.
+  CPU-side vertex fields use fixed-size `*Storage` arrays for stable
+  ABI layout; the Vulkan formats expose them to GLSL as the vec2/vec3/
+  vec4 inputs below.
 - `SimpleRenderSystem` owns a `VkPipelineLayout` (with one push
   constant range covering `SimplePushConstantData`) and a `Pipeline`,
   built against a render pass obtained from `Renderer`.
@@ -188,7 +191,9 @@ layout(set = 0, binding = 0) uniform GlobalUbo {
 The `PointLight pointLights[10]` array size must match
 `FrameInfo.MAX_LIGHTS` on the Zig side. Only the first
 `ubo.numLights` entries are read each frame; the rest are unused
-padding.
+padding. Zig's GPU-facing UBO and push-constant structs use
+array-backed `Mat4Storage` / `Vec4Storage` values with explicit
+16-byte alignment; SIMD `Mat4` values are converted before upload.
 
 ### Vertex Shader (`shader.vert`)
 

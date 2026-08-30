@@ -1,4 +1,4 @@
 pre_merge:
   - nix develop --command codebook-lsp lint --unique -s .
-  - nix develop --command zlint src/*
+  - nix develop --command zig build lint
   - nix develop --command zig build test

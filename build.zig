@@ -1,94 +1,9 @@
-// zlint-disable no-print -- build scripts legitimately log to stderr via std.debug.print
-
 const std = @import("std");
-const builtin = @import("builtin");
+const zlinter = @import("zlinter");
 
 const shaders_dir = "./shaders";
 const models_dir = "./models";
 const textures_dir = "./textures";
-
-/// A step that runs kcov on an artifact binary (requires kcov to be
-/// installed). Adapted from https://github.com/vancluever/z2d.
-fn coverStep(
-    b: *std.Build,
-    artifact: *std.Build.Step.Compile,
-    clean: bool,
-    open: bool,
-) *std.Build.Step {
-    const dir = b.pathJoin(&.{ b.install_prefix, "cover" });
-
-    // Only pass the kcov `--clean` flag when the caller asked for it, so
-    // a plain `zig build coverage` run with `clean=false` preserves the
-    // existing report directory.
-    // Anchor the include pattern to this project's `src/` directory so
-    // kcov doesn't also pick up unrelated files that happen to live
-    // under a `src/` path — most notably the C++ standard library
-    // sources (`<zig>/lib/zig/libcxx/src/...`, `libcxxabi/src/...`)
-    // that get pulled in by the tinyobjloader C++ wrapper.
-    const include_pattern = b.fmt("--include-pattern={s}/", .{b.pathFromRoot("src")});
-
-    var kcov_argv: std.ArrayList([]const u8) = .empty;
-    kcov_argv.append(b.allocator, "kcov") catch @panic("OOM");
-    if (clean) kcov_argv.append(b.allocator, "--clean") catch @panic("OOM");
-    kcov_argv.append(b.allocator, include_pattern) catch @panic("OOM");
-    kcov_argv.append(b.allocator, dir) catch @panic("OOM");
-
-    const coverage_command = b.addSystemCommand(kcov_argv.items);
-    coverage_command.addArtifactArg(artifact);
-
-    const mkdir_command = b.addSystemCommand(&.{ "mkdir", "-p", dir });
-    coverage_command.step.dependOn(&mkdir_command.step);
-
-    if (clean) {
-        const clean_command = b.addSystemCommand(&.{ "rm", "-rf", dir });
-        mkdir_command.step.dependOn(&clean_command.step);
-    }
-
-    // Compact terminal summary of the kcov report so the user can see
-    // the coverage numbers without opening the HTML report. kcov
-    // maintains a stable `<dir>/test` symlink pointing at the latest
-    // per-run output, so we can read `coverage.json` (overall + per-file
-    // percentages) and `codecov.json` (per-line hit counts, used to list
-    // the uncovered line ranges per file) directly without globbing.
-    const coverage_json = b.pathJoin(&.{ dir, "test", "coverage.json" });
-    const codecov_json = b.pathJoin(&.{ dir, "test", "codecov.json" });
-    const summary_script = b.fmt(
-        \\set -eu
-        \\echo
-        \\jq -r '"coverage: \(.percent_covered)% (\(.covered_lines)/\(.total_lines) lines)"' "{s}"
-        \\jq -r '.files | sort_by(.percent_covered|tonumber) | .[] | "  \(.percent_covered)%\t\(.covered_lines)/\(.total_lines)\t\(.file|sub(".*/src/";""))"' "{s}"
-        \\echo "uncovered lines:"
-        \\jq -r '
-        \\  def collapse_ranges:
-        \\    reduce .[] as $n ([];
-        \\      if length == 0 then [[$n, $n]]
-        \\      elif .[-1][1] + 1 == $n then .[:-1] + [[.[-1][0], $n]]
-        \\      else . + [[$n, $n]]
-        \\      end)
-        \\    | map(if .[0] == .[1] then "\(.[0])" else "\(.[0])-\(.[1])" end)
-        \\    | join(", ");
-        \\  .coverage
-        \\  | to_entries
-        \\  | map({{file: .key, uncovered: (.value | to_entries | map(select(.value | startswith("0/"))) | map(.key | tonumber) | sort)}})
-        \\  | map(select(.uncovered | length > 0))
-        \\  | sort_by(.file)
-        \\  | if length == 0 then "  (none)" else (.[] | "  \(.file): \(.uncovered | collapse_ranges)") end
-        \\' "{s}"
-        \\echo
-    , .{ coverage_json, coverage_json, codecov_json });
-
-    const summary_command = b.addSystemCommand(&.{ "sh", "-c", summary_script });
-    summary_command.step.dependOn(&coverage_command.step);
-
-    if (!open) return &summary_command.step;
-
-    const open_command = b.addSystemCommand(&.{
-        if (builtin.target.os.tag == .linux) "xdg-open" else "open",
-        b.pathJoin(&.{ dir, "index.html" }),
-    });
-    open_command.step.dependOn(&summary_command.step);
-    return &open_command.step;
-}
 
 fn compileAllShaders(b: *std.Build, exe: anytype) !void {
     const io = b.graph.io;
@@ -99,7 +14,7 @@ fn compileAllShaders(b: *std.Build, exe: anytype) !void {
     defer walker.deinit();
 
     while (try walker.next(io)) |entry| {
-        const out_file = try std.fmt.allocPrint(b.allocator, "{s}.spv", .{entry.path});
+        const out_file = try b.allocator.print("{s}.spv", .{entry.path});
         defer b.allocator.free(out_file);
         std.debug.print("compiling shader: {s} -> {s}\n", .{ entry.path, out_file });
         addShader(b, exe, entry.path, out_file) catch |e| {
@@ -111,7 +26,7 @@ fn compileAllShaders(b: *std.Build, exe: anytype) !void {
 fn addShader(b: *std.Build, exe: anytype, in_file: []const u8, out_file: []const u8) !void {
     // example:
     // glslc -o shaders/vert.spv shaders/shader.vert
-    const full_in = try std.fs.path.join(b.allocator, &[_][]const u8{ shaders_dir, in_file });
+    const full_in = try std.Io.Dir.path.join(b.allocator, &[_][]const u8{ shaders_dir, in_file });
 
     const run_cmd = b.addSystemCommand(&[_][]const u8{
         "glslc",
@@ -153,7 +68,7 @@ fn embedAllModels(b: *std.Build, exe: anytype) !void {
         // walk into them to find files) and other entry kinds.
         if (entry.kind != .file) continue;
 
-        const full_path = try std.fs.path.join(b.allocator, &[_][]const u8{ models_dir, entry.path });
+        const full_path = try std.Io.Dir.path.join(b.allocator, &[_][]const u8{ models_dir, entry.path });
         std.debug.print("embedding model: {s}\n", .{full_path});
         exe.root_module.addAnonymousImport(entry.path, .{
             .root_source_file = b.path(full_path),
@@ -182,7 +97,7 @@ fn embedAllTextures(b: *std.Build, exe: anytype) !void {
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
 
-        const full_path = try std.fs.path.join(b.allocator, &[_][]const u8{ textures_dir, entry.path });
+        const full_path = try std.Io.Dir.path.join(b.allocator, &[_][]const u8{ textures_dir, entry.path });
         std.debug.print("embedding texture: {s}\n", .{full_path});
         exe.root_module.addAnonymousImport(entry.path, .{
             .root_source_file = b.path(full_path),
@@ -191,7 +106,17 @@ fn embedAllTextures(b: *std.Build, exe: anytype) !void {
 }
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    const default_target: std.Target.Query = if (b.graph.environ_map.get("NIX_DYNAMIC_LINKER")) |dynamic_linker|
+        if (dynamic_linker.len == 0)
+            .{}
+        else
+            std.Target.Query.parse(.{
+                .arch_os_abi = b.graph.environ_map.get("NIX_ZIG_TARGET") orelse "native",
+                .dynamic_linker = dynamic_linker,
+            }) catch @panic("invalid NIX_DYNAMIC_LINKER")
+    else
+        .{};
+    const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize = b.standardOptimizeOption(.{});
 
     // Select which application root `main.zig` runs. Use
@@ -214,6 +139,10 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    if (target.result.os.tag == .linux and target.query.dynamic_linker != null) {
+        // Nix's shared libraries resolve versioned glibc symbols at runtime.
+        exe.linker_allow_shlib_undefined = true;
+    }
 
     exe.root_module.addOptions("build_options", build_options);
 
@@ -237,7 +166,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("src/wrapper/tinyobj"));
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/wrapper/tinyobj/tinyobj_wrapper.cpp"),
-        .flags = &.{ "-std=c++17", "-fno-exceptions" },
+        // zcov instruments Zig code. Keep fuzz-mode sanitizer coverage
+        // out of C++: its trace callbacks and PC tables use a different ABI.
+        .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-sanitize-coverage=trace-cmp,inline-8bit-counters,pc-table" },
     });
     exe.root_module.linkSystemLibrary("tinyobjloader", .{});
 
@@ -261,11 +192,45 @@ pub fn build(b: *std.Build) void {
     _ = imgui_tree.addCopyDirectory(imgui_dep.path(""), "imgui", .{});
     const imgui_root = imgui_tree.getDirectory();
 
+    const c_header = b.addWriteFiles().add("vulkan_engine_c.h",
+        \\#include <GLFW/glfw3.h>
+        \\#include <vulkan/vulkan_beta.h>
+        \\#include <stdarg.h>
+        \\#include <stdbool.h>
+        \\#include <stdio.h>
+        \\#include <stdint.h>
+        \\#include "tinyobj_wrapper.h"
+        \\#define __attribute__(x)
+        \\#include "cimgui.h"
+        \\#include "cimgui_impl.h"
+        \\#undef __attribute__
+        \\#include "imgui_wrapper.h"
+    );
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = c_header,
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_c.linkSystemLibrary("glfw3", .{});
+    translate_c.linkSystemLibrary("vulkan", .{});
+    translate_c.addIncludePath(b.path("src/wrapper/tinyobj"));
+    translate_c.addIncludePath(b.path("src/wrapper/imgui"));
+    translate_c.addIncludePath(imgui_root);
+    translate_c.addIncludePath(imgui_root.path(b, "imgui"));
+    translate_c.addIncludePath(imgui_root.path(b, "imgui/backends"));
+    translate_c.defineCMacro("GLFW_INCLUDE_VULKAN", null);
+    translate_c.defineCMacro("GLFW_INCLUDE_NONE", null);
+    translate_c.defineCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", null);
+    translate_c.defineCMacro("CIMGUI_USE_GLFW", null);
+    translate_c.defineCMacro("CIMGUI_USE_VULKAN", null);
+    translate_c.defineCMacro("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", null);
+    exe.root_module.addImport("c", translate_c.createModule());
+
     exe.root_module.addIncludePath(imgui_root);
     exe.root_module.addIncludePath(imgui_root.path(b, "imgui"));
     exe.root_module.addIncludePath(imgui_root.path(b, "imgui/backends"));
-    // Tiny C-ABI shim that exposes a few Dear ImGui APIs the Zig
-    // `@cImport` can't materialize (notably `ImGui::GetIO()` field
+    // Tiny C-ABI shim that exposes a few Dear ImGui APIs the Zig C
+    // translator can't materialize (notably `ImGui::GetIO()` field
     // access — `ImGuiIO` references opaque types via `[*c]` pointers,
     // which Zig refuses to dereference). Compiled against the cimgui
     // include tree assembled just above.
@@ -276,6 +241,7 @@ pub fn build(b: *std.Build) void {
             "-std=c++17",
             "-fno-exceptions",
             "-fno-rtti",
+            "-fno-sanitize-coverage=trace-cmp,inline-8bit-counters,pc-table",
             "-DCIMGUI_USE_GLFW",
             "-DCIMGUI_USE_VULKAN",
             "-DGLFW_INCLUDE_NONE",
@@ -305,6 +271,7 @@ pub fn build(b: *std.Build) void {
             "-std=c++17",
             "-fno-exceptions",
             "-fno-rtti",
+            "-fno-sanitize-coverage=trace-cmp,inline-8bit-counters,pc-table",
             "-DCIMGUI_USE_GLFW",
             "-DCIMGUI_USE_VULKAN",
             "-DGLFW_INCLUDE_NONE",
@@ -335,6 +302,7 @@ pub fn build(b: *std.Build) void {
             "-std=c++17",
             "-fno-exceptions",
             "-fno-rtti",
+            "-fno-sanitize-coverage=trace-cmp,inline-8bit-counters,pc-table",
             "-DCIMGUI_USE_GLFW",
             "-DCIMGUI_USE_VULKAN",
             "-DGLFW_INCLUDE_NONE",
@@ -365,49 +333,40 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
-    const cover = b.option(
-        bool,
-        "cover",
-        "Generate a coverage report for the test step using kcov (implies use_llvm=true)",
-    ) orelse false;
-    const clean = b.option(
-        bool,
-        "clean",
-        "Clean the coverage output directory before running kcov",
-    ) orelse false;
-    const open = b.option(
-        bool,
-        "open",
-        "Open the generated coverage report after the test step finishes",
-    ) orelse false;
+    const coverage = b.option(bool, "coverage", "Enable zig-cov") orelse false;
+    const coverage_rt = b.option([]const u8, "coverage-rt", "zig-cov-rt path") orelse null;
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
-        // kcov needs DWARF debug info, which the LLVM backend reliably
-        // produces. Force LLVM whenever coverage is requested.
-        .use_llvm = if (cover) true else null,
+        // Zig's fuzz instrumentation requires the compiler-provided runner.
+        // Keep the project's friendlier runner for ordinary test invocations.
+        .test_runner = if (coverage) null else .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
-    const test_step = b.step("test", "Run tests");
-    if (cover) {
-        test_step.dependOn(coverStep(b, exe_tests, clean, open));
-    } else {
-        const run_exe_tests = b.addRunArtifact(exe_tests);
-        test_step.dependOn(&run_exe_tests.step);
+    if (target.result.os.tag == .linux and target.query.dynamic_linker != null) {
+        exe_tests.linker_allow_shlib_undefined = true;
+    }
+    if (coverage) {
+        exe_tests.use_llvm = true;
+        exe_tests.root_module.fuzz = true;
+        exe_tests.root_module.link_libc = true;
+        if (coverage_rt) |path| {
+            exe_tests.root_module.addObjectFile(.{ .cwd_relative = path });
+        }
     }
 
-    // Dedicated coverage step: always uses the LLVM backend so kcov has
-    // the DWARF debug info it needs, independent of the `-Dcover` flag
-    // that toggles coverage on the regular `test` step.
-    const coverage_tests = b.addTest(.{
-        .root_module = exe.root_module,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
-        .use_llvm = true,
+    const run_exe_tests = b.addRunArtifact(exe_tests);
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&run_exe_tests.step);
+
+    const lint_step = b.step("lint", "Lint source code");
+    lint_step.dependOn(step: {
+        var builder = zlinter.builder(b, .{});
+        builder.addRule(.{ .builtin = .switch_case_ordering }, .{});
+        builder.addRule(.{ .builtin = .no_unused }, .{});
+        builder.addRule(.{ .builtin = .no_deprecated }, .{});
+        builder.addRule(.{ .builtin = .no_orelse_unreachable }, .{});
+        break :step builder.build();
     });
-    const coverage_step = b.step("coverage", "Run tests under kcov and write a coverage report to zig-out/cover");
-    coverage_step.dependOn(coverStep(b, coverage_tests, true, false));
 }

@@ -422,9 +422,9 @@ pub fn run(self: *Self) !void {
             // `pointLightSystem.update` then fills in `pointLights[]`
             // + `numLights` from the scene's point-light game objects.
             var ubo: GlobalUbo = .{
-                .projection = camera.getProjection(),
-                .view = camera.getView(),
-                .inverseView = camera.getInverseView(),
+                .projection = math.mat4ToStorage(camera.getProjection()),
+                .view = math.mat4ToStorage(camera.getView()),
+                .inverseView = math.mat4ToStorage(camera.getInverseView()),
             };
             pointLightSystem.update(&frameInfo, &ubo);
             uboBuffers[frameIndex].writeToBuffer(@ptrCast(&ubo), c.VK_WHOLE_SIZE, 0);
@@ -669,8 +669,8 @@ test "TutorialApp default window dimensions are 800x600" {
 }
 
 test "TutorialApp has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 8), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 8), info.field_names.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
     try std.testing.expectEqual(*Device, @FieldType(Self, "device"));

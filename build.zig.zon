@@ -2,7 +2,7 @@
     .name = .vulkan_engine,
     .version = "0.0.0",
     .fingerprint = 0xd8cbed5931f8e0a3,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0-dev.1509+bb296ab9b",
     .dependencies = .{
         .cimgui = .{
             .url = "git+https://github.com/cimgui/cimgui.git#d298666861ebf00dcfeb2407409931c04e47e33c",
@@ -11,6 +11,10 @@
         .imgui = .{
             .url = "https://github.com/ocornut/imgui/archive/8936b58fe26e8c3da834b8f60b06511d537b4c63.tar.gz",
             .hash = "N-V-__8AAKBCdwB2ORnA19yAaaCihr6odBLQztrMOoCs8Q7s",
+        },
+        .zlinter = .{
+            .url = "git+https://github.com/KurtWagner/zlinter#9dfe1fb26160fa97e9c3d3539698beaf29d8a4da",
+            .hash = "zlinter-0.0.1-OjQ08X4hFQAtSAjESBBXRKm05M_juGsp8tdy3IdKrnax",
         },
     },
     .paths = .{

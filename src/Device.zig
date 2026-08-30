@@ -25,7 +25,7 @@ presentQueue: c.VkQueue,
 commandPool: c.VkCommandPool,
 
 pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
-    const enable_validation_layers = builtin.mode == .Debug;
+    const enable_validation_layers = builtin.mode == .debug;
 
     const vulkan = try Vulkan.init(alloc, enable_validation_layers);
     // SAFETY: filled in by glfwCreateWindowSurface in window.create_surface below.
@@ -551,8 +551,8 @@ test "pickMemoryType with properties=0 matches the first filter-allowed type" {
 }
 
 test "Device has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 11), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 11), info.field_names.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
     try std.testing.expectEqual(bool, @FieldType(Self, "enable_validation_layers"));

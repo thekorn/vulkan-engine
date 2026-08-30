@@ -429,8 +429,8 @@ test "DescriptorPool.Builder collects pool sizes and tunables" {
 }
 
 test "DescriptorSetLayout has expected fields and types" {
-    const fields = @typeInfo(DescriptorSetLayout).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 4), fields.len);
+    const info = @typeInfo(DescriptorSetLayout).@"struct";
+    try std.testing.expectEqual(@as(usize, 4), info.field_names.len);
     try std.testing.expectEqual(Allocator, @FieldType(DescriptorSetLayout, "alloc"));
     try std.testing.expectEqual(*Device, @FieldType(DescriptorSetLayout, "device"));
     try std.testing.expectEqual(
@@ -440,8 +440,8 @@ test "DescriptorSetLayout has expected fields and types" {
 }
 
 test "DescriptorPool has expected fields and types" {
-    const fields = @typeInfo(DescriptorPool).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 2), fields.len);
+    const info = @typeInfo(DescriptorPool).@"struct";
+    try std.testing.expectEqual(@as(usize, 2), info.field_names.len);
     try std.testing.expectEqual(*Device, @FieldType(DescriptorPool, "device"));
     try std.testing.expectEqual(
         c.VkDescriptorPool,
@@ -450,8 +450,8 @@ test "DescriptorPool has expected fields and types" {
 }
 
 test "DescriptorWriter has expected fields and types" {
-    const fields = @typeInfo(DescriptorWriter).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 4), fields.len);
+    const info = @typeInfo(DescriptorWriter).@"struct";
+    try std.testing.expectEqual(@as(usize, 4), info.field_names.len);
     try std.testing.expectEqual(Allocator, @FieldType(DescriptorWriter, "alloc"));
     try std.testing.expectEqual(*DescriptorSetLayout, @FieldType(DescriptorWriter, "setLayout"));
     try std.testing.expectEqual(*DescriptorPool, @FieldType(DescriptorWriter, "pool"));

@@ -280,8 +280,8 @@ test "CustomUiApp default window dimensions are 800x600" {
 }
 
 test "CustomUiApp has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 5), fields.len);
+    const info = @typeInfo(Self).@"struct";
+    try std.testing.expectEqual(@as(usize, 5), info.field_names.len);
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*Window, @FieldType(Self, "window"));
     try std.testing.expectEqual(*Device, @FieldType(Self, "device"));

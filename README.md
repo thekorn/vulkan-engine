@@ -60,18 +60,28 @@ Or even
 nix develop --command zig build run
 ```
 
-## tests & spell checking
+## checks and coverage
 
-Run the test suite **and** the spell checker before pushing changes:
+Run the test suite, build-integrated
+[`zlinter`](https://github.com/KurtWagner/zlinter) checks and spell
+checker before pushing changes:
 
-```
+```bash
 nix develop --command zig build test --summary all
+nix develop --command zig build lint
 nix develop --command codebook-lsp lint --unique -s .
 ```
 
 The spell-check step uses [`codebook`](https://github.com/blopker/codebook) and
-respects the project dictionary in `codebook.toml`. CI runs both steps as part
-of the `build test` workflow.
+respects the project dictionary in `codebook.toml`. CI runs all three checks as
+part of the `build test` workflow.
+
+Generate a self-contained HTML coverage report with
+[`zcov`](https://github.com/ericsssan/zcov):
+
+```bash
+nix develop --command zig-cov test --format=html --output=coverage.html -- --summary all
+```
 
 ## tools
 

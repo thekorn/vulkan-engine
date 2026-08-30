@@ -1,6 +1,6 @@
 # Vulkan Engine — Agent Guidance
 
-A small Vulkan rendering engine written in Zig 0.16, built on GLFW +
+A small Vulkan rendering engine written in Zig, built on GLFW +
 Vulkan + a C-ABI shim over `tinyobjloader`. Entry point is
 [`src/main.zig`](src/main.zig), which by default hands off to
 [`src/CustomUiApp.zig`](src/CustomUiApp.zig) — a minimal app that shows a
@@ -35,13 +35,12 @@ before committing or opening a PR. CI runs the same commands.
 ```bash
 nix develop --command zig build test --summary all   # build + Zig tests
 nix develop --command codebook-lsp lint --unique -s . # spell check
-nix develop --command zlint src/*                    # Zig lint
+nix develop --command zig build lint                 # zlinter
 ```
 
 When the spell checker flags a legitimate technical term, add it to
-the `words` array in `codebook.toml` rather than rewording. For
-`zlint`'s `unsafe-undefined`, prefer fixing the diagnostic; otherwise
-add a `// SAFETY: <reason>` comment above the line.
+the `words` array in `codebook.toml` rather than rewording. Fix new
+`zlinter` diagnostics before committing.
 
 ## Quick Commands
 
@@ -50,12 +49,14 @@ nix develop                       # enter the dev shell (recommended)
 zig build                         # compile
 zig build run                     # compile and run
 zig build test                    # run the Zig test suite
-zig build coverage                # run the Zig test suite and generate a coverage report
-zig build test -Dcover -Dopen     # run under kcov and open the HTML report
+zig build lint                    # run build-integrated zlinter rules
+zig-cov test --format=html --output=coverage.html -- --summary all
 zig build --help                  # show all options
 ```
 
-Without Nix, install Zig 0.16.0, GLFW3, the Vulkan SDK and
+`zcov` currently requires the exact Zig nightly pinned by `flake.nix`
+and `build.zig.zon` (`0.17.0-dev.1509+bb296ab9b`). Without Nix,
+install that compiler, `zig-cov`, GLFW3, the Vulkan SDK and
 `shaderc/glslc` manually.
 
 ## Key File Locations

@@ -91,7 +91,7 @@ fn initOrSkip(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
 
 test "Window has expected fields and types" {
     const info = @typeInfo(Self).@"struct";
-    try std.testing.expectEqual(@as(usize, 5), info.fields.len);
+    try std.testing.expectEqual(@as(usize, 5), info.field_names.len);
 
     try std.testing.expectEqual(std.mem.Allocator, @FieldType(Self, "alloc"));
     try std.testing.expectEqual(*c.GLFWwindow, @FieldType(Self, "instance"));

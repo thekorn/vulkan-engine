@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Zig 0.16 rejects a resolv.conf whose final line has no newline. Repair the
+# Zig package fetching rejects a resolv.conf whose final line has no newline. Repair the
 # orb runtime's generated file if it was replaced while the orb was asleep.
 if [ -s /etc/resolv.conf ] && [ "$(tail -c 1 /etc/resolv.conf; printf x)" != $'\nx' ]; then
     printf '\n' | sudo tee -a /etc/resolv.conf >/dev/null

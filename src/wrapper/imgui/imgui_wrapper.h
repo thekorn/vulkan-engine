@@ -4,7 +4,7 @@
 // `cimgui` already exposes the full Dear ImGui surface as C functions,
 // but the auto-generated `struct ImGuiIO` declaration contains
 // `[*c]ImGuiContext` fields where `ImGuiContext` is only
-// forward-declared (and therefore opaque in the Zig `@cImport`). That
+// forward-declared (and therefore opaque in Zig's translated C module). That
 // makes it impossible to dereference the `[*c]ImGuiIO` returned by
 // `igGetIO_Nil()` from Zig (the language correctly rejects an
 // "indexable pointer to opaque type"). This wrapper does the IO struct

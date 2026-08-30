@@ -1,32 +1,10 @@
-// zlint-disable no-print -- the test runner intentionally writes formatted output (incl. ANSI codes) to stderr
-
-// This is for the Zig 0.16.
-
-// See https://gist.github.com/karlseguin/c6bea5b35e4e8d26af6f81c22cb5d76b/eb15512d6ae49663fa9df6c7a9725b20dab43edd
-// for a version that workson Zig 0.15.2.
-
-// See https://gist.github.com/karlseguin/c6bea5b35e4e8d26af6f81c22cb5d76b/1f317ebc9cd09bc50fd5591d09c34255e15d1d85
-// for a version that workson Zig 0.14.1.
-
-// in your build.zig, you can specify a custom test runner:
-// const tests = b.addTest(.{
-//    .root_module = $MODULE_BEING_TESTED,
-//    .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
-// });
-
-// in your build.zig, you can specify a custom test runner:
-// const tests = b.addTest(.{
-//    .root_module = $MODULE_BEING_TESTED,
-//    .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
-// });
-
 const std = @import("std");
 const Io = std.Io;
 const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 
-const BORDER = "=" ** 80;
+const BORDER = "================================================================================";
 
 // use in custom panic handler
 var current_test: ?[]const u8 = null;
@@ -76,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
 
         const is_unnamed_test = isUnnamed(t);
         if (env.filter) |f| {
-            if (!is_unnamed_test and std.mem.indexOf(u8, t.name, f) == null) {
+            if (!is_unnamed_test and std.mem.find(u8, t.name, f) == null) {
                 continue;
             }
         }
@@ -94,13 +72,16 @@ pub fn main(init: std.process.Init) !void {
         };
 
         current_test = friendly_name;
-        std.testing.allocator_instance = .{};
+        std.testing.allocator_instance = .init(std.heap.page_allocator, .{
+            .canary = 0xc3a701ba,
+            .check_write_after_free = true,
+        });
         const result = t.func();
         current_test = null;
 
         const ns_taken = slowest.endTiming(io, friendly_name);
 
-        if (std.testing.allocator_instance.deinit() == .leak) {
+        if (std.testing.allocator_instance.deinit() != 0) {
             leak += 1;
             Printer.status(.fail, "\n{s}\n\"{s}\" - Memory Leak\n{s}\n", .{ BORDER, friendly_name, BORDER });
         }
@@ -231,7 +212,7 @@ const SlowTracker = struct {
         {
             // Optimization to avoid shifting the dequeue for the common case
             // where the test isn't one of our slowest.
-            const fastest_of_the_slow = slowest.peekMin() orelse unreachable;
+            const fastest_of_the_slow = slowest.peekMin().?;
             if (fastest_of_the_slow.ns > ns) {
                 // the test was faster than our fastest slow test, don't add
                 return ns;
@@ -292,18 +273,18 @@ pub const panic = std.debug.FullPanic(struct {
     }
 }.panicFn);
 
-fn isUnnamed(t: std.builtin.TestFn) bool {
+fn isUnnamed(t: std.lang.TestFn) bool {
     const marker = ".test_";
     const test_name = t.name;
-    const index = std.mem.indexOf(u8, test_name, marker) orelse return false;
+    const index = std.mem.find(u8, test_name, marker) orelse return false;
     _ = std.fmt.parseInt(u32, test_name[index + marker.len ..], 10) catch return false;
     return true;
 }
 
-fn isSetup(t: std.builtin.TestFn) bool {
+fn isSetup(t: std.lang.TestFn) bool {
     return std.mem.endsWith(u8, t.name, "tests:beforeAll");
 }
 
-fn isTeardown(t: std.builtin.TestFn) bool {
+fn isTeardown(t: std.lang.TestFn) bool {
     return std.mem.endsWith(u8, t.name, "tests:afterAll");
 }

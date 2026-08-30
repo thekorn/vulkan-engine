@@ -17,12 +17,12 @@ pipelineLayout: c.VkPipelineLayout,
 pub const SimplePushConstantData = extern struct {
     /// Per-object model-to-world matrix. The shader multiplies this by
     /// `ubo.projection * ubo.view` to get the final clip-space transform.
-    modelMatrix: math.Mat4 = math.identity_mat4,
+    modelMatrix: math.Mat4Storage align(16) = math.identity_mat4_storage,
     // `normalMatrix` is stored as a `Mat4` (rather than a `Mat3`) so
     // that the std140 push-constant layout matches the GLSL side
     // without needing per-column padding. The shader extracts it as
     // `mat3(push.normalMatrix)`.
-    normalMatrix: math.Mat4 = math.identity_mat4,
+    normalMatrix: math.Mat4Storage align(16) = math.identity_mat4_storage,
 };
 
 pub fn init(
@@ -149,8 +149,8 @@ pub fn renderGameObjects(self: *Self, frameInfo: *FrameInfo) !void {
         );
 
         const push: SimplePushConstantData = .{
-            .modelMatrix = obj.transform.mat4(),
-            .normalMatrix = obj.transform.normalMatrix(),
+            .modelMatrix = math.mat4ToStorage(obj.transform.mat4()),
+            .normalMatrix = math.mat4ToStorage(obj.transform.normalMatrix()),
         };
 
         c.vkCmdPushConstants(
@@ -174,12 +174,12 @@ test "SimpleRenderSystem has expected fields and types" {
 }
 
 test "SimplePushConstantData has the expected field layout" {
-    const fields = @typeInfo(SimplePushConstantData).@"struct".fields;
-    try std.testing.expectEqual(@as(usize, 2), fields.len);
-    try std.testing.expectEqualStrings("modelMatrix", fields[0].name);
-    try std.testing.expectEqual(math.Mat4, fields[0].type);
-    try std.testing.expectEqualStrings("normalMatrix", fields[1].name);
-    try std.testing.expectEqual(math.Mat4, fields[1].type);
+    const info = @typeInfo(SimplePushConstantData).@"struct";
+    try std.testing.expectEqual(@as(usize, 2), info.field_names.len);
+    try std.testing.expectEqualStrings("modelMatrix", info.field_names[0]);
+    try std.testing.expectEqual(math.Mat4Storage, info.field_types[0]);
+    try std.testing.expectEqualStrings("normalMatrix", info.field_names[1]);
+    try std.testing.expectEqual(math.Mat4Storage, info.field_types[1]);
 }
 
 test "SimplePushConstantData defaults modelMatrix to the identity matrix" {

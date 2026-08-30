@@ -21,16 +21,16 @@ indexCount: u32 = 0,
 indexBuffer: ?Buffer = null,
 
 pub const Vertex = extern struct {
-    position: math.Vec3 = .{ 0, 0, 0 },
-    color: math.Vec3 = .{ 0, 0, 0 },
-    normal: math.Vec3 = .{ 0, 0, 0 },
-    uv: math.Vec2 = .{ 0, 0 },
+    position: math.Vec3Storage = .{ 0, 0, 0 },
+    color: math.Vec3Storage = .{ 0, 0, 0 },
+    normal: math.Vec3Storage = .{ 0, 0, 0 },
+    uv: math.Vec2Storage = .{ 0, 0 },
     /// Object-space tangent for normal mapping: `xyz` is the tangent
     /// direction along +U, `w` carries the bitangent handedness sign
     /// (+1 / -1) so the fragment shader can reconstruct the bitangent
     /// as `cross(N, T) * tangent.w`. Computed by
     /// `Builder.computeTangents` after the OBJ load + dedup pass.
-    tangent: math.Vec4 = .{ 0, 0, 0, 0 },
+    tangent: math.Vec4Storage = .{ 0, 0, 0, 0 },
 
     pub fn getBindingDescriptions() [1]c.VkVertexInputBindingDescription {
         return [1]c.VkVertexInputBindingDescription{
@@ -131,7 +131,7 @@ pub const Builder = struct {
 
         if (ok == 0) {
             if (err_msg != null) {
-                std.log.scoped(.model).err("tinyobjloader: {s}", .{err_msg});
+                std.log.scoped(.model).warn("tinyobjloader: {s}", .{err_msg});
             }
             return error.InvalidObj;
         }
@@ -181,8 +181,8 @@ pub const Builder = struct {
 
         // Walk the index buffer one triangle at a time. The vertex
         // indices are named `idx0` / `idx1` / `idx2` (rather than the
-        // mathematical `i0` / `i1` / `i2`) because Zig 0.16 made
-        // `i0`, `i1`, ... primitive integer type names.
+        // mathematical `i0` / `i1` / `i2`) because `i0`, `i1`, ...
+        // are primitive integer type names in Zig.
         var tri: usize = 0;
         while (tri + 3 <= self.indices.items.len) : (tri += 3) {
             const idx0: usize = self.indices.items[tri];
@@ -192,10 +192,10 @@ pub const Builder = struct {
             const v1 = self.vertices.items[idx1];
             const v2 = self.vertices.items[idx2];
 
-            const e1 = v1.position - v0.position;
-            const e2 = v2.position - v0.position;
-            const du1 = v1.uv - v0.uv;
-            const du2 = v2.uv - v0.uv;
+            const e1: math.Vec3 = @as(math.Vec3, v1.position) - @as(math.Vec3, v0.position);
+            const e2: math.Vec3 = @as(math.Vec3, v2.position) - @as(math.Vec3, v0.position);
+            const du1: math.Vec2 = @as(math.Vec2, v1.uv) - @as(math.Vec2, v0.uv);
+            const du2: math.Vec2 = @as(math.Vec2, v2.uv) - @as(math.Vec2, v0.uv);
 
             const det = du1[0] * du2[1] - du2[0] * du1[1];
             if (@abs(det) < 1e-8) continue;
@@ -221,7 +221,7 @@ pub const Builder = struct {
         }
 
         for (self.vertices.items, 0..) |*v, idx| {
-            const n_vec = v.normal;
+            const n_vec: math.Vec3 = v.normal;
             var t_vec = accum_t[idx];
 
             // Gram-Schmidt: project T onto the tangent plane defined
@@ -400,9 +400,8 @@ test "Vertex has expected size derived from field layout" {
     };
     const expected_size = std.mem.alignForward(usize, data_end, @alignOf(Vertex));
 
-    // Derive the expected size from the actual field layout and struct
-    // alignment rather than hard-coding a target/ABI-specific total
-    // size for vector fields.
+    // Derive the expected size from the actual storage-field layout and
+    // struct alignment rather than duplicating the field widths here.
     try std.testing.expectEqual(expected_size, @sizeOf(Vertex));
 
     const v = Vertex{
@@ -497,21 +496,21 @@ test "Vertex.getAttributeDescriptions offsets are all distinct" {
 }
 
 test "Model has expected fields and types" {
-    const fields = @typeInfo(Self).@"struct".fields;
+    const info = @typeInfo(Self).@"struct";
 
-    try std.testing.expectEqual(@as(usize, 6), fields.len);
-    try std.testing.expectEqualStrings("device", fields[0].name);
-    try std.testing.expectEqual(*Device, fields[0].type);
-    try std.testing.expectEqualStrings("vertexCount", fields[1].name);
-    try std.testing.expectEqual(u32, fields[1].type);
-    try std.testing.expectEqualStrings("vertexBuffer", fields[2].name);
-    try std.testing.expectEqual(Buffer, fields[2].type);
-    try std.testing.expectEqualStrings("hasIndexBuffer", fields[3].name);
-    try std.testing.expectEqual(bool, fields[3].type);
-    try std.testing.expectEqualStrings("indexCount", fields[4].name);
-    try std.testing.expectEqual(u32, fields[4].type);
-    try std.testing.expectEqualStrings("indexBuffer", fields[5].name);
-    try std.testing.expectEqual(?Buffer, fields[5].type);
+    try std.testing.expectEqual(@as(usize, 6), info.field_names.len);
+    try std.testing.expectEqualStrings("device", info.field_names[0]);
+    try std.testing.expectEqual(*Device, info.field_types[0]);
+    try std.testing.expectEqualStrings("vertexCount", info.field_names[1]);
+    try std.testing.expectEqual(u32, info.field_types[1]);
+    try std.testing.expectEqualStrings("vertexBuffer", info.field_names[2]);
+    try std.testing.expectEqual(Buffer, info.field_types[2]);
+    try std.testing.expectEqualStrings("hasIndexBuffer", info.field_names[3]);
+    try std.testing.expectEqual(bool, info.field_types[3]);
+    try std.testing.expectEqualStrings("indexCount", info.field_names[4]);
+    try std.testing.expectEqual(u32, info.field_types[4]);
+    try std.testing.expectEqualStrings("indexBuffer", info.field_names[5]);
+    try std.testing.expectEqual(?Buffer, info.field_types[5]);
 }
 
 test "Builder.loadModel returns InvalidObj on malformed input" {

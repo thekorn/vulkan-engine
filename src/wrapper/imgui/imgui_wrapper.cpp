@@ -1,5 +1,5 @@
 // C-ABI shim over a few Dear ImGui APIs that can't be consumed
-// directly from the Zig `@cImport` (see `imgui_wrapper.h` for the
+// directly from Zig's translated C module (see `imgui_wrapper.h` for the
 // rationale).
 
 #define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
