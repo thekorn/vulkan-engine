@@ -34,6 +34,13 @@
 
           nativeBuildInputs = [ zig ];
 
+          configurePhase = ''
+            runHook preConfigure
+            export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-cache"
+            mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
+            runHook postConfigure
+          '';
+
           buildPhase = ''
             runHook preBuild
             zig build ${zig-target-flags} -Doptimize=ReleaseSafe
