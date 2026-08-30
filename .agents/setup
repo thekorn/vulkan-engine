@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+nix_profile="$HOME/.nix-profile"
+
+run_step() {
+    local label="$1"
+    shift
+    local started_at=$SECONDS
+
+    printf '[orb setup] %s\n' "$label"
+    "$@"
+    printf '[orb setup] %s completed in %ss\n' "$label" "$((SECONDS - started_at))"
+}
+
+install_system_packages() {
+    local required_packages=(ca-certificates curl xz-utils)
+    local missing_packages=()
+    local package
+
+    for package in "${required_packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fq 'install ok installed'; then
+            missing_packages+=("$package")
+        fi
+    done
+
+    if ((${#missing_packages[@]} == 0)); then
+        return
+    fi
+
+    sudo apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+}
+
+ensure_resolver_config() {
+    # Zig 0.16 rejects a resolv.conf whose final line has no newline. Orb
+    # runtimes can generate the file in that form when the container starts.
+    if [ -s /etc/resolv.conf ] && [ "$(tail -c 1 /etc/resolv.conf; printf x)" != $'\nx' ]; then
+        printf '\n' | sudo tee -a /etc/resolv.conf >/dev/null
+    fi
+}
+
+install_nix() {
+    if command -v nix >/dev/null 2>&1 || [ -x "$nix_profile/bin/nix" ]; then
+        return
+    fi
+
+    local installer
+    local status
+    installer="$(mktemp)"
+
+    if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+        https://nixos.org/nix/install -o "$installer"; then
+        :
+    else
+        status=$?
+        rm -f "$installer"
+        return "$status"
+    fi
+
+    if sh "$installer" --no-daemon --yes --no-channel-add; then
+        :
+    else
+        status=$?
+        rm -f "$installer"
+        return "$status"
+    fi
+
+    rm -f "$installer"
+}
+
+load_nix() {
+    if [ -f "$nix_profile/etc/profile.d/nix.sh" ]; then
+        # shellcheck disable=SC1091
+        source "$nix_profile/etc/profile.d/nix.sh"
+    elif [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+        # shellcheck disable=SC1091
+        source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    fi
+
+    command -v nix >/dev/null
+}
+
+configure_nix() {
+    local config_dir="$HOME/.config/nix"
+    local config_file="$config_dir/nix.conf"
+    local flakes_setting='extra-experimental-features = nix-command flakes'
+
+    mkdir -p "$config_dir"
+    touch "$config_file"
+    if ! grep -Fqx "$flakes_setting" "$config_file"; then
+        printf '%s\n' "$flakes_setting" >> "$config_file"
+    fi
+}
+
+install_login_hook() {
+    local profile="$HOME/.bash_profile"
+    local marker='# vulkan-engine Nix development shell'
+
+    touch "$profile"
+    if grep -Fqx "$marker" "$profile"; then
+        return
+    fi
+
+    cat >> "$profile" <<EOF
+
+$marker
+if [[ -z "\${IN_NIX_SHELL:-}" && "\${PWD}" == "$repo_root" ]]; then
+    if [ -f "\$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+        source "\$HOME/.nix-profile/etc/profile.d/nix.sh"
+    elif [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+        source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    fi
+    if command -v nix >/dev/null 2>&1; then
+        eval "\$(nix print-dev-env "$repo_root")"
+    fi
+fi
+EOF
+}
+
+realize_dev_shell() {
+    nix develop "$repo_root" --command true
+}
+
+fetch_zig_dependencies() {
+    nix develop "$repo_root" --command zig build --fetch
+}
+
+run_step 'checking bootstrap packages' install_system_packages
+run_step 'checking resolver configuration' ensure_resolver_config
+run_step 'installing Nix' install_nix
+load_nix
+run_step 'configuring Nix flakes' configure_nix
+run_step 'installing the login-shell hook' install_login_hook
+run_step 'realizing the pinned development shell' realize_dev_shell
+run_step 'fetching Zig package dependencies' fetch_zig_dependencies
+
+printf '[orb setup] ready\n'

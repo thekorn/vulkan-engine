@@ -10,3 +10,5 @@ zig-pkg
 imgui.ini
 # nix reuslt
 result
+# Amp's generated orb portal metadata
+.amp/portals/*

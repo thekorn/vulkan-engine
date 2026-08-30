@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Zig 0.16 rejects a resolv.conf whose final line has no newline. Repair the
+# orb runtime's generated file if it was replaced while the orb was asleep.
+if [ -s /etc/resolv.conf ] && [ "$(tail -c 1 /etc/resolv.conf; printf x)" != $'\nx' ]; then
+    printf '\n' | sudo tee -a /etc/resolv.conf >/dev/null
+fi
+
+# The Nix environment itself is persisted in the orb snapshot and activated
+# by the login-shell hook installed during setup.
