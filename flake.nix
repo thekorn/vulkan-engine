@@ -36,7 +36,14 @@
           version = "0.1.0";
           src = zcov-src;
 
-          nativeBuildInputs = [ zig ];
+          nativeBuildInputs = [
+            zig
+            pkgs.autoPatchelfHook
+          ];
+
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.libc ];
+
+          autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.isLinux [ "--keep-libc" ];
 
           configurePhase = ''
             runHook preConfigure

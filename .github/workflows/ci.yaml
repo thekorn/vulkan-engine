@@ -23,11 +23,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-      # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      # Run our checks to catch quick issues
-      - run: nix flake check
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+      - name: Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v14
+
+      - name: Evaluate flake
+        run: nix flake check --no-build
 
       - name: spellcheck
         run: nix develop -c codebook-lsp lint --unique -s .
