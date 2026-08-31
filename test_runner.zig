@@ -9,21 +9,19 @@ const BORDER = "================================================================
 // use in custom panic handler
 var current_test: ?[]const u8 = null;
 
-pub fn main(init: std.process.Init) !void {
+pub fn main(init: std.process.Init.Minimal) !void {
+    @disableInstrumentation();
+
     var mem: [8192]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&mem);
 
     const allocator = fba.allocator();
 
-    const env = Env.init(init.environ_map);
+    var environ_map = try init.environ.createMap(std.heap.page_allocator);
+    defer environ_map.deinit();
+    const env = Env.init(&environ_map);
 
-    std.testing.io_instance = .init(init.gpa, .{
-        .argv0 = .init(init.minimal.args),
-        .environ = init.minimal.environ,
-    });
-    defer std.testing.io_instance.deinit();
-
-    const io = std.testing.io;
+    const io = Io.Threaded.global_single_threaded.io();
 
     var slowest = SlowTracker.init(allocator, io, 5);
     defer slowest.deinit();
@@ -76,7 +74,13 @@ pub fn main(init: std.process.Init) !void {
             .canary = 0xc3a701ba,
             .check_write_after_free = true,
         });
+        std.testing.io_instance = .init(std.testing.allocator, .{
+            .argv0 = .init(init.args),
+            .environ = init.environ,
+        });
+        std.testing.environ = init.environ;
         const result = t.func();
+        std.testing.io_instance.deinit();
         current_test = null;
 
         const ns_taken = slowest.endTiming(io, friendly_name);
