@@ -38,13 +38,5 @@ jobs:
       - name: build & test
         run: nix develop -c zig build test --summary all
 
-      - name: coverage (zcov)
-        run: nix develop -c zig-cov test --format=html --output=coverage.html -- --summary all
-
-      - name: upload coverage report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: coverage-report
-          path: coverage.html
-          if-no-files-found: ignore
+      - name: Measure test coverage
+        run: nix develop -c zig-cov test --format=github --include=src/
