@@ -23,7 +23,11 @@
           inherit system;
         };
         zig = zig-overlay.packages.${system}."master-2026-07-29";
-        zig-target = "${pkgs.stdenv.targetPlatform.system}-${pkgs.stdenv.targetPlatform.parsed.abi.name}";
+        zig-target =
+          if pkgs.stdenv.isDarwin then
+            "${pkgs.stdenv.targetPlatform.parsed.cpu.name}-macos-none"
+          else
+            "${pkgs.stdenv.targetPlatform.system}-${pkgs.stdenv.targetPlatform.parsed.abi.name}";
         zig-target-flags =
           "-Dtarget=${zig-target}"
           + pkgs.lib.optionalString pkgs.stdenv.isLinux " -Ddynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker}";
