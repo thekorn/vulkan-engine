@@ -48,16 +48,17 @@ top.
 
 ## local development
 
-Setup using nix
+Install [devenv](https://devenv.sh/getting-started/) (which uses Nix),
+then enter the pinned development environment:
 
 ```
-nix develop
+devenv shell
 ```
 
-Or even
+Or run a command directly:
 
 ```
-nix develop --command zig build run
+devenv shell -- zig build run
 ```
 
 ## checks and coverage
@@ -67,9 +68,9 @@ Run the test suite, build-integrated
 checker before pushing changes:
 
 ```bash
-nix develop --command zig build test --summary all
-nix develop --command zig build lint
-nix develop --command codebook-lsp lint --unique -s .
+devenv shell -- zig build test --summary all
+devenv shell -- zig build lint
+devenv shell -- codebook-lsp lint --unique -s .
 ```
 
 The spell-check step uses [`codebook`](https://github.com/blopker/codebook) and
@@ -80,7 +81,7 @@ Generate a self-contained HTML coverage report with
 [`zcov`](https://github.com/ericsssan/zcov):
 
 ```bash
-nix develop --command zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
 ```
 
 ## tools
@@ -88,7 +89,7 @@ nix develop --command zig-cov test --format=html --output=coverage.html -- --sum
 ### lines of code
 
 ```
-nix develop --command cloc src shaders models docs
+devenv shell -- cloc src shaders models docs
 ```
 
 ## resources

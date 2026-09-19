@@ -367,8 +367,12 @@ shared via material handles rather than ad-hoc names.
 vulkan-engine/
 ├── build.zig              # Build configuration (Zig build system)
 ├── build.zig.zon          # Zig manifest/dependencies
-├── flake.nix              # Nix development environment
-├── flake.lock             # Pinned Nix inputs
+├── devenv.nix             # Development environment
+├── devenv.yaml            # Development inputs
+├── devenv.lock            # Pinned development input graph
+├── nix/toolchain.nix      # Shared Zig and coverage toolchain
+├── flake.nix              # Nix engine package and application
+├── flake.lock             # Pinned package inputs
 ├── README.md              # Basic project info
 ├── AGENTS.md              # Top-level agent guidance (entry point)
 ├── codebook.toml          # Codebook configuration

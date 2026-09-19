@@ -2,15 +2,15 @@
 name: writing-zig
 description: Writes and ports Zig code for this project's pinned 0.17 nightly. Use when editing Zig sources, build.zig, test_runner.zig, or Zig ABI layouts.
 license: MIT
-compatibility: Requires Zig 0.17.0-dev.1509+bb296ab9b through the repository Nix flake.
+compatibility: Requires Zig 0.17.0-dev.1509+bb296ab9b through the repository devenv shell.
 metadata:
   category: programming-language
 ---
 
 # Writing Zig for Vulkan Engine
 
-Use the exact compiler pinned by `flake.nix` and `build.zig.zon`.
-Run commands through `nix develop --command ...`; do not assume APIs
+Use the exact compiler pinned by `nix/toolchain.nix` and `build.zig.zon`.
+Run commands through `devenv shell -- ...`; do not assume APIs
 from another Zig release.
 
 ## Verify the Toolchain
@@ -50,13 +50,13 @@ runner.
 ## Required Verification
 
 ```bash
-nix develop --command zig build test --summary all
-nix develop --command zig build lint
-nix develop --command codebook-lsp lint --unique -s .
+devenv shell -- zig build test --summary all
+devenv shell -- zig build lint
+devenv shell -- codebook-lsp lint --unique -s .
 ```
 
 For coverage changes, also run:
 
 ```bash
-nix develop --command zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
 ```

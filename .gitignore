@@ -12,5 +12,8 @@ coverage.html
 imgui.ini
 # nix reuslt
 result
+# Local devenv state and overrides
+.devenv*
+devenv.local.nix
 # Amp's generated orb portal metadata
 .amp/portals/*

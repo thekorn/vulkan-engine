@@ -5,7 +5,7 @@ zig_cmd="${ZIG_CMD:-zig}"
 expected="0.17.0-dev.1509+bb296ab9b"
 
 if ! command -v "$zig_cmd" >/dev/null 2>&1; then
-    printf 'ERROR: zig not found; set ZIG_CMD or enter `nix develop`.\n' >&2
+    printf 'ERROR: zig not found; set ZIG_CMD or enter `devenv shell`.\n' >&2
     exit 1
 fi
 

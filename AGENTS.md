@@ -24,7 +24,7 @@ Detailed guidance is split into focused docs under `docs/`:
   render-related Zig sources: Vulkan pipeline stages, shader
   source, and pipeline configuration.
 - @docs/build-and-tooling.md — loaded when editing `build.zig*`,
-  `flake.nix`, `codebook.toml`, `test_runner.zig` or anything under
+  `devenv.*`, `nix/`, `flake.nix`, `codebook.toml`, `test_runner.zig` or anything under
   `.github/`: full build / dev-env / CI / testing details.
 
 ## Required Checks Before Committing
@@ -33,9 +33,9 @@ These three commands form one logical "test suite" — all must pass
 before committing or opening a PR. CI runs the same commands.
 
 ```bash
-nix develop --command zig build test --summary all   # build + Zig tests
-nix develop --command codebook-lsp lint --unique -s . # spell check
-nix develop --command zig build lint                 # zlinter
+devenv shell -- zig build test --summary all   # build + Zig tests
+devenv shell -- codebook-lsp lint --unique -s . # spell check
+devenv shell -- zig build lint                 # zlinter
 ```
 
 When the spell checker flags a legitimate technical term, add it to
@@ -45,7 +45,7 @@ the `words` array in `codebook.toml` rather than rewording. Fix new
 ## Quick Commands
 
 ```bash
-nix develop                       # enter the dev shell (recommended)
+devenv shell                      # enter the dev shell (recommended)
 zig build                         # compile
 zig build run                     # compile and run
 zig build test                    # run the Zig test suite
@@ -54,7 +54,7 @@ zig-cov test --format=html --output=coverage.html -- --summary all
 zig build --help                  # show all options
 ```
 
-`zcov` currently requires the exact Zig nightly pinned by `flake.nix`
+`zcov` currently requires the exact Zig nightly pinned by `nix/toolchain.nix`
 and `build.zig.zon` (`0.17.0-dev.1509+bb296ab9b`). Without Nix,
 install that compiler, `zig-cov`, GLFW3, the Vulkan SDK and
 `shaderc/glslc` manually.
@@ -71,7 +71,7 @@ install that compiler, `zig-cov`, GLFW3, the Vulkan SDK and
 - Build config: [`build.zig`](build.zig)
 - Custom test runner: [`test_runner.zig`](test_runner.zig)
 - Spell-check dictionary: [`codebook.toml`](codebook.toml)
-- Dev environment: [`flake.nix`](flake.nix)
+- Dev environment: [`devenv.nix`](devenv.nix) / [`devenv.yaml`](devenv.yaml)
 
 ## Graceful Shutdown
 

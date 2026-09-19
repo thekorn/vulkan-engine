@@ -22,50 +22,10 @@
         pkgs = (import nixpkgs) {
           inherit system;
         };
-        zig = zig-overlay.packages.${system}."master-2026-07-29";
-        zig-target =
-          if pkgs.stdenv.isDarwin then
-            "${pkgs.stdenv.targetPlatform.parsed.cpu.name}-macos-none"
-          else
-            "${pkgs.stdenv.targetPlatform.system}-${pkgs.stdenv.targetPlatform.parsed.abi.name}";
-        zig-target-flags =
-          "-Dtarget=${zig-target}"
-          + pkgs.lib.optionalString pkgs.stdenv.isLinux " -Ddynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker}";
-        zig-cov = pkgs.stdenv.mkDerivation {
-          pname = "zig-cov";
-          version = "0.1.0";
-          src = zcov-src;
-
-          nativeBuildInputs = [
-            zig
-            pkgs.autoPatchelfHook
-          ];
-
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.libc ];
-
-          autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.isLinux [ "--keep-libc" ];
-
-          configurePhase = ''
-            runHook preConfigure
-            export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-cache"
-            mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
-            runHook postConfigure
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            zig build ${zig-target-flags} -Doptimize=ReleaseSafe
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p "$out/bin" "$out/lib"
-            cp zig-out/bin/zig-cov "$out/bin/"
-            cp zig-out/lib/zig-cov-rt.o "$out/lib/"
-            runHook postInstall
-          '';
+        toolchain = import ./nix/toolchain.nix {
+          inherit pkgs zig-overlay zcov-src;
         };
+        inherit (toolchain) zig zig-target-flags;
         vulkan-engine = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "vulkan-engine";
           version = "0.0.0";
@@ -143,55 +103,6 @@
         apps.default = {
           type = "app";
           program = "${vulkan-engine}/bin/vulkan_engine";
-        };
-
-        devShell = pkgs.mkShell {
-          buildInputs =
-            with pkgs;
-            [
-              zig
-              zig-cov
-              codebook
-              cloc
-              shaderc
-              pkg-config
-              vulkan-headers
-              vulkan-loader.dev
-              vulkan-loader
-              vulkan-validation-layers
-              tinyobjloader
-
-              # for [rift engine]
-              #glslang.bin
-              #freetype.out
-              #freetype.dev
-            ]
-            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [
-              libGL.dev
-            ]);
-
-          nativeBuildInputs =
-            with pkgs;
-            [
-              glfw
-            ]
-            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [ libGL ]);
-
-          shellHook = ''
-            alias zed='zeditor'
-          '';
-
-          NIX_DYNAMIC_LINKER = pkgs.lib.optionalString pkgs.stdenv.isLinux pkgs.stdenv.cc.bintools.dynamicLinker;
-          NIX_ZIG_TARGET = zig-target;
-          LD_LIBRARY_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux (
-            pkgs.lib.makeLibraryPath [
-              pkgs.glfw
-              pkgs.libGL
-              pkgs.tinyobjloader
-              pkgs.vulkan-loader
-            ]
-          );
-          VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
         };
       }
     );

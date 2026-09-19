@@ -4,6 +4,8 @@ globs:
   - "build.zig.zon"
   - "flake.nix"
   - "flake.lock"
+  - "devenv.*"
+  - "nix/**"
   - "codebook.toml"
   - ".github/**"
   - "test_runner.zig"
@@ -20,7 +22,7 @@ information. Always-on quick commands live in the top-level
 The project uses Zig's build system and currently requires
 `0.17.0-dev.1509+bb296ab9b`, the compiler revision supported by
 [`zcov`](https://github.com/ericsssan/zcov). `build.zig.zon` enforces
-that minimum and `flake.nix` selects the matching
+that minimum and `nix/toolchain.nix` selects the matching
 `mitchellh/zig-overlay` package (`master-2026-07-29`). Do not update
 the compiler independently of zcov.
 
@@ -61,21 +63,26 @@ zig build lint
 
 ## Development Setup
 
-Nix is the supported setup:
+Install [devenv](https://devenv.sh/getting-started/) and Nix, then run:
 
 ```bash
-nix develop
-nix develop --command zig build run
+devenv shell
+devenv shell -- zig build run
 ```
 
-The flake provides the pinned Zig compiler, `zig-cov`, codebook,
+The devenv shell provides the pinned Zig compiler, `zig-cov`, codebook,
 `cloc`, `glslc`, pkg-config, GLFW, Vulkan headers/loader/validation
 layers, tinyobjloader and Linux OpenGL libraries. It also exports the
 Nix target, dynamic linker and runtime library path needed by Zig's
 LLVM linker in this environment.
 
-The flake exposes a `vulkan-engine` package in addition to the dev
-shell. Zig package dependencies are fetched through `zig.fetchDeps`,
+`devenv.yaml` pins the toolchain inputs and `devenv.lock` locks the full
+input graph. Update revisions in `devenv.yaml` deliberately, then run
+`devenv update`; keep Zig and zcov compatible.
+
+The flake remains for `nix build` / `nix run`, exposing the
+`vulkan-engine` package but no dev shell. Both use `nix/toolchain.nix`.
+Zig package dependencies are fetched through `zig.fetchDeps`,
 and `autoPatchelfHook` makes the installed Linux executable use its
 Nix runtime libraries.
 
@@ -89,9 +96,9 @@ These commands form one logical test suite and must all pass before a
 commit or PR:
 
 ```bash
-nix develop --command zig build test --summary all
-nix develop --command zig build lint
-nix develop --command codebook-lsp lint --unique -s .
+devenv shell -- zig build test --summary all
+devenv shell -- zig build lint
+devenv shell -- codebook-lsp lint --unique -s .
 ```
 
 ### Tests
@@ -127,7 +134,7 @@ to the dictionary only when it is a legitimate technical term.
 Generate a self-contained source-level HTML report with:
 
 ```bash
-nix develop --command zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
 ```
 
 `zig-cov test` invokes the normal test build with
@@ -159,7 +166,7 @@ README for its complete CLI.
 The GitHub Actions workflow runs on pushes and pull requests to
 `main`:
 
-1. Checkout and install Nix.
+1. Checkout and install Nix and devenv.
 2. `nix flake check`.
 3. Spell check.
 4. `zig build lint`.
@@ -177,8 +184,10 @@ the coverage deliverable.
   zcov instrumentation and zlinter step.
 - `build.zig.zon` — package metadata, exact Zig minimum and source
   dependencies.
-- `flake.nix` / `flake.lock` — reproducible compiler, zcov build,
-  system libraries, package and dev shell.
+- `devenv.nix` / `devenv.yaml` / `devenv.lock` — reproducible dev shell
+  and pinned inputs.
+- `nix/toolchain.nix` — shared compiler selection and zcov build.
+- `flake.nix` / `flake.lock` — engine package and application.
 - `test_runner.zig` — ordinary test output; not used for fuzz-based
   coverage runs.
 - `codebook.toml` — spelling dictionary and ignored generated/vendor

@@ -96,9 +96,11 @@ configure_nix() {
 
 install_login_hook() {
     local profile="$HOME/.bash_profile"
-    local marker='# vulkan-engine Nix development shell'
+    local marker='# vulkan-engine devenv development shell'
 
     touch "$profile"
+    # Upgrade the previous repository-owned hook without changing other entries.
+    sed -i '/^# vulkan-engine Nix development shell$/,/^fi$/d' "$profile"
     if grep -Fqx "$marker" "$profile"; then
         return
     fi
@@ -106,25 +108,31 @@ install_login_hook() {
     cat >> "$profile" <<EOF
 
 $marker
-if [[ -z "\${IN_NIX_SHELL:-}" && "\${PWD}" == "$repo_root" ]]; then
+if [[ -z "\${DEVENV_ROOT:-}" && "\${PWD}" == "$repo_root" ]]; then
     if [ -f "\$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
         source "\$HOME/.nix-profile/etc/profile.d/nix.sh"
     elif [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
         source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
     fi
-    if command -v nix >/dev/null 2>&1; then
-        eval "\$(nix print-dev-env "$repo_root")"
+    if command -v devenv >/dev/null 2>&1; then
+        eval "\$(devenv shell -- bash -c 'export -p')"
     fi
 fi
 EOF
 }
 
+install_devenv() {
+    if ! command -v devenv >/dev/null 2>&1; then
+        nix profile add github:NixOS/nixpkgs/549bd84d6279f9852cae6225e372cc67fb91a4c1#devenv
+    fi
+}
+
 realize_dev_shell() {
-    nix develop "$repo_root" --command true
+    (cd "$repo_root" && devenv shell -- true)
 }
 
 fetch_zig_dependencies() {
-    nix develop "$repo_root" --command zig build --fetch
+    (cd "$repo_root" && devenv shell -- zig build --fetch)
 }
 
 run_step 'checking bootstrap packages' install_system_packages
@@ -132,6 +140,7 @@ run_step 'checking resolver configuration' ensure_resolver_config
 run_step 'installing Nix' install_nix
 load_nix
 run_step 'configuring Nix flakes' configure_nix
+run_step 'installing devenv' install_devenv
 run_step 'installing the login-shell hook' install_login_hook
 run_step 'realizing the pinned development shell' realize_dev_shell
 run_step 'fetching Zig package dependencies' fetch_zig_dependencies

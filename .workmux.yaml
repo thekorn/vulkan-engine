@@ -1,4 +1,4 @@
 pre_merge:
-  - nix develop --command codebook-lsp lint --unique -s .
-  - nix develop --command zig build lint
-  - nix develop --command zig build test
+  - devenv shell -- codebook-lsp lint --unique -s .
+  - devenv shell -- zig build lint
+  - devenv shell -- zig build test

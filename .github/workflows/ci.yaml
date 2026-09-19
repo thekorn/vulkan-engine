@@ -29,17 +29,20 @@ jobs:
       - name: Enable Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v14
 
+      - name: Install devenv
+        run: nix profile add github:NixOS/nixpkgs/549bd84d6279f9852cae6225e372cc67fb91a4c1#devenv
+
       - name: Evaluate flake
         run: nix flake check --no-build
 
       - name: spellcheck
-        run: nix develop -c codebook-lsp lint --unique -s .
+        run: devenv shell -- codebook-lsp lint --unique -s .
 
       - name: lint (zlinter)
-        run: nix develop -c zig build lint
+        run: devenv shell -- zig build lint
 
       - name: build & test
-        run: nix develop -c zig build test --summary all
+        run: devenv shell -- zig build test --summary all
 
       - name: Measure test coverage
-        run: nix develop -c zig-cov test --format=github --include=src/
+        run: devenv shell -- zig-cov test --format=github --include=src/
