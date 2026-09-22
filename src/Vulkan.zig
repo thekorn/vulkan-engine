@@ -184,7 +184,6 @@ pub fn createLogicalDevice(
     globalDevice: *c.VkDevice,
     graphicsQueue: *c.VkQueue,
     presentQueue: *c.VkQueue,
-    enableValidationLayers: bool,
 ) !void {
     const indices = try findQueueFamilies(alloc, physicalDevice, surface);
 
@@ -221,8 +220,9 @@ pub fn createLogicalDevice(
 
         .enabledExtensionCount = @intCast(deviceExtensions.len),
         .ppEnabledExtensionNames = deviceExtensions.ptr,
-        .enabledLayerCount = if (enableValidationLayers) @intCast(validationLayers.len) else 0,
-        .ppEnabledLayerNames = if (enableValidationLayers) &validationLayers else null,
+        // Validation layers are enabled on the instance; device layers are unused.
+        .enabledLayerCount = 0,
+        .ppEnabledLayerNames = null,
 
         .pNext = null,
         .flags = 0,

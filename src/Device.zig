@@ -48,7 +48,6 @@ pub fn init(alloc: std.mem.Allocator, window: *Window) !*Self {
         &globalDevice,
         &graphicsQueue,
         &presentQueue,
-        enable_validation_layers,
     );
 
     // SAFETY: filled in by vkCreateCommandPool inside createCommandPool below.
