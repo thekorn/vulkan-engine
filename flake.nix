@@ -4,7 +4,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    zcov-src.url = "github:ericsssan/zcov/d5b606ab43b31fbf4ba88b6484be95cb03747de2";
+    zcov-src.url = "github:ericsssan/zcov";
     zcov-src.flake = false;
   };
 

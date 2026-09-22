@@ -1,12 +1,12 @@
 # Preserve the toolchain inputs used by the package flake.
 inputs:
   nixpkgs:
-    url: github:nixos/nixpkgs/549bd84d6279f9852cae6225e372cc67fb91a4c1
+    url: github:NixOS/nixpkgs/nixos-unstable
   zig-overlay:
     url: github:mitchellh/zig-overlay
     inputs:
       nixpkgs:
         follows: nixpkgs
   zcov-src:
-    url: github:ericsssan/zcov/d5b606ab43b31fbf4ba88b6484be95cb03747de2
+    url: github:ericsssan/zcov
     flake: false
