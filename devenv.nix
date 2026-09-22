@@ -19,16 +19,16 @@ in
     vulkan-loader
     vulkan-validation-layers
     tinyobjloader
-  ] ++ lib.optionals stdenv.isLinux [ libGL.dev libGL ];
+  ] ++ lib.optionals stdenv.hostPlatform.isLinux [ libGL.dev libGL ];
 
   enterShell = ''
     alias zed='zeditor'
   '';
 
   env = {
-    NIX_DYNAMIC_LINKER = lib.optionalString pkgs.stdenv.isLinux pkgs.stdenv.cc.bintools.dynamicLinker;
+    NIX_DYNAMIC_LINKER = lib.optionalString pkgs.stdenv.hostPlatform.isLinux pkgs.stdenv.cc.bintools.dynamicLinker;
     NIX_ZIG_TARGET = toolchain.zig-target;
-    LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (lib.makeLibraryPath [
+    LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.hostPlatform.isLinux (lib.makeLibraryPath [
       pkgs.glfw
       pkgs.libGL
       pkgs.tinyobjloader

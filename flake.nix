@@ -41,7 +41,7 @@
             zig
             pkgs.pkg-config
             pkgs.shaderc
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
 
           buildInputs =
             with pkgs;
@@ -52,7 +52,7 @@
               vulkan-loader
               tinyobjloader
             ]
-            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [
+            ++ (pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               libGL
               stdenv.cc.libc
             ]);
@@ -60,7 +60,7 @@
           # Zig supplies the Nix dynamic linker directly, so preserve its
           # matching libc in the runtime search path when autoPatchelf fixes
           # the executable.
-          autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.isLinux [ "--keep-libc" ];
+          autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "--keep-libc" ];
 
           configurePhase = ''
             runHook preConfigure

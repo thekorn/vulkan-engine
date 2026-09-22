@@ -2,13 +2,13 @@
 let
   zig = zig-overlay.packages.${pkgs.stdenv.hostPlatform.system}."master-2026-09-20";
   zig-target =
-    if pkgs.stdenv.isDarwin then
+    if pkgs.stdenv.hostPlatform.isDarwin then
       "${pkgs.stdenv.targetPlatform.parsed.cpu.name}-macos-none"
     else
       "${pkgs.stdenv.targetPlatform.system}-${pkgs.stdenv.targetPlatform.parsed.abi.name}";
   zig-target-flags =
     "-Dtarget=${zig-target}"
-    + pkgs.lib.optionalString pkgs.stdenv.isLinux " -Ddynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker}";
+    + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux " -Ddynamic-linker=${pkgs.stdenv.cc.bintools.dynamicLinker}";
 in
 {
   inherit zig zig-target zig-target-flags;
@@ -17,9 +17,9 @@ in
     version = "0.1.0";
     src = zcov-src;
 
-    nativeBuildInputs = [ zig ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
-    buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.libc ];
-    autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.isLinux [ "--keep-libc" ];
+    nativeBuildInputs = [ zig ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
+    buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.libc ];
+    autoPatchelfFlags = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "--keep-libc" ];
 
     configurePhase = ''
       runHook preConfigure
