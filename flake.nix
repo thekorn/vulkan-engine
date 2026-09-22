@@ -39,10 +39,9 @@
 
           nativeBuildInputs = [
             zig
-            pkgs.autoPatchelfHook
             pkgs.pkg-config
             pkgs.shaderc
-          ];
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
 
           buildInputs =
             with pkgs;
