@@ -69,7 +69,7 @@ devenv shell
 devenv shell -- zig build run
 ```
 
-The devenv shell provides Zig, `zig-cov`, codebook,
+The devenv shell provides Zig, ZLS, `zig-cov`, codebook,
 `cloc`, `glslc`, pkg-config, GLFW, Vulkan headers/loader/validation
 layers, tinyobjloader and Linux OpenGL libraries. It also exports the
 Nix target, dynamic linker and runtime library path needed by Zig's

@@ -10,3 +10,8 @@ inputs:
   zcov-src:
     url: github:ericsssan/zcov
     flake: false
+  zls:
+    url: github:zigtools/zls
+    inputs:
+      nixpkgs:
+        follows: nixpkgs

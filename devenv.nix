@@ -9,6 +9,7 @@ in
   packages = with pkgs; [
     toolchain.zig
     toolchain.zig-cov
+    inputs.zls.packages.${stdenv.hostPlatform.system}.default
     codebook
     cloc
     shaderc
