@@ -60,5 +60,5 @@ devenv shell -- codebook-lsp lint --unique -s .
 For coverage changes, also run:
 
 ```bash
-devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html --include=src/ -- --summary all
 ```

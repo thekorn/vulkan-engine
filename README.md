@@ -81,7 +81,7 @@ Generate a self-contained HTML coverage report with
 [`zcov`](https://github.com/ericsssan/zcov):
 
 ```bash
-devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html --include=src/ -- --summary all
 ```
 
 ## tools

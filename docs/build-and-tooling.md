@@ -133,7 +133,7 @@ to the dictionary only when it is a legitimate technical term.
 Generate a self-contained source-level HTML report with:
 
 ```bash
-devenv shell -- zig-cov test --format=html --output=coverage.html -- --summary all
+devenv shell -- zig-cov test --format=html --output=coverage.html --include=src/ -- --summary all
 ```
 
 `zig-cov test` invokes the normal test build with

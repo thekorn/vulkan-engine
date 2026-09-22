@@ -50,7 +50,7 @@ zig build                         # compile
 zig build run                     # compile and run
 zig build test                    # run the Zig test suite
 zig build lint                    # run build-integrated zlinter rules
-zig-cov test --format=html --output=coverage.html -- --summary all
+zig-cov test --format=html --output=coverage.html --include=src/ -- --summary all
 zig build --help                  # show all options
 ```
 
