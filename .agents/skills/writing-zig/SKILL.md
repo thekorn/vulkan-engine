@@ -1,21 +1,23 @@
 ---
 name: writing-zig
-description: Writes and ports Zig code for this project's pinned 0.17 nightly. Use when editing Zig sources, build.zig, test_runner.zig, or Zig ABI layouts.
+description: Writes and ports Zig 0.17 code for this project. Use when editing Zig sources, build.zig, test_runner.zig, or Zig ABI layouts.
 license: MIT
-compatibility: Requires Zig 0.17.0-dev.1509+bb296ab9b through the repository devenv shell.
+compatibility: Requires Zig 0.17 at or above 0.17.0-dev.2251+1175a3e99. The repository devenv shell provides Zig and native dependencies.
 metadata:
   category: programming-language
 ---
 
 # Writing Zig for Vulkan Engine
 
-Use the exact compiler pinned by `nix/toolchain.nix` and `build.zig.zon`.
-Run commands through `devenv shell -- ...`; do not assume APIs
-from another Zig release.
+Use Zig 0.17, with `0.17.0-dev.2251+1175a3e99` as the minimum version.
+Any Zig 0.17 version at or above that minimum is allowed; an exact
+nightly is not required.
+Run commands through `devenv shell -- ...` for a consistent toolchain;
+do not assume APIs from another Zig release.
 
 ## Verify the Toolchain
 
-Run `scripts/check-zig-version.sh` before diagnosing version-sensitive
+Run `devenv shell -- zig version` before diagnosing version-sensitive
 compiler errors. Use `zig env` to locate the active standard-library
 source and inspect it directly when an API is uncertain.
 

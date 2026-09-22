@@ -54,10 +54,11 @@ zig-cov test --format=html --output=coverage.html -- --summary all
 zig build --help                  # show all options
 ```
 
-`zcov` currently requires the exact Zig nightly pinned by `nix/toolchain.nix`
-and `build.zig.zon` (`0.17.0-dev.1509+bb296ab9b`). Without Nix,
-install that compiler, `zig-cov`, GLFW3, the Vulkan SDK and
-`shaderc/glslc` manually.
+Use Zig 0.17, with `0.17.0-dev.2251+1175a3e99` as the minimum version.
+Any Zig 0.17 version at or above that minimum is allowed; an exact
+nightly is not required. Without Nix, install Zig, `zig-cov`, GLFW3,
+the Vulkan SDK and `shaderc/glslc` manually. When updating Zig, run
+the checks above and coverage to verify compatibility.
 
 ## Key File Locations
 

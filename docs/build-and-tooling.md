@@ -19,12 +19,11 @@ information. Always-on quick commands live in the top-level
 
 ## Toolchain
 
-The project uses Zig's build system and currently requires
-`0.17.0-dev.1509+bb296ab9b`, the compiler revision supported by
-[`zcov`](https://github.com/ericsssan/zcov). `build.zig.zon` enforces
-that minimum and `nix/toolchain.nix` selects the matching
-`mitchellh/zig-overlay` package (`master-2026-07-29`). Do not update
-the compiler independently of zcov.
+The project uses Zig's build system with a recent nightly compiler.
+`nix/toolchain.nix` selects a `mitchellh/zig-overlay` package for
+reproducible builds, not because one exact nightly is required by
+the engine or [`zcov`](https://github.com/ericsssan/zcov). When updating
+Zig, run the required checks and coverage to verify compatibility.
 
 `build.zig.zon` supplies three source dependencies:
 
@@ -70,7 +69,7 @@ devenv shell
 devenv shell -- zig build run
 ```
 
-The devenv shell provides the pinned Zig compiler, `zig-cov`, codebook,
+The devenv shell provides Zig, `zig-cov`, codebook,
 `cloc`, `glslc`, pkg-config, GLFW, Vulkan headers/loader/validation
 layers, tinyobjloader and Linux OpenGL libraries. It also exports the
 Nix target, dynamic linker and runtime library path needed by Zig's
@@ -86,7 +85,7 @@ Zig package dependencies are fetched through `zig.fetchDeps`,
 and `autoPatchelfHook` makes the installed Linux executable use its
 Nix runtime libraries.
 
-Without Nix, install the exact Zig version above, build/install zcov,
+Without Nix, install a recent Zig nightly, build/install zcov,
 and provide GLFW3, a Vulkan SDK, tinyobjloader, a C++ runtime and
 `shaderc/glslc`.
 
@@ -182,8 +181,7 @@ the coverage deliverable.
 
 - `build.zig` — shaders/assets, C translation, executable, tests,
   zcov instrumentation and zlinter step.
-- `build.zig.zon` — package metadata, exact Zig minimum and source
-  dependencies.
+- `build.zig.zon` — package metadata and source dependencies.
 - `devenv.nix` / `devenv.yaml` / `devenv.lock` — reproducible dev shell
   and pinned inputs.
 - `nix/toolchain.nix` — shared compiler selection and zcov build.

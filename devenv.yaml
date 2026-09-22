@@ -3,7 +3,7 @@ inputs:
   nixpkgs:
     url: github:nixos/nixpkgs/549bd84d6279f9852cae6225e372cc67fb91a4c1
   zig-overlay:
-    url: github:mitchellh/zig-overlay/c208fab1819e85fd843bde0d38b4d674967013d6
+    url: github:mitchellh/zig-overlay
     inputs:
       nixpkgs:
         follows: nixpkgs

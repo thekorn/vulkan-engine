@@ -1,6 +1,6 @@
 { pkgs, zig-overlay, zcov-src }:
 let
-  zig = zig-overlay.packages.${pkgs.stdenv.hostPlatform.system}."master-2026-07-29";
+  zig = zig-overlay.packages.${pkgs.stdenv.hostPlatform.system}."master-2026-09-20";
   zig-target =
     if pkgs.stdenv.isDarwin then
       "${pkgs.stdenv.targetPlatform.parsed.cpu.name}-macos-none"
