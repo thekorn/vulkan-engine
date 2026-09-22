@@ -1,6 +1,16 @@
 { pkgs, zig-overlay, zcov-src }:
 let
-  zig = zig-overlay.packages.${pkgs.stdenv.hostPlatform.system}."master-2026-09-20";
+  zig = zig-overlay.packages.${pkgs.stdenv.hostPlatform.system}."master-2026-09-20".overrideAttrs (old: {
+    # The build runner keeps a slice into a temporary target query when adding
+    # --dynamic-linker. Copy it into the command's arena so it survives until
+    # process launch. Remove this workaround once the pinned Zig fixes it.
+    installPhase = old.installPhase + ''
+      substituteInPlace "$out/lib/compiler/Maker/Step/Compile.zig" \
+        --replace-fail \
+        'zig_args.appendAssumeCapacity(dynamic_linker_path);' \
+        'zig_args.appendAssumeCapacity(try arena.dupe(u8, dynamic_linker_path));'
+    '';
+  });
   zig-target =
     if pkgs.stdenv.hostPlatform.isDarwin then
       "${pkgs.stdenv.targetPlatform.parsed.cpu.name}-macos-none"
