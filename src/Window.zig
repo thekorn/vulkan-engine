@@ -12,6 +12,8 @@ height: i32,
 framebufferResized: bool = false,
 
 pub fn init(alloc: std.mem.Allocator, width: i32, height: i32) !*Self {
+    // Reuse the linked loader; GLFW's dynamic lookup cannot find it in the Nix store.
+    c.glfwInitVulkanLoader(c.vkGetInstanceProcAddr);
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     errdefer c.glfwTerminate();
 

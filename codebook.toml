@@ -40,6 +40,7 @@ words = [
     "framebuffers",
     "freetype",
     "glfw",
+    "glfw's",
     "glm",
     "globbing",
     "glsl",
